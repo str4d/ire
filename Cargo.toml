@@ -1,0 +1,6 @@
+[package]
+name = "ire"
+version = "0.0.1"
+authors = ["Jack Grigg <str4d@i2pmail.org>"]
+
+[dependencies]
