@@ -11,3 +11,11 @@ categories = ["cryptography"]
 keywords = ["i2p", "net", "network", "privacy", "security"]
 
 [dependencies]
+aesti = "^0.3"
+arrayref = "^0.3"
+cookie-factory = "^0.2"
+ed25519-dalek = "^0.4"
+nom = "^3.2"
+num = "^0.1"
+rand = "^0.3"
+sha2 = "^0.6"
