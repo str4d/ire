@@ -15,7 +15,11 @@ aesti = "^0.3"
 arrayref = "^0.3"
 cookie-factory = "^0.2"
 ed25519-dalek = "^0.4"
+itertools = "^0.6"
 nom = "^3.2"
 num = "^0.1"
 rand = "^0.3"
 sha2 = "^0.6"
+
+[dev-dependencies]
+pretty_assertions = "^0.3"

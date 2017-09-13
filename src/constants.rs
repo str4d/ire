@@ -55,3 +55,11 @@ impl CryptoConstants {
         }
     }
 }
+
+// Certificate types
+pub const NULL_CERT: u8 = 0;
+pub const HASH_CERT: u8 = 1;
+pub const HIDDEN_CERT: u8 = 2;
+pub const SIGNED_CERT: u8 = 3;
+pub const MULTI_CERT: u8 = 4;
+pub const KEY_CERT: u8 = 5;
