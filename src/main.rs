@@ -3,6 +3,7 @@ extern crate aesti;
 extern crate arrayref;
 extern crate cookie_factory;
 extern crate ed25519_dalek;
+extern crate flate2;
 extern crate itertools;
 #[macro_use]
 extern crate nom;
@@ -17,6 +18,7 @@ extern crate pretty_assertions;
 mod constants;
 mod crypto;
 mod data;
+mod i2np;
 
 fn main() {
     println!("Hello, world!");
