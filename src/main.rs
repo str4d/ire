@@ -19,6 +19,7 @@ mod constants;
 mod crypto;
 mod data;
 mod i2np;
+mod transport;
 
 fn main() {
     println!("Hello, world!");
