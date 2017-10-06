@@ -5,6 +5,7 @@ extern crate bytes;
 extern crate cookie_factory;
 extern crate ed25519_dalek;
 extern crate flate2;
+#[macro_use]
 extern crate futures;
 extern crate itertools;
 #[macro_use]
