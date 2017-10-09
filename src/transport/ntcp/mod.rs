@@ -541,7 +541,7 @@ impl Encoder for Codec {
 }
 
 //
-// Connection management engine
+// Common parts of the handshake protocols
 //
 
 fn gen_session_confirm_sig_msg(state: &SharedHandshakeState, own_ri: bool) -> Vec<u8> {
@@ -590,6 +590,16 @@ struct SharedHandshakeState {
 
 // Placeholder for internal state when connection is established
 struct Established;
+
+trait HandshakeStateTrait {
+    fn next_frame(self) -> (Option<HandshakeFrame>, Self);
+    fn handle_frame(self, frame: HandshakeFrame) -> (Result<(), io::Error>, Self);
+    fn is_established(&self) -> bool;
+}
+
+//
+// Outbound handshake protocol
+//
 
 struct OBHandshake<S> {
     shared: SharedHandshakeState,
@@ -695,7 +705,7 @@ enum OBHandshakeState {
     Established(OBHandshake<Established>),
 }
 
-impl OBHandshakeState {
+impl HandshakeStateTrait for OBHandshakeState {
     fn next_frame(self) -> (Option<HandshakeFrame>, Self) {
         match self {
             OBHandshakeState::SessionRequest(state) => {
@@ -771,16 +781,22 @@ impl OBHandshakeState {
     }
 }
 
-struct OutboundHandshakeTransport<T> {
-    upstream: Framed<T, OutboundHandshakeCodec>,
-    state: Option<OBHandshakeState>,
+//
+// Transport to execute the handshake protocols
+//
+
+struct HandshakeTransport<T, C, S> {
+    upstream: Framed<T, C>,
+    state: Option<S>,
 }
 
-
-impl<T> OutboundHandshakeTransport<T>
+impl<T, C, S> HandshakeTransport<T, C, S>
     where T: AsyncRead + AsyncWrite,
           T: Send,
-          T: 'static
+          T: 'static,
+          C: Decoder<Item = HandshakeFrame, Error = io::Error>,
+          C: Encoder<Item = HandshakeFrame, Error = io::Error>,
+          S: HandshakeStateTrait
 {
     /// Returns a future of an `Framed<T, Codec>` that is connected
     fn connect(stream: T,
@@ -798,7 +814,7 @@ impl<T> OutboundHandshakeTransport<T>
 
         // TODO: Find a way to refer to the codec from here, to deduplicate state
         let codec = OutboundHandshakeCodec::new(dh_key_builder, iv_enc, ri_remote.clone());
-        let mut t = OutboundHandshakeTransport {
+        let mut t = HandshakeTransport {
             upstream: stream.framed(codec),
             state: Some(OBHandshakeState::SessionRequest(OBHandshake::new(own_ri,
                                                                           own_key,
@@ -812,7 +828,7 @@ impl<T> OutboundHandshakeTransport<T>
             return Box::new(future::err(io::Error::new(io::ErrorKind::ConnectionAborted, err)));
         }
 
-        let mut connector = OutboundTransportConnector { transport: Some(t) };
+        let mut connector = TransportConnector { transport: Some(t) };
 
         if let Err(e) = connector.poll() {
             let err = format!("Failed to handle frames: {:?}", e);
@@ -870,10 +886,13 @@ impl<T> OutboundHandshakeTransport<T>
     }
 }
 
-impl<T> Stream for OutboundHandshakeTransport<T>
+impl<T, C, S> Stream for HandshakeTransport<T, C, S>
     where T: AsyncRead + AsyncWrite,
           T: Send,
-          T: 'static
+          T: 'static,
+          C: Decoder<Item = HandshakeFrame, Error = io::Error>,
+          C: Encoder<Item = HandshakeFrame, Error = io::Error>,
+          S: HandshakeStateTrait
 {
     type Item = ();
     type Error = io::Error;
@@ -898,9 +917,11 @@ impl<T> Stream for OutboundHandshakeTransport<T>
     }
 }
 
-impl<T> Sink for OutboundHandshakeTransport<T>
+impl<T, C, S> Sink for HandshakeTransport<T, C, S>
     where T: AsyncWrite,
-          T: Send
+          T: Send,
+          C: Decoder<Item = HandshakeFrame, Error = io::Error>,
+          C: Encoder<Item = HandshakeFrame, Error = io::Error>
 {
     type SinkItem = HandshakeFrame;
     type SinkError = io::Error;
@@ -914,25 +935,31 @@ impl<T> Sink for OutboundHandshakeTransport<T>
     }
 }
 
-/// Implements a future of `OutboundHandshakeTransport`
+/// Implements a future of `HandshakeTransport`
 ///
 /// This structure is used to perform the NTCP handshake and provide
 /// a connected transport afterwards
-struct OutboundTransportConnector<T> {
-    transport: Option<OutboundHandshakeTransport<T>>,
+struct TransportConnector<T, C, S> {
+    transport: Option<HandshakeTransport<T, C, S>>,
 }
 
-impl<T> OutboundTransportConnector<T> {
-    fn transmute_transport(transport: OutboundHandshakeTransport<T>) -> Framed<T, Codec> {
+impl<T, C, S> TransportConnector<T, C, S>
+    where Codec: From<C>
+{
+    fn transmute_transport(transport: HandshakeTransport<T, C, S>) -> Framed<T, Codec> {
         let (parts, established) = transport.upstream.into_parts_and_codec();
         Framed::from_parts(parts, Codec::from(established))
     }
 }
 
-impl<T> Future for OutboundTransportConnector<T>
+impl<T, C, S> Future for TransportConnector<T, C, S>
     where T: AsyncRead + AsyncWrite,
           T: Send,
-          T: 'static
+          T: 'static,
+          C: Decoder<Item = HandshakeFrame, Error = io::Error>,
+          C: Encoder<Item = HandshakeFrame, Error = io::Error>,
+          Codec: From<C>,
+          S: HandshakeStateTrait
 {
     type Item = Framed<T, Codec>;
     type Error = io::Error;
@@ -944,14 +971,14 @@ impl<T> Future for OutboundTransportConnector<T>
         transport.send_and_handle_frames()?;
 
         if transport.state.as_ref().map_or(false, |s| s.is_established()) {
-            return Ok(Async::Ready(OutboundTransportConnector::transmute_transport(transport)));
+            return Ok(Async::Ready(TransportConnector::transmute_transport(transport)));
         }
 
         match transport.poll()? {
             Async::Ready(Some(_)) => {
                 if transport.state.as_ref().map_or(false, |s| s.is_established()) {
                     // Upstream had frames available and we're connected, the transport is ready
-                    Ok(Async::Ready(OutboundTransportConnector::transmute_transport(transport)))
+                    Ok(Async::Ready(TransportConnector::transmute_transport(transport)))
                 } else {
                     // Upstream had frames but we're not yet connected, continue polling
                     let poll_ret = transport.poll();
@@ -968,6 +995,10 @@ impl<T> Future for OutboundTransportConnector<T>
         }
     }
 }
+
+//
+// Connection management engine
+//
 
 pub struct Engine;
 
@@ -988,7 +1019,7 @@ impl Engine {
         // The layer above will convert I2NP packets to Frames
         // (or should the Engine handle timesync packets itself?)
         let transport = Box::new(TcpStream::connect(&addr, &handle).and_then(|socket| {
-            OutboundHandshakeTransport::connect(socket, own_ri, own_key, peer_ri)
+            HandshakeTransport::<TcpStream, OutboundHandshakeCodec, OBHandshakeState>::connect(socket, own_ri, own_key, peer_ri)
         }));
 
         // Add a timeout
