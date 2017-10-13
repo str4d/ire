@@ -7,8 +7,8 @@ use std::iter::repeat;
 use std::net::SocketAddr;
 use std::ops::AddAssign;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tokio_core::net::TcpStream;
-use tokio_core::reactor::{Handle, Timeout};
+use tokio_core::net::{TcpListener, TcpStream};
+use tokio_core::reactor::{Core, Handle, Timeout};
 use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_io::codec::{Decoder, Encoder, Framed};
 
@@ -452,6 +452,17 @@ pub enum Frame {
     TimeSync(u32),
 }
 
+use std::fmt;
+
+impl fmt::Debug for Frame {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            &Frame::Standard(_) => "Standard message".fmt(formatter),
+            &Frame::TimeSync(ts) => format!("Timesync ({})", ts).fmt(formatter),
+        }
+    }
+}
+
 pub struct Codec {
     aes: Aes256,
     decrypted: usize,
@@ -548,7 +559,7 @@ fn gen_session_confirm_sig_msg(state: &SharedHandshakeState, own_ri: bool) -> Ve
     let ri = if own_ri {
         &state.own_ri
     } else {
-        &state.ri_remote
+        &state.ri_remote.as_ref().unwrap()
     };
     let base_len = 907; // 2*256 + 387 + 2*4
     let mut buf = Vec::with_capacity(base_len);
@@ -581,7 +592,7 @@ fn gen_session_confirm_sig_msg(state: &SharedHandshakeState, own_ri: bool) -> Ve
 struct SharedHandshakeState {
     own_ri: RouterIdentity,
     own_key: SigningPrivateKey,
-    ri_remote: RouterIdentity,
+    ri_remote: Option<RouterIdentity>,
     dh_x: Vec<u8>,
     dh_y: Vec<u8>,
     ts_a: u32,
@@ -595,6 +606,192 @@ trait HandshakeStateTrait {
     fn next_frame(self) -> (Option<HandshakeFrame>, Self);
     fn handle_frame(self, frame: HandshakeFrame) -> (Result<(), io::Error>, Self);
     fn is_established(&self) -> bool;
+}
+
+//
+// Inbound handshake protocol
+//
+
+struct IBHandshake<S> {
+    shared: SharedHandshakeState,
+    state: S,
+}
+
+// First, the state transformations
+
+// - Message 1: <-- SessionRequest
+
+struct IBSessionRequest;
+
+impl IBHandshake<IBSessionRequest> {
+    fn new(own_ri: RouterIdentity, own_key: SigningPrivateKey, dh_y: Vec<u8>) -> Self {
+        IBHandshake {
+            shared: SharedHandshakeState {
+                own_ri,
+                own_key,
+                ri_remote: None,
+                dh_x: vec![],
+                dh_y,
+                ts_a: 0,
+                ts_b: 0,
+            },
+            state: IBSessionRequest,
+        }
+    }
+
+    fn next(self, hxy: Hash) -> IBHandshake<OBSessionCreated> {
+        IBHandshake {
+            shared: self.shared,
+            state: OBSessionCreated { hxy },
+        }
+    }
+}
+
+// - Message 2: --> SessionCreated
+
+struct OBSessionCreated {
+    hxy: Hash,
+}
+
+impl IBHandshake<OBSessionCreated> {
+    fn next(self) -> (SessionCreated, IBHandshake<IBSessionConfirmA>) {
+        (SessionCreated {
+             dh_y: self.shared.dh_y.clone(),
+             hash: self.state.hxy,
+             ts_b: self.shared.ts_b,
+         },
+         IBHandshake {
+             shared: self.shared,
+             state: IBSessionConfirmA { rtt_timer: SystemTime::now() },
+         })
+    }
+}
+
+// - Message 3: <-- SessionConfirmA
+
+struct IBSessionConfirmA {
+    rtt_timer: SystemTime,
+}
+
+impl IBHandshake<IBSessionConfirmA> {
+    fn next(self, sig: Signature) -> IBHandshake<OBSessionConfirmB> {
+        IBHandshake {
+            shared: self.shared,
+            state: OBSessionConfirmB { sig },
+        }
+    }
+}
+
+// - Message 4: --> SessionConfirmB
+
+struct OBSessionConfirmB {
+    sig: Signature,
+}
+
+impl IBHandshake<OBSessionConfirmB> {
+    fn next(self) -> (SessionConfirmB, IBHandshake<Established>) {
+        (SessionConfirmB { sig: self.state.sig },
+         IBHandshake {
+             shared: self.shared,
+             state: Established,
+         })
+    }
+}
+
+// Next, the state transitions
+
+enum IBHandshakeState {
+    SessionRequest(IBHandshake<IBSessionRequest>),
+    SessionCreated(IBHandshake<OBSessionCreated>),
+    SessionConfirmA(IBHandshake<IBSessionConfirmA>),
+    SessionConfirmB(IBHandshake<OBSessionConfirmB>),
+    Established(IBHandshake<Established>),
+}
+
+impl HandshakeStateTrait for IBHandshakeState {
+    fn next_frame(self) -> (Option<HandshakeFrame>, Self) {
+        match self {
+            IBHandshakeState::SessionCreated(state) => {
+                // Part 2
+                let (sc, sca_state) = state.next();
+                (Some(HandshakeFrame::SessionCreated(sc)),
+                 IBHandshakeState::SessionConfirmA(sca_state))
+            }
+            IBHandshakeState::SessionConfirmB(state) => {
+                // Part 4
+                let (scb, e_state) = state.next();
+                (Some(HandshakeFrame::SessionConfirmB(scb)), IBHandshakeState::Established(e_state))
+            }
+            state => (None, state),
+        }
+    }
+
+    fn handle_frame(self, frame: HandshakeFrame) -> (Result<(), io::Error>, Self) {
+        match (self, frame) {
+            (IBHandshakeState::SessionRequest(mut state), HandshakeFrame::SessionRequest(sr)) => {
+                // Part 1
+                // Check that Alice knows who she is trying to talk with, and
+                // that the X isn't corrupt
+                let mut hxxorhb = Hash::digest(&sr.dh_x[..]);
+                hxxorhb.xor(&state.shared.own_ri.hash());
+                if hxxorhb != sr.hash {
+                    return (Err(io::Error::new(io::ErrorKind::InvalidData,
+                                               "Invalid SessionRequest HXxorHB")),
+                            IBHandshakeState::SessionRequest(state));
+                }
+                // TODO check replays
+                let now = SystemTime::now();
+                let mut ts_b = now.duration_since(UNIX_EPOCH).expect("Time went backwards");
+                ts_b.add_assign(Duration::from_millis(500));
+                // Update local state
+                state.shared.dh_x = sr.dh_x;
+                state.shared.ts_b = ts_b.as_secs() as u32;
+                let mut xy = Vec::from(&state.shared.dh_x[..]);
+                xy.extend_from_slice(&state.shared.dh_y);
+                let hxy = Hash::digest(&xy);
+                (Ok(()), IBHandshakeState::SessionCreated(state.next(hxy)))
+            }
+            (IBHandshakeState::SessionConfirmA(mut state),
+             HandshakeFrame::SessionConfirmA(sca)) => {
+                // Part 3
+                // Get peer skew
+                let rtt = state.state
+                    .rtt_timer
+                    .elapsed()
+                    .expect("Time went backwards?");
+                // Update local state
+                state.shared.ri_remote = Some(sca.ri_a);
+                state.shared.ts_a = sca.ts_a;
+                // Generate message to be verified
+                let msg = gen_session_confirm_sig_msg(&state.shared, true);
+                if !state.shared
+                        .ri_remote
+                        .as_ref()
+                        .unwrap()
+                        .signing_key
+                        .verify(&msg, &sca.sig) {
+                    return (Err(io::Error::new(io::ErrorKind::ConnectionRefused,
+                                               "Invalid SessionConfirmA signature")),
+                            IBHandshakeState::SessionConfirmA(state));
+                }
+                // Generate message to be signed
+                let msg = gen_session_confirm_sig_msg(&state.shared, false);
+                let sig = state.shared.own_key.sign(&msg);
+                (Ok(()), IBHandshakeState::SessionConfirmB(state.next(sig)))
+            }
+            (state, _) => {
+                (Err(io::Error::new(io::ErrorKind::InvalidData, "Unexpected handshake frame")),
+                 state)
+            }
+        }
+    }
+
+    fn is_established(&self) -> bool {
+        match self {
+            &IBHandshakeState::Established(_) => true,
+            _ => false,
+        }
+    }
 }
 
 //
@@ -625,7 +822,7 @@ impl OBHandshake<OBSessionRequest> {
             shared: SharedHandshakeState {
                 own_ri,
                 own_key,
-                ri_remote,
+                ri_remote: Some(ri_remote),
                 dh_x,
                 dh_y: vec![],
                 ts_a: 0,
@@ -758,6 +955,8 @@ impl HandshakeStateTrait for OBHandshakeState {
                 let msg = gen_session_confirm_sig_msg(&state.shared, true);
                 if !state.shared
                         .ri_remote
+                        .as_ref()
+                        .unwrap()
                         .signing_key
                         .verify(&msg, &scb.sig) {
                     return (Err(io::Error::new(io::ErrorKind::ConnectionRefused,
@@ -798,6 +997,39 @@ impl<T, C, S> HandshakeTransport<T, C, S>
           C: Encoder<Item = HandshakeFrame, Error = io::Error>,
           S: HandshakeStateTrait
 {
+    /// Returns a future of a stream of `Framed<T, Codec>`s that are connected
+    fn listen(stream: T,
+              own_ri: RouterIdentity,
+              own_key: SigningPrivateKey)
+              -> Box<Future<Item = Framed<T, Codec>, Error = io::Error>> {
+        // Generate a new DH pair
+        let dh_key_builder = DHSessionKeyBuilder::new();
+        let dh_y = dh_key_builder.get_pub();
+        let mut iv_enc = [0u8; AES_BLOCK_SIZE];
+        iv_enc.copy_from_slice(&dh_y[dh_y.len() - AES_BLOCK_SIZE..]);
+
+        // TODO: Find a way to refer to the codec from here, to deduplicate state
+        let codec = InboundHandshakeCodec::new(dh_key_builder, iv_enc);
+        let mut t = HandshakeTransport {
+            upstream: stream.framed(codec),
+            state: Some(IBHandshakeState::SessionRequest(IBHandshake::new(own_ri, own_key, dh_y))),
+        };
+
+        if let Err(e) = t.send_and_handle_frames() {
+            let err = format!("Failed to handle frames: {:?}", e);
+            return Box::new(future::err(io::Error::new(io::ErrorKind::ConnectionAborted, err)));
+        }
+
+        let mut connector = TransportConnector { transport: Some(t) };
+
+        if let Err(e) = connector.poll() {
+            let err = format!("Failed to handle frames: {:?}", e);
+            return Box::new(future::err(io::Error::new(io::ErrorKind::ConnectionAborted, err)));
+        }
+
+        Box::new(connector)
+    }
+
     /// Returns a future of an `Framed<T, Codec>` that is connected
     fn connect(stream: T,
                own_ri: RouterIdentity,
@@ -1005,6 +1237,40 @@ pub struct Engine;
 impl Engine {
     pub fn new() -> Self {
         Engine
+    }
+
+    pub fn listen(&self, own_ri: RouterIdentity, own_key: SigningPrivateKey, addr: &SocketAddr) {
+        let mut core = Core::new().unwrap();
+        let handle = core.handle();
+
+        // Bind to the address
+        let listener = TcpListener::bind(addr, &handle).unwrap();
+
+        // For each incoming connection:
+        let server = listener.incoming().for_each(move |(socket, _)| {
+            // Execute the handshake
+            let conn =
+                HandshakeTransport::<TcpStream,
+                                     InboundHandshakeCodec,
+                                     IBHandshakeState>::listen(socket,
+                                                               own_ri.clone(),
+                                                               own_key.clone());
+
+            // Once connected:
+            let process_conn = conn.and_then(|conn| {
+                // For every message received:
+                conn.for_each(|frame| {
+                                  // TODO: Do something
+                                  Ok(())
+                              })
+            });
+
+            handle.spawn(process_conn.map_err(|_| ()));
+
+            Ok(())
+        });
+
+        core.run(server).unwrap();
     }
 
     pub fn connect(&self,
