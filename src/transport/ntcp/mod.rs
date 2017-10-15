@@ -713,12 +713,14 @@ impl HandshakeStateTrait for IBHandshakeState {
         match self {
             IBHandshakeState::SessionCreated(state) => {
                 // Part 2
+                debug!("Sending SessionCreated");
                 let (sc, sca_state) = state.next();
                 (Some(HandshakeFrame::SessionCreated(sc)),
                  IBHandshakeState::SessionConfirmA(sca_state))
             }
             IBHandshakeState::SessionConfirmB(state) => {
                 // Part 4
+                debug!("Sending SessionConfirmB");
                 let (scb, e_state) = state.next();
                 (Some(HandshakeFrame::SessionConfirmB(scb)), IBHandshakeState::Established(e_state))
             }
@@ -730,6 +732,7 @@ impl HandshakeStateTrait for IBHandshakeState {
         match (self, frame) {
             (IBHandshakeState::SessionRequest(mut state), HandshakeFrame::SessionRequest(sr)) => {
                 // Part 1
+                debug!("Received SessionRequest");
                 // Check that Alice knows who she is trying to talk with, and
                 // that the X isn't corrupt
                 let mut hxxorhb = Hash::digest(&sr.dh_x[..]);
@@ -754,11 +757,13 @@ impl HandshakeStateTrait for IBHandshakeState {
             (IBHandshakeState::SessionConfirmA(mut state),
              HandshakeFrame::SessionConfirmA(sca)) => {
                 // Part 3
+                debug!("Received SessionConfirmA");
                 // Get peer skew
                 let rtt = state.state
                     .rtt_timer
                     .elapsed()
                     .expect("Time went backwards?");
+                debug!("Peer RTT: {:?}", rtt);
                 // Update local state
                 state.shared.ri_remote = Some(sca.ri_a);
                 state.shared.ts_a = sca.ts_a;
@@ -907,12 +912,14 @@ impl HandshakeStateTrait for OBHandshakeState {
         match self {
             OBHandshakeState::SessionRequest(state) => {
                 // Part 1
+                debug!("Sending SessionRequest");
                 let (sr, sc_state) = state.next();
                 (Some(HandshakeFrame::SessionRequest(sr)),
                  OBHandshakeState::SessionCreated(sc_state))
             }
             OBHandshakeState::SessionConfirmA(state) => {
                 // Part 3
+                debug!("Sending SessionConfirmA");
                 let (sca, scb_state) = state.next();
                 (Some(HandshakeFrame::SessionConfirmA(sca)),
                  OBHandshakeState::SessionConfirmB(scb_state))
@@ -925,11 +932,13 @@ impl HandshakeStateTrait for OBHandshakeState {
         match (self, frame) {
             (OBHandshakeState::SessionCreated(mut state), HandshakeFrame::SessionCreated(sc)) => {
                 // Part 2
+                debug!("Received SessionCreated");
                 // Get peer skew
                 let rtt = state.state
                     .rtt_timer
                     .elapsed()
                     .expect("Time went backwards?");
+                debug!("Peer RTT: {:?}", rtt);
                 let now = SystemTime::now();
                 let mut ts_a = now.duration_since(UNIX_EPOCH).expect("Time went backwards");
                 ts_a.add_assign(Duration::from_millis(500));
@@ -951,6 +960,7 @@ impl HandshakeStateTrait for OBHandshakeState {
             }
             (OBHandshakeState::SessionConfirmB(state), HandshakeFrame::SessionConfirmB(scb)) => {
                 // Part 4
+                debug!("Received SessionConfirmB");
                 // Generate message to be verified
                 let msg = gen_session_confirm_sig_msg(&state.shared, true);
                 if !state.shared
@@ -1248,6 +1258,7 @@ impl Engine {
 
         // For each incoming connection:
         let server = listener.incoming().for_each(move |(socket, _)| {
+            info!("Incoming socket!");
             // Execute the handshake
             let conn =
                 HandshakeTransport::<TcpStream,
@@ -1258,8 +1269,10 @@ impl Engine {
 
             // Once connected:
             let process_conn = conn.and_then(|conn| {
+                info!("Connection established!");
                 // For every message received:
                 conn.for_each(|frame| {
+                                  debug!("Received frame: {:?}", frame);
                                   // TODO: Do something
                                   Ok(())
                               })
