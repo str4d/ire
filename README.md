@@ -10,6 +10,48 @@ global, decentralised [I2P network].
 Ire is in pre-alpha; much of the internal architecture still needs to be defined
 and implemented.
 
+### Implemented Features
+
+- Cryptographic primitives
+  - [ ] ElGamal
+  - [ ] DSA
+  - [ ] ECDSA
+  - [x] Ed25519
+  - [x] AES256
+- I2NP
+  - [x] Message parsing
+  - [ ] Message handling
+- Transports
+  - [ ] Transport manager
+  - [ ] NTCP
+    - [x] Handshake
+    - [ ] Connection tracking
+  - [ ] SSU
+
+## Usage
+
+The binary implements a basic client and server that can be used to test the NTCP
+handshake:
+
+1. Generate keys for the server and client:
+
+  ```bash
+$ cargo run --release cli gen server.router.keys.dat server.router.info
+$ cargo run --release cli gen client.router.keys.dat client.router.info
+  ```
+
+2. Run the server:
+
+  ```bash
+$ RUST_LOG=ire=debug cargo run --release cli server server.router.keys.dat 127.0.0.1:12345
+  ```
+
+3. Run a client:
+
+  ```bash
+$ RUST_LOG=ire=debug cargo run --release cli client client.router.keys.dat server.router.info 127.0.0.1:12345
+  ```
+
 ## Code of Conduct
 
 We abide by the [Contributor Covenant][cc] and ask that you do as well.
