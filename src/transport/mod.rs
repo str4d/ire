@@ -225,6 +225,7 @@ mod tests {
             let dh_priv = BigUint::from_bytes_be(&tv.dh_priv[..]);
             let dh_pub = BigUint::from_bytes_be(&tv.dh_pub[..]);
             let builder = DHSessionKeyBuilder { dh_priv, dh_pub };
+            assert_eq!(builder.get_pub(), Vec::from(&tv.dh_pub[..]));
             let session_key = builder.build_session_key(&tv.peer_pub);
             assert_eq!(session_key.0, tv.session_key.0);
         }
