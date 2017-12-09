@@ -15,8 +15,6 @@ use constants;
 pub mod frame;
 pub mod math;
 
-use self::math::ModPow;
-
 pub const AES_BLOCK_SIZE: usize = 16;
 
 #[derive(Clone,Copy,Debug,PartialEq)]

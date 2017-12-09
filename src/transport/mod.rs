@@ -4,7 +4,7 @@ use std::iter::repeat;
 
 use constants::CryptoConstants;
 use crypto::SessionKey;
-use crypto::math::{ModPow, rectify};
+use crypto::math::rectify;
 
 pub mod ntcp;
 
