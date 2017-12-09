@@ -2,6 +2,7 @@
 
 [![Crates.io](https://img.shields.io/crates/v/ire.svg)](https://crates.io/crates/ire)
 [![Build Status](https://travis-ci.org/str4d/ire.svg?branch=master)](https://travis-ci.org/str4d/ire)
+[![codecov](https://codecov.io/gh/str4d/ire/branch/master/graph/badge.svg)](https://codecov.io/gh/str4d/ire)
 
 Ire is a Rust implementation of an I2P router, designed to participate in the
 global, decentralised [I2P network].
