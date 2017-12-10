@@ -25,7 +25,7 @@ fn gen_padding<'a>(input: (&'a mut [u8], usize),
                    -> Result<(&'a mut [u8], usize), GenError> {
     let pad_len = padding_len(content_len);
     // TODO: Fill this with random padding
-    Ok((input.0, input.1 + pad_len))
+    gen_skip!(input, pad_len)
 }
 
 //
@@ -196,7 +196,7 @@ named!(get_adler<[u8; 4]>,
     peek!(do_parse!(
         data: switch!(peek!(be_u16),
             0 => take!(12) |
-            size => take!((size+6) as usize + padding_len((size+6) as usize))
+            size => take!((size+2) as usize + padding_len((size+6) as usize))
         ) >> (adler(data))
     ))
 );
@@ -239,7 +239,7 @@ fn gen_timestamp_frame<'a>(input: (&'a mut [u8], usize),
     do_gen!(input,
         start: gen_be_u16!(0) >>
                gen_be_u32!(timestamp) >>
-               gen_padding(6) >>
+               gen_padding(10) >>
         end:   gen_adler(start, end)
     )
 }
@@ -299,5 +299,93 @@ mod tests {
         assert_eq!([0x8a, 0xdb, 0x15, 0x0c], adler(&b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"[..]));
         assert_eq!([0x97, 0xb6, 0x10, 0x69],
             adler(&b"12345678901234567890123456789012345678901234567890123456789012345678901234567890"[..]));
+    }
+
+    #[test]
+    fn get_adler_standard() {
+        let data = [
+            0x00, 0x02, 0x01, 0x02, 0x01, 0x02, 0x03, 0x04,
+            0x05, 0x06, 0x07, 0x08, 0x00, 0xb6, 0x00, 0x2a];
+        match get_adler(&data) {
+            IResult::Done(i, cs) => {
+                assert_eq!(cs, &data[12..]);
+            }
+            IResult::Error(e) => {
+                panic!("error in get_adler: {:?}", e);
+            }
+            IResult::Incomplete(n) => {
+                panic!("incomplete get_adler: {:?}", n);
+            }
+        }
+    }
+
+    #[test]
+    fn get_adler_standard_long() {
+        let data = [
+            0x00, 0x10, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06,
+            0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
+            0x0f, 0x10, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06,
+            0x07, 0x08, 0x09, 0x0a, 0x0b, 0x28, 0x00, 0xd0];
+        match get_adler(&data) {
+            IResult::Done(i, cs) => {
+                assert_eq!(cs, &data[28..]);
+            }
+            IResult::Error(e) => {
+                panic!("error in get_adler: {:?}", e);
+            }
+            IResult::Incomplete(n) => {
+                panic!("incomplete get_adler: {:?}", n);
+            }
+        }
+    }
+
+    #[test]
+    fn get_adler_timesync() {
+        let data = [
+            0x00, 0x00, 0x01, 0x02, 0x03, 0x04, 0x01, 0x02,
+            0x03, 0x04, 0x05, 0x06, 0x00, 0x94, 0x00, 0x20];
+        match get_adler(&data) {
+            IResult::Done(i, cs) => {
+                assert_eq!(cs, &data[12..]);
+            }
+            IResult::Error(e) => {
+                panic!("error in get_adler: {:?}", e);
+            }
+            IResult::Incomplete(n) => {
+                panic!("incomplete get_adler: {:?}", n);
+            }
+        }
+    }
+
+    #[test]
+    fn gen_timestamp_frame_valid() {
+        let mut buf = vec![0u8; 16];
+        match gen_timestamp_frame((&mut buf[..], 0), 12345678).map(|tup| tup.1) {
+            Ok(sz) => {
+                assert_eq!(sz, 16);
+                assert_eq!(&buf[0..2], &[0x00, 0x00]);
+                assert_eq!(&buf[2..6], &[0x00, 0xbc, 0x61, 0x4e]);
+            }
+            Err(e) => {
+                panic!("error in gen_timestamp_frame: {:?}", e);
+            }
+        }
+    }
+
+    #[test]
+    fn gen_timestamp_frame_small_buffer() {
+        let mut buf = vec![0u8; 12];
+        match gen_timestamp_frame((&mut buf[..], 0), 12345678).map(|tup| tup.1) {
+            Ok(sz) => {
+                panic!("Returned {:?} bytes", sz);
+            }
+            Err(GenError::BufferTooSmall(sz)) => {
+                // TODO: Figure out why this is 17, not 16
+                assert_eq!(sz, 17);
+            }
+            Err(e) => {
+                panic!("Unexpected error in gen_timestamp_frame: {:?}", e);
+            }
+        }
     }
 }
