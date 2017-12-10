@@ -25,6 +25,7 @@ extern crate tokio_io;
 extern crate pretty_assertions;
 
 use clap::{Arg, ArgMatches, App, SubCommand};
+use futures::{Future, Sink};
 use tokio_core::reactor::Core;
 
 mod constants;
@@ -107,12 +108,25 @@ fn cli_client(args: &ArgMatches) -> i32 {
     let conn = ntcp.connect(rsk.rid, rsk.signing_private_key, peer_rid, &addr, &handle);
 
     match core.run(conn) {
-        Ok(_) => {
+        Ok(t) => {
             info!("Connection established!");
-            0
+            let f = t.send(transport::ntcp::Frame::TimeSync(42));
+            let f = f.and_then(|t| {
+                t.send(transport::ntcp::Frame::Standard(i2np::Message::dummy_data()))
+            });
+            match core.run(f) {
+                Ok(_) => {
+                    info!("Dummy data sent!");
+                    0
+                }
+                Err(e) => {
+                    error!("Failed to send dummy data: {:?}", e);
+                    1
+                }
+            }
         }
         Err(e) => {
-            info!("Handshake failed: {}", e);
+            error!("Handshake failed: {}", e);
             1
         }
     }

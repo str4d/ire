@@ -6,6 +6,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::iter::repeat;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use constants;
 use crypto::{EncType, PrivateKey, PublicKey, SigType, Signature, SigningPrivateKey, SigningPublicKey};
@@ -40,8 +41,18 @@ impl Hash {
     }
 }
 
+/// The number of milliseconds since midnight on January 1, 1970 in the GMT
+/// timezone. If the number is 0, the date is undefined or null.
 #[derive(Debug,PartialEq)]
 pub struct I2PDate(u64);
+
+impl I2PDate {
+    pub fn from_system_time(t: SystemTime) -> Self {
+        let d = t.duration_since(UNIX_EPOCH).unwrap_or(Duration::new(0, 0));
+        I2PDate(d.as_secs() * 1_000 + (d.subsec_nanos() / 1_000_000) as u64)
+    }
+}
+
 #[derive(Debug,Eq,Hash,Ord,PartialEq,PartialOrd)]
 pub struct I2PString(String);
 #[derive(Debug)]

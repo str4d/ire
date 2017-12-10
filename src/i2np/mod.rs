@@ -1,4 +1,5 @@
 use nom::IResult;
+use std::time::SystemTime;
 
 use crypto::SessionKey;
 use data::{Certificate, Hash, I2PDate, LeaseSet, RouterInfo, SessionTag, TunnelId};
@@ -136,4 +137,14 @@ pub struct Message {
     id: u32,
     expiration: I2PDate,
     payload: MessagePayload,
+}
+
+impl Message {
+    pub fn dummy_data() -> Self {
+        Message {
+            id: 0,
+            expiration: I2PDate::from_system_time(SystemTime::now()),
+            payload: MessagePayload::Data(vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]),
+        }
+    }
 }
