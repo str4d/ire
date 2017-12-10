@@ -1001,8 +1001,7 @@ struct HandshakeTransport<T, C, S> {
 
 impl<T, C, S> HandshakeTransport<T, C, S>
     where T: AsyncRead + AsyncWrite,
-          T: Send,
-          T: 'static,
+          T: Send + 'static,
           C: Decoder<Item = HandshakeFrame, Error = io::Error>,
           C: Encoder<Item = HandshakeFrame, Error = io::Error>,
           S: HandshakeStateTrait
@@ -1130,8 +1129,7 @@ impl<T, C, S> HandshakeTransport<T, C, S>
 
 impl<T, C, S> Stream for HandshakeTransport<T, C, S>
     where T: AsyncRead + AsyncWrite,
-          T: Send,
-          T: 'static,
+          T: Send + 'static,
           C: Decoder<Item = HandshakeFrame, Error = io::Error>,
           C: Encoder<Item = HandshakeFrame, Error = io::Error>,
           S: HandshakeStateTrait
@@ -1196,8 +1194,7 @@ impl<T, C, S> TransportConnector<T, C, S>
 
 impl<T, C, S> Future for TransportConnector<T, C, S>
     where T: AsyncRead + AsyncWrite,
-          T: Send,
-          T: 'static,
+          T: Send + 'static,
           C: Decoder<Item = HandshakeFrame, Error = io::Error>,
           C: Encoder<Item = HandshakeFrame, Error = io::Error>,
           Codec: From<C>,
