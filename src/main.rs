@@ -1,3 +1,4 @@
+extern crate actix;
 extern crate aesti;
 #[macro_use]
 extern crate arrayref;

@@ -11,6 +11,7 @@ categories = ["cryptography"]
 keywords = ["i2p", "net", "network", "privacy", "security"]
 
 [dependencies]
+actix = "^0.4"
 aesti = "^0.3"
 arrayref = "^0.3"
 bytes = "^0.4"
