@@ -25,9 +25,10 @@ extern crate tokio_io;
 #[macro_use]
 extern crate pretty_assertions;
 
+use actix::prelude::*;
 use clap::{App, Arg, ArgMatches, SubCommand};
-use futures::{Future, Sink};
-use tokio_core::reactor::Core;
+use futures::Stream;
+use tokio_core::net::TcpListener;
 
 mod constants;
 mod crypto;
@@ -95,51 +96,36 @@ fn cli_gen(args: &ArgMatches) -> i32 {
 }
 
 fn cli_server(args: &ArgMatches) -> i32 {
+    let sys = actix::System::new("ire");
+
     let rsk = data::RouterSecretKeys::from_file(args.value_of("routerKeys").unwrap());
     let addr = args.value_of("bind").unwrap().parse().unwrap();
 
     // Accept all incoming sockets
     info!("Listening on {}", addr);
-    let ntcp = transport::ntcp::Engine::new();
-    ntcp.listen(rsk.rid, rsk.signing_private_key, &addr);
-    0
+    let listener = TcpListener::bind(&addr, Arbiter::handle()).unwrap();
+    let _: () = transport::ntcp::Engine::create(move |ctx| {
+        ctx.add_stream(
+            listener
+                .incoming()
+                .map(|(st, addr)| transport::TcpConnect(st, addr)),
+        );
+        transport::ntcp::Engine::new(rsk.rid, rsk.signing_private_key)
+    });
+
+    sys.run()
 }
 
 fn cli_client(args: &ArgMatches) -> i32 {
-    let mut core = Core::new().unwrap();
-    let handle = core.handle();
+    let sys = actix::System::new("ire-client");
 
     let rsk = data::RouterSecretKeys::from_file(args.value_of("routerKeys").unwrap());
     let peer_rid = data::RouterIdentity::from_file(args.value_of("peerId").unwrap());
     let addr = args.value_of("addr").unwrap().parse().unwrap();
 
     info!("Connecting to {}", addr);
-    let ntcp = transport::ntcp::Engine::new();
-    let conn = ntcp.connect(rsk.rid, rsk.signing_private_key, peer_rid, &addr, &handle);
+    let ntcp = transport::ntcp::Engine::new(rsk.rid, rsk.signing_private_key);
+    ntcp.connect(peer_rid, &addr);
 
-    match core.run(conn) {
-        Ok(t) => {
-            info!("Connection established!");
-            let f = t.send(transport::ntcp::Frame::TimeSync(42));
-            let f = f.and_then(|t| {
-                t.send(transport::ntcp::Frame::Standard(
-                    i2np::Message::dummy_data(),
-                ))
-            });
-            match core.run(f) {
-                Ok(_) => {
-                    info!("Dummy data sent!");
-                    0
-                }
-                Err(e) => {
-                    error!("Failed to send dummy data: {:?}", e);
-                    1
-                }
-            }
-        }
-        Err(e) => {
-            error!("Handshake failed: {}", e);
-            1
-        }
-    }
+    sys.run()
 }

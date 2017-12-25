@@ -1,3 +1,4 @@
+use actix::prelude::*;
 use cookie_factory::GenError;
 use bytes::BytesMut;
 use futures::{future, Async, Future, Poll, Sink, StartSend, Stream};
@@ -7,15 +8,15 @@ use std::iter::repeat;
 use std::net::SocketAddr;
 use std::ops::AddAssign;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tokio_core::net::{TcpListener, TcpStream};
-use tokio_core::reactor::{Core, Handle, Timeout};
+use tokio_core::net::TcpStream;
+use tokio_core::reactor::Timeout;
 use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_io::codec::{Decoder, Encoder, Framed};
 
 use crypto::{Aes256, Signature, SigningPrivateKey, AES_BLOCK_SIZE};
 use data::{Hash, RouterIdentity};
 use i2np::Message;
-use super::DHSessionKeyBuilder;
+use super::{DHSessionKeyBuilder, TcpConnect};
 
 mod frame;
 
@@ -52,6 +53,11 @@ pub enum HandshakeFrame {
     SessionCreated(SessionCreated),
     SessionConfirmA(SessionConfirmA),
     SessionConfirmB(SessionConfirmB),
+}
+
+impl ResponseType for HandshakeFrame {
+    type Item = ();
+    type Error = ();
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -456,6 +462,16 @@ impl Encoder for OutboundHandshakeCodec {
 pub enum Frame {
     Standard(Message),
     TimeSync(u32),
+}
+
+impl ResponseType for Message {
+    type Item = ();
+    type Error = ();
+}
+
+impl ResponseType for Frame {
+    type Item = ();
+    type Error = ();
 }
 
 use std::fmt;
@@ -1334,61 +1350,111 @@ where
 }
 
 //
+// Actor responsible for communication with a particular NTCP peer
+//
+
+struct Session;
+
+impl Actor for Session {
+    type Context = FramedContext<Self>;
+
+    fn started(&mut self, ctx: &mut Self::Context) {
+        info!("Connection established!");
+
+        // TODO: Send useful initial messages
+        let _ = ctx.send(Frame::Standard(Message::dummy_data()));
+        let _ = ctx.send(Frame::TimeSync(42));
+        let _ = ctx.send(Frame::Standard(Message::dummy_data()));
+    }
+}
+
+impl FramedActor for Session {
+    type Io = TcpStream;
+    type Codec = Codec;
+
+    /// This is main inbound event loop for the NTCP session
+    fn handle(&mut self, msg: io::Result<Frame>, ctx: &mut Self::Context) {
+        match msg {
+            Ok(frame) => debug!("Received frame: {:?}", frame),
+            Err(err) => {
+                error!("Error while connected: {}", err);
+                ctx.stop()
+            }
+        }
+    }
+}
+
+impl Handler<Message> for Session {
+    type Result = MessageResult<Message>;
+
+    /// This is main outbound event loop for the NTCP session
+    fn handle(&mut self, msg: Message, ctx: &mut Self::Context) -> Self::Result {
+        let _ = ctx.send(Frame::Standard(msg));
+        Ok(())
+    }
+}
+
+//
 // Connection management engine
 //
 
-pub struct Engine;
+pub struct Engine {
+    own_ri: RouterIdentity,
+    own_key: SigningPrivateKey,
+}
+
+impl Actor for Engine {
+    type Context = Context<Self>;
+}
+
+impl StreamHandler<io::Result<TcpConnect>> for Engine {}
+
+impl Handler<io::Result<TcpConnect>> for Engine {
+    type Result = MessageResult<TcpConnect>;
+
+    fn handle(&mut self, msg: io::Result<TcpConnect>, ctx: &mut Self::Context) -> Self::Result {
+        match msg {
+            Ok(socket) => self.accept(socket),
+            Err(err) => {
+                error!("Error during accept: {}", err);
+                ctx.stop()
+            }
+        }
+
+        Ok(())
+    }
+}
 
 impl Engine {
-    pub fn new() -> Self {
-        Engine
+    pub fn new(own_ri: RouterIdentity, own_key: SigningPrivateKey) -> Self {
+        Engine { own_ri, own_key }
     }
 
-    pub fn listen(&self, own_ri: RouterIdentity, own_key: SigningPrivateKey, addr: &SocketAddr) {
-        let mut core = Core::new().unwrap();
-        let handle = core.handle();
+    fn accept(&self, socket: TcpConnect) {
+        info!("Incoming socket!");
+        // Execute the handshake
+        let conn =
+            HandshakeTransport::<TcpStream, InboundHandshakeCodec, IBHandshakeState>::listen(
+                socket.0,
+                self.own_ri.clone(),
+                self.own_key.clone(),
+            );
 
-        // Bind to the address
-        let listener = TcpListener::bind(addr, &handle).unwrap();
-
-        // For each incoming connection:
-        let server = listener.incoming().for_each(move |(socket, _)| {
-            info!("Incoming socket!");
-            // Execute the handshake
-            let conn =
-                HandshakeTransport::<TcpStream, InboundHandshakeCodec, IBHandshakeState>::listen(
-                    socket,
-                    own_ri.clone(),
-                    own_key.clone(),
-                );
-
-            // Once connected:
-            let process_conn = conn.and_then(|conn| {
-                info!("Connection established!");
-                // For every message received:
-                conn.for_each(|frame| {
-                    debug!("Received frame: {:?}", frame);
-                    // TODO: Do something
-                    Ok(())
-                })
-            });
-
-            handle.spawn(process_conn.map_err(|_| ()));
-
-            Ok(())
+        // Once connected:
+        let process_conn = conn.and_then(|conn| {
+            // Start the Session actor
+            let session: Address<_> = Session::create_from_framed(conn, |_| Session);
+            future::ok(())
         });
 
-        core.run(server).unwrap();
+        Arbiter::handle().spawn(process_conn.map_err(|_| ()));
     }
 
-    pub fn connect(
-        &self,
-        own_ri: RouterIdentity,
-        own_key: SigningPrivateKey,
-        peer_ri: RouterIdentity,
-        addr: &SocketAddr,
-        handle: &Handle,
-    ) -> Box<Future<Item = Framed<TcpStream, Codec>, Error = io::Error>> {
+    pub fn connect(&self, peer_ri: RouterIdentity, addr: &SocketAddr) {
+        let own_ri = self.own_ri.clone();
+        let own_key = self.own_key.clone();
+        let handle = Arbiter::handle();
+
         // Connect to the peer
         // Return a transport ready for sending and receiving Frames
         // The layer above will convert I2NP packets to Frames
@@ -1404,20 +1470,32 @@ impl Engine {
 
         // Add a timeout
         let timeout = Timeout::new(Duration::new(10, 0), &handle).unwrap();
-        Box::new(transport.map(Ok).select(timeout.map(Err)).then(|res| {
-            match res {
-                // The handshake finished before the timeout fired
-                Ok((Ok(conn), _timeout)) => Ok(conn),
+        handle.spawn(
+            transport
+                .map(Ok)
+                .select(timeout.map(Err))
+                .then(|res| {
+                    match res {
+                        // The handshake finished before the timeout fired
+                        Ok((Ok(conn), _timeout)) => {
+                            // Start the Session actor
+                            let session: Address<_> =
+                                Session::create_from_framed(conn, |_| Session);
+                            session.send(Message::dummy_data());
+                            future::ok(())
+                        }
 
-                // The timeout fired before the handshake finished
-                Ok((Err(()), _handshake)) => Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    "timeout during handshake",
-                )),
+                        // The timeout fired before the handshake finished
+                        Ok((Err(()), _handshake)) => future::err(io::Error::new(
+                            io::ErrorKind::Other,
+                            "timeout during handshake",
+                        )),
 
-                // One of the futures (handshake or timeout) hit an error
-                Err((e, _other)) => Err(e),
-            }
-        }))
+                        // One of the futures (handshake or timeout) hit an error
+                        Err((e, _other)) => future::err(e),
+                    }
+                })
+                .map_err(|_| ()),
+        )
     }
 }

@@ -1,12 +1,22 @@
+use actix::prelude::*;
 use num::bigint::{BigUint, RandBigInt};
 use rand;
 use std::iter::repeat;
+use std::net::SocketAddr;
+use tokio_core::net::TcpStream;
 
 use constants::CryptoConstants;
 use crypto::SessionKey;
 use crypto::math::rectify;
 
 pub mod ntcp;
+
+pub struct TcpConnect(pub TcpStream, pub SocketAddr);
+
+impl ResponseType for TcpConnect {
+    type Item = ();
+    type Error = ();
+}
 
 pub struct DHSessionKeyBuilder {
     dh_priv: BigUint,
