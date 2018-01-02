@@ -1,16 +1,17 @@
 use actix::prelude::*;
 use cookie_factory::GenError;
 use bytes::BytesMut;
-use futures::{future, Async, Future, Poll, Sink, StartSend, Stream};
+use futures::{future, Future};
 use nom::{IResult, Offset};
 use std::io;
 use std::iter::repeat;
+use std::marker::PhantomData;
 use std::net::SocketAddr;
 use std::ops::AddAssign;
+use std::process;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio_core::net::TcpStream;
 use tokio_core::reactor::Timeout;
-use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_io::codec::{Decoder, Encoder, Framed};
 
 use crypto::{Aes256, Signature, SigningPrivateKey, AES_BLOCK_SIZE};
@@ -1068,282 +1069,101 @@ impl HandshakeStateTrait for OBHandshakeState {
 }
 
 //
-// Transport to execute the handshake protocols
+// Actor to execute the handshake protocols
 //
 
-struct HandshakeTransport<T, C, S> {
-    upstream: Framed<T, C>,
+struct Handshake<C, S> {
     state: Option<S>,
+    phantom: PhantomData<C>,
 }
 
-impl<T, C, S> HandshakeTransport<T, C, S>
+impl<C, S> Actor for Handshake<C, S>
 where
-    T: AsyncRead + AsyncWrite,
-    T: Send + 'static,
     C: Decoder<Item = HandshakeFrame, Error = io::Error>,
     C: Encoder<Item = HandshakeFrame, Error = io::Error>,
-    S: HandshakeStateTrait,
-{
-    /// Returns a future of a stream of `Framed<T, Codec>`s that are connected
-    fn listen(
-        stream: T,
-        own_ri: RouterIdentity,
-        own_key: SigningPrivateKey,
-    ) -> Box<Future<Item = Framed<T, Codec>, Error = io::Error>> {
-        // Generate a new DH pair
-        let dh_key_builder = DHSessionKeyBuilder::new();
-        let dh_y = dh_key_builder.get_pub();
-        let mut iv_enc = [0u8; AES_BLOCK_SIZE];
-        iv_enc.copy_from_slice(&dh_y[dh_y.len() - AES_BLOCK_SIZE..]);
-
-        // TODO: Find a way to refer to the codec from here, to deduplicate state
-        let codec = InboundHandshakeCodec::new(dh_key_builder, iv_enc);
-        let mut t = HandshakeTransport {
-            upstream: stream.framed(codec),
-            state: Some(IBHandshakeState::SessionRequest(IBHandshake::new(
-                own_ri,
-                own_key,
-                dh_y,
-            ))),
-        };
-
-        if let Err(e) = t.send_and_handle_frames() {
-            let err = format!("Failed to handle frames: {:?}", e);
-            return Box::new(future::err(io::Error::new(
-                io::ErrorKind::ConnectionAborted,
-                err,
-            )));
-        }
-
-        let mut connector = TransportConnector { transport: Some(t) };
-
-        if let Err(e) = connector.poll() {
-            let err = format!("Failed to handle frames: {:?}", e);
-            return Box::new(future::err(io::Error::new(
-                io::ErrorKind::ConnectionAborted,
-                err,
-            )));
-        }
-
-        Box::new(connector)
-    }
-
-    /// Returns a future of an `Framed<T, Codec>` that is connected
-    fn connect(
-        stream: T,
-        own_ri: RouterIdentity,
-        own_key: SigningPrivateKey,
-        ri_remote: RouterIdentity,
-    ) -> Box<Future<Item = Framed<T, Codec>, Error = io::Error>> {
-        // Generate a new DH pair
-        let dh_key_builder = DHSessionKeyBuilder::new();
-        let dh_x = dh_key_builder.get_pub();
-        let mut hxxorhb = Hash::digest(&dh_x[..]);
-        hxxorhb.xor(&ri_remote.hash());
-        let mut iv_enc = [0u8; AES_BLOCK_SIZE];
-        iv_enc.copy_from_slice(&hxxorhb.0[AES_BLOCK_SIZE..]);
-
-        // TODO: Find a way to refer to the codec from here, to deduplicate state
-        let codec = OutboundHandshakeCodec::new(dh_key_builder, iv_enc, ri_remote.clone());
-        let mut t = HandshakeTransport {
-            upstream: stream.framed(codec),
-            state: Some(OBHandshakeState::SessionRequest(OBHandshake::new(
-                own_ri,
-                own_key,
-                ri_remote,
-                dh_x,
-                hxxorhb,
-            ))),
-        };
-
-        if let Err(e) = t.send_and_handle_frames() {
-            let err = format!("Failed to handle frames: {:?}", e);
-            return Box::new(future::err(io::Error::new(
-                io::ErrorKind::ConnectionAborted,
-                err,
-            )));
-        }
-
-        let mut connector = TransportConnector { transport: Some(t) };
-
-        if let Err(e) = connector.poll() {
-            let err = format!("Failed to handle frames: {:?}", e);
-            return Box::new(future::err(io::Error::new(
-                io::ErrorKind::ConnectionAborted,
-                err,
-            )));
-        }
-
-        Box::new(connector)
-    }
-
-    fn next_frame(&mut self) -> Option<HandshakeFrame> {
-        let state = self.state.take().unwrap();
-        let (frame, new_state) = state.next_frame();
-        self.state = Some(new_state);
-        frame
-    }
-
-    fn handle_frame(&mut self, frame: HandshakeFrame) -> Result<(), io::Error> {
-        let state = self.state.take().unwrap();
-        let (res, new_state) = state.handle_frame(frame);
-        self.state = Some(new_state);
-        res
-    }
-
-    // Note that this can only return one of
-    // - Error
-    // - Async::NotReady
-    // - Async::Ready(None)
-    // All other results are handled until one of these three is reached.
-    fn send_and_handle_frames(&mut self) -> Poll<Option<()>, io::Error> {
-        self.send_frames()?;
-        self.handle_frames()
-    }
-
-    fn send_frames(&mut self) -> Result<(), io::Error> {
-        //FIXME: find a way to use a future here
-        while let Some(f) = self.next_frame() {
-            if let Err(e) = self.send_frame(f) {
-                return Err(e);
-            }
-        }
-        Ok(())
-    }
-
-    fn send_frame(&mut self, frame: HandshakeFrame) -> Poll<(), io::Error> {
-        self.start_send(frame).and_then(|_| self.poll_complete())
-    }
-
-    fn handle_frames(&mut self) -> Poll<Option<()>, io::Error> {
-        loop {
-            // try_ready will return if we hit an error or NotReady.
-            if try_ready!(self.poll()).is_none() {
-                return Ok(Async::Ready(None));
-            }
-        }
-    }
-}
-
-impl<T, C, S> Stream for HandshakeTransport<T, C, S>
-where
-    T: AsyncRead + AsyncWrite,
-    T: Send + 'static,
-    C: Decoder<Item = HandshakeFrame, Error = io::Error>,
-    C: Encoder<Item = HandshakeFrame, Error = io::Error>,
-    S: HandshakeStateTrait,
-{
-    type Item = ();
-    type Error = io::Error;
-
-    fn poll(&mut self) -> Poll<Option<()>, io::Error> {
-        let value = match self.upstream.poll() {
-            Ok(Async::Ready(t)) => t,
-            Ok(Async::NotReady) => return Ok(Async::NotReady),
-            Err(e) => return Err(From::from(e)),
-        };
-
-        if let Some(frame) = value {
-            if let Err(e) = self.handle_frame(frame) {
-                let err = format!("failed to handle frame: {:?}", e);
-                return Err(io::Error::new(io::ErrorKind::Other, err));
-            }
-            self.send_frames()?;
-            Ok(Async::Ready(Some(())))
-        } else {
-            Ok(Async::Ready(None))
-        }
-    }
-}
-
-impl<T, C, S> Sink for HandshakeTransport<T, C, S>
-where
-    T: AsyncWrite,
-    T: Send,
-    C: Decoder<Item = HandshakeFrame, Error = io::Error>,
-    C: Encoder<Item = HandshakeFrame, Error = io::Error>,
-{
-    type SinkItem = HandshakeFrame;
-    type SinkError = io::Error;
-
-    fn start_send(&mut self, item: HandshakeFrame) -> StartSend<HandshakeFrame, io::Error> {
-        self.upstream.start_send(item)
-    }
-
-    fn poll_complete(&mut self) -> Poll<(), io::Error> {
-        self.upstream.poll_complete()
-    }
-}
-
-/// Implements a future of `HandshakeTransport`
-///
-/// This structure is used to perform the NTCP handshake and provide
-/// a connected transport afterwards
-struct TransportConnector<T, C, S> {
-    transport: Option<HandshakeTransport<T, C, S>>,
-}
-
-impl<T, C, S> TransportConnector<T, C, S>
-where
+    C: 'static,
     Codec: From<C>,
+    S: HandshakeStateTrait + 'static,
 {
-    fn transmute_transport(transport: HandshakeTransport<T, C, S>) -> Framed<T, Codec> {
-        let (parts, established) = transport.upstream.into_parts_and_codec();
-        Framed::from_parts(parts, Codec::from(established))
+    type Context = FramedContext<Self>;
+
+    fn started(&mut self, ctx: &mut Self::Context) {
+        info!("Starting handshake");
+
+        match self.state.take().unwrap().next_frame() {
+            (Some(frame), state) => {
+                self.state = Some(state);
+                let _ = ctx.send(frame);
+            }
+            (None, state) => {
+                self.state = Some(state);
+            }
+        }
     }
 }
 
-impl<T, C, S> Future for TransportConnector<T, C, S>
+impl<C, S> FramedActor for Handshake<C, S>
 where
-    T: AsyncRead + AsyncWrite,
-    T: Send + 'static,
     C: Decoder<Item = HandshakeFrame, Error = io::Error>,
     C: Encoder<Item = HandshakeFrame, Error = io::Error>,
+    C: 'static,
     Codec: From<C>,
-    S: HandshakeStateTrait,
+    S: HandshakeStateTrait + 'static,
 {
-    type Item = Framed<T, Codec>;
-    type Error = io::Error;
+    type Io = TcpStream;
+    type Codec = C;
 
-    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        let mut transport = self.transport.take().unwrap();
+    /// This is main event loop for the NTCP handshake
+    fn handle(&mut self, msg: io::Result<HandshakeFrame>, ctx: &mut Self::Context) {
+        match msg {
+            Ok(frame) => {
+                match self.state.take().unwrap().handle_frame(frame) {
+                    (Ok(()), state) => match state.next_frame() {
+                        (Some(frame), state) => {
+                            self.state = Some(state);
+                            let _ = ctx.send(frame);
+                        }
+                        (None, state) => {
+                            self.state = Some(state);
+                        }
+                    },
+                    (Err(e), state) => {
+                        self.state = Some(state);
+                        error!("Error while handling handshake frame: {}", e);
+                        ctx.stop();
+                    }
+                };
 
-        //we might have received a frame before here
-        transport.send_and_handle_frames()?;
+                // If we are established, fire off a real session
+                if self.state.as_ref().map_or(false, |s| s.is_established()) {
+                    // Schedule transmutation of the Framed
+                    ctx.run_later(Duration::from_millis(100), |_, ctx| {
+                        info!("Finished handshake!");
+                        // Now transmute the Framed from a handshake into a session
+                        let handshake_framed = ctx.take().unwrap();
+                        let (parts, handshake_codec) = handshake_framed.into_parts_and_codec();
 
-        if transport
-            .state
-            .as_ref()
-            .map_or(false, |s| s.is_established())
-        {
-            return Ok(Async::Ready(TransportConnector::transmute_transport(
-                transport,
-            )));
-        }
+                        // Start the Session actor
+                        let session: Address<_> = Session::create_from_framed(
+                            Framed::from_parts(parts, Codec::from(handshake_codec)),
+                            |_| Session,
+                        );
+                        // TODO: Store the session
+                    });
 
-        match transport.poll()? {
-            Async::Ready(Some(_)) => {
-                if transport
-                    .state
-                    .as_ref()
-                    .map_or(false, |s| s.is_established())
-                {
-                    // Upstream had frames available and we're connected, the transport is ready
-                    Ok(Async::Ready(TransportConnector::transmute_transport(
-                        transport,
-                    )))
-                } else {
-                    // Upstream had frames but we're not yet connected, continue polling
-                    let poll_ret = transport.poll();
-                    self.transport = Some(transport);
-                    poll_ret?;
-                    Ok(Async::NotReady)
+                    // Ensure all handshake messages are sent before transmuting the
+                    // Framed, otherwise the IVs can get out of sync.
+                    // drain() blocks all other events until the specified future
+                    // completes, so the scheduled call will be run afterwards.
+                    debug!("Waiting for handshake to finish...");
+                    let _ = ctx.drain();
                 }
             }
-            _ => {
-                // Upstream had no frames
-                self.transport = Some(transport);
-                Ok(Async::NotReady)
+            Err(err) => {
+                /// We'll stop NTCP handshake actor on any error, high likely it is just
+                /// termination of the TCP stream.
+                error!("Error while performing handshake: {}", err);
+                ctx.stop()
             }
         }
     }
@@ -1432,22 +1252,28 @@ impl Engine {
 
     fn accept(&self, socket: TcpConnect) {
         info!("Incoming socket!");
-        // Execute the handshake
-        let conn =
-            HandshakeTransport::<TcpStream, InboundHandshakeCodec, IBHandshakeState>::listen(
-                socket.0,
-                self.own_ri.clone(),
-                self.own_key.clone(),
-            );
 
-        // Once connected:
-        let process_conn = conn.and_then(|conn| {
-            // Start the Session actor
-            let session: Address<_> = Session::create_from_framed(conn, |_| Session);
-            future::ok(())
-        });
+        // Generate a new DH pair
+        let dh_key_builder = DHSessionKeyBuilder::new();
+        let dh_y = dh_key_builder.get_pub();
+        let mut iv_enc = [0u8; AES_BLOCK_SIZE];
+        iv_enc.copy_from_slice(&dh_y[dh_y.len() - AES_BLOCK_SIZE..]);
 
-        Arbiter::handle().spawn(process_conn.map_err(|_| ()));
+        // TODO: Find a way to refer to the codec from here, to deduplicate state
+        let codec = InboundHandshakeCodec::new(dh_key_builder, iv_enc);
+        let state = IBHandshakeState::SessionRequest(IBHandshake::new(
+            self.own_ri.clone(),
+            self.own_key.clone(),
+            dh_y,
+        ));
+
+        // For each incoming connection we create `InboundHandshake` actor
+        // to conduct the NTCP handshake
+        // let server = self.chat.clone();
+        let _: () = Handshake {
+            state: Some(state),
+            phantom: PhantomData,
+        }.framed(socket.0, codec);
     }
 
     pub fn connect(&self, peer_ri: RouterIdentity, addr: &SocketAddr) {
@@ -1459,14 +1285,32 @@ impl Engine {
         // Return a transport ready for sending and receiving Frames
         // The layer above will convert I2NP packets to Frames
         // (or should the Engine handle timesync packets itself?)
-        let transport = Box::new(TcpStream::connect(&addr, &handle).and_then(|socket| {
-            HandshakeTransport::<TcpStream, OutboundHandshakeCodec, OBHandshakeState>::connect(
-                socket,
+        let transport = TcpStream::connect(&addr, &handle).and_then(|socket| {
+            // Generate a new DH pair
+            let dh_key_builder = DHSessionKeyBuilder::new();
+            let dh_x = dh_key_builder.get_pub();
+            let mut hxxorhb = Hash::digest(&dh_x[..]);
+            hxxorhb.xor(&peer_ri.hash());
+            let mut iv_enc = [0u8; AES_BLOCK_SIZE];
+            iv_enc.copy_from_slice(&hxxorhb.0[AES_BLOCK_SIZE..]);
+
+            // TODO: Find a way to refer to the codec from here, to deduplicate state
+            let codec = OutboundHandshakeCodec::new(dh_key_builder, iv_enc, peer_ri.clone());
+            let state = OBHandshakeState::SessionRequest(OBHandshake::new(
                 own_ri,
                 own_key,
                 peer_ri,
-            )
-        }));
+                dh_x,
+                hxxorhb,
+            ));
+
+            let _: () = Handshake {
+                state: Some(state),
+                phantom: PhantomData,
+            }.framed(socket, codec);
+
+            future::ok(())
+        });
 
         // Add a timeout
         let timeout = Timeout::new(Duration::new(10, 0), &handle).unwrap();
@@ -1477,13 +1321,7 @@ impl Engine {
                 .then(|res| {
                     match res {
                         // The handshake finished before the timeout fired
-                        Ok((Ok(conn), _timeout)) => {
-                            // Start the Session actor
-                            let session: Address<_> =
-                                Session::create_from_framed(conn, |_| Session);
-                            session.send(Message::dummy_data());
-                            future::ok(())
-                        }
+                        Ok((Ok(()), _timeout)) => future::ok(()),
 
                         // The timeout fired before the handshake finished
                         Ok((Err(()), _handshake)) => future::err(io::Error::new(
@@ -1495,7 +1333,10 @@ impl Engine {
                         Err((e, _other)) => future::err(e),
                     }
                 })
-                .map_err(|_| ()),
+                .map_err(|e| {
+                    error!("Could not connect to server: {}", e);
+                    process::exit(1)
+                }),
         )
     }
 }
