@@ -1,12 +1,13 @@
 use cookie_factory::*;
-use nom::{be_u16, be_u32, IResult};
+use nom::{IResult, be_u16, be_u32};
 
 use crypto::frame::{gen_signature, signature};
 use data::{Hash, RouterIdentity};
 use data::frame::{gen_hash, gen_router_identity, hash, router_identity};
 use i2np::Message;
 use i2np::frame::{gen_message, message};
-use super::{Frame, HandshakeFrame, SessionConfirmA, SessionConfirmB, SessionCreated, SessionRequest};
+use super::{Frame, HandshakeFrame, SessionConfirmA, SessionConfirmB, SessionCreated,
+            SessionRequest};
 
 //
 // Utils
@@ -20,9 +21,10 @@ fn padding(input: &[u8], content_len: usize) -> IResult<&[u8], &[u8]> {
     take!(input, padding_len(content_len))
 }
 
-fn gen_padding<'a>(input: (&'a mut [u8], usize),
-                   content_len: usize)
-                   -> Result<(&'a mut [u8], usize), GenError> {
+fn gen_padding<'a>(
+    input: (&'a mut [u8], usize),
+    content_len: usize,
+) -> Result<(&'a mut [u8], usize), GenError> {
     let pad_len = padding_len(content_len);
     // TODO: Fill this with random padding
     gen_skip!(input, pad_len)
@@ -49,9 +51,10 @@ named!(pub session_request<HandshakeFrame>,
     )
 );
 
-pub fn gen_session_request<'a>(input: (&'a mut [u8], usize),
-                               sr: &SessionRequest)
-                               -> Result<(&'a mut [u8], usize), GenError> {
+pub fn gen_session_request<'a>(
+    input: (&'a mut [u8], usize),
+    sr: &SessionRequest,
+) -> Result<(&'a mut [u8], usize), GenError> {
     do_gen!(input, gen_slice!(sr.dh_x) >> gen_hash(&sr.hash))
 }
 
@@ -69,10 +72,11 @@ named!(pub session_created_enc<(Vec<u8>, Vec<u8>)>,
     )
 );
 
-pub fn gen_session_created_enc<'a>(input: (&'a mut [u8], usize),
-                                   dh_y: &Vec<u8>,
-                                   ct: &[u8; 48])
-                                   -> Result<(&'a mut [u8], usize), GenError> {
+pub fn gen_session_created_enc<'a>(
+    input: (&'a mut [u8], usize),
+    dh_y: &Vec<u8>,
+    ct: &[u8; 48],
+) -> Result<(&'a mut [u8], usize), GenError> {
     do_gen!(input, gen_slice!(dh_y) >> gen_slice!(ct))
 }
 
@@ -91,11 +95,14 @@ named!(pub session_created_dec<(Hash, u32)>,
     )
 );
 
-pub fn gen_session_created_dec<'a>(input: (&'a mut [u8], usize),
-                                   sc: &SessionCreated)
-                                   -> Result<(&'a mut [u8], usize), GenError> {
-    do_gen!(input,
-            gen_hash(&sc.hash) >> gen_be_u32!(sc.ts_b) >> gen_padding(36))
+pub fn gen_session_created_dec<'a>(
+    input: (&'a mut [u8], usize),
+    sc: &SessionCreated,
+) -> Result<(&'a mut [u8], usize), GenError> {
+    do_gen!(
+        input,
+        gen_hash(&sc.hash) >> gen_be_u32!(sc.ts_b) >> gen_padding(36)
+    )
 }
 
 // 0      2        sz+2  sz+6     sz+6+len(pad)   sz+6+len(pad)+len(sig)
@@ -112,16 +119,19 @@ pub fn gen_session_created_dec<'a>(input: (&'a mut [u8], usize),
 // - If there is a KeyCert, its types are in bytes 389-392
 //   - If no KeyCert, these bytes will be tsA
 
-pub fn gen_session_confirm_sig_msg<'a>(input: (&'a mut [u8], usize),
-                                       dh_x: &Vec<u8>,
-                                       dh_y: &Vec<u8>,
-                                       ri: &RouterIdentity,
-                                       ts_a: u32,
-                                       ts_b: u32)
-                                       -> Result<(&'a mut [u8], usize), GenError> {
-    do_gen!(input,
-            gen_slice!(dh_x) >> gen_slice!(dh_y) >> gen_hash(&ri.hash()) >> gen_be_u32!(ts_a) >>
-            gen_be_u32!(ts_b))
+pub fn gen_session_confirm_sig_msg<'a>(
+    input: (&'a mut [u8], usize),
+    dh_x: &Vec<u8>,
+    dh_y: &Vec<u8>,
+    ri: &RouterIdentity,
+    ts_a: u32,
+    ts_b: u32,
+) -> Result<(&'a mut [u8], usize), GenError> {
+    do_gen!(
+        input,
+        gen_slice!(dh_x) >> gen_slice!(dh_y) >> gen_hash(&ri.hash()) >> gen_be_u32!(ts_a)
+            >> gen_be_u32!(ts_b)
+    )
 }
 
 named!(pub session_confirm_a<HandshakeFrame>,
@@ -129,15 +139,17 @@ named!(pub session_confirm_a<HandshakeFrame>,
         size:     be_u16 >>
         ri_a:     router_identity >>
         ts_a:     be_u32 >>
-                  call!(padding, size as usize + 6 + ri_a.signing_key.sig_type().sig_len() as usize) >>
+                  call!(padding,
+                        size as usize + 6 + ri_a.signing_key.sig_type().sig_len() as usize) >>
         sig:      call!(signature, &ri_a.signing_key.sig_type()) >>
         (HandshakeFrame::SessionConfirmA(SessionConfirmA { ri_a, ts_a, sig }))
     )
 );
 
-pub fn gen_session_confirm_a<'a>(input: (&'a mut [u8], usize),
-                                 sca: &SessionConfirmA)
-                                 -> Result<(&'a mut [u8], usize), GenError> {
+pub fn gen_session_confirm_a<'a>(
+    input: (&'a mut [u8], usize),
+    sca: &SessionConfirmA,
+) -> Result<(&'a mut [u8], usize), GenError> {
     do_gen!(input,
         size:  gen_skip!(2) >>
         start: gen_router_identity(&sca.ri_a) >>
@@ -156,19 +168,22 @@ pub fn gen_session_confirm_a<'a>(input: (&'a mut [u8], usize),
 //
 // Length determined by RI_B, which the recipient already knows.
 
-pub fn session_confirm_b<'a>(input: &'a [u8],
-                             ri_b: &RouterIdentity)
-                             -> IResult<&'a [u8], HandshakeFrame> {
-    do_parse!(input,
+pub fn session_confirm_b<'a>(
+    input: &'a [u8],
+    ri_b: &RouterIdentity,
+) -> IResult<&'a [u8], HandshakeFrame> {
+    do_parse!(
+        input,
         sig: call!(signature, &ri_b.signing_key.sig_type()) >>
              take!(padding_len(ri_b.signing_key.sig_type().sig_len() as usize)) >>
         (HandshakeFrame::SessionConfirmB(SessionConfirmB { sig }))
     )
 }
 
-pub fn gen_session_confirm_b<'a>(input: (&'a mut [u8], usize),
-                                 scb: &SessionConfirmB)
-                                 -> Result<(&'a mut [u8], usize), GenError> {
+pub fn gen_session_confirm_b<'a>(
+    input: (&'a mut [u8], usize),
+    scb: &SessionConfirmB,
+) -> Result<(&'a mut [u8], usize), GenError> {
     do_gen!(input,
         start: gen_signature(&scb.sig) >>
         end:   gen_padding(end - start)
@@ -189,10 +204,16 @@ fn adler(input: &[u8]) -> [u8; 4] {
         s2 += s1;
         s2 %= 65521;
     }
-    [((s2 >> 8) & 0xff) as u8, (s2 & 0xff) as u8, ((s1 >> 8) & 0xff) as u8, (s1 & 0xff) as u8]
+    [
+        ((s2 >> 8) & 0xff) as u8,
+        (s2 & 0xff) as u8,
+        ((s1 >> 8) & 0xff) as u8,
+        (s1 & 0xff) as u8,
+    ]
 }
 
-named!(get_adler<[u8; 4]>,
+named!(
+    get_adler<[u8; 4]>,
     peek!(do_parse!(
         data: switch!(peek!(be_u16),
             0 => take!(12) |
@@ -201,10 +222,11 @@ named!(get_adler<[u8; 4]>,
     ))
 );
 
-fn gen_adler<'a>(input: (&'a mut [u8], usize),
-                 start: usize,
-                 end: usize)
-                 -> Result<(&'a mut [u8], usize), GenError> {
+fn gen_adler<'a>(
+    input: (&'a mut [u8], usize),
+    start: usize,
+    end: usize,
+) -> Result<(&'a mut [u8], usize), GenError> {
     let cs = adler(&input.0[start..end]);
     gen_slice!(input, cs)
 }
@@ -215,14 +237,16 @@ fn gen_adler<'a>(input: (&'a mut [u8], usize),
 // +------+------------+---------+-------+
 //  short  size octets     octets    octets
 
-fn gen_standard_frame<'a>(input: (&'a mut [u8], usize),
-                          msg: &Message)
-                          -> Result<(&'a mut [u8], usize), GenError> {
-    do_gen!(input,
+fn gen_standard_frame<'a>(
+    input: (&'a mut [u8], usize),
+    msg: &Message,
+) -> Result<(&'a mut [u8], usize), GenError> {
+    do_gen!(
+        input,
         start:     gen_skip!(2) >>
         msg_start: gen_message(msg) >>
-        msg_end:   gen_at_offset!(start, gen_be_u16!(msg_end-msg_start)) >>
-                   gen_padding(msg_end-msg_start+6) >>
+        msg_end:   gen_at_offset!(start, gen_be_u16!(msg_end - msg_start)) >>
+                   gen_padding(msg_end - msg_start + 6) >>
         end:       gen_adler(start, end)
     )
 }
@@ -233,10 +257,12 @@ fn gen_standard_frame<'a>(input: (&'a mut [u8], usize),
 // +-----+-----------+---------+-------+
 //  short    long      octets    octets
 
-fn gen_timestamp_frame<'a>(input: (&'a mut [u8], usize),
-                           timestamp: u32)
-                           -> Result<(&'a mut [u8], usize), GenError> {
-    do_gen!(input,
+fn gen_timestamp_frame<'a>(
+    input: (&'a mut [u8], usize),
+    timestamp: u32,
+) -> Result<(&'a mut [u8], usize), GenError> {
+    do_gen!(
+        input,
         start: gen_be_u16!(0) >>
                gen_be_u32!(timestamp) >>
                gen_padding(10) >>
@@ -265,9 +291,10 @@ named!(pub frame<Frame>,
     )
 );
 
-pub fn gen_frame<'a>(input: (&'a mut [u8], usize),
-                     frame: &Frame)
-                     -> Result<(&'a mut [u8], usize), GenError> {
+pub fn gen_frame<'a>(
+    input: (&'a mut [u8], usize),
+    frame: &Frame,
+) -> Result<(&'a mut [u8], usize), GenError> {
     match frame {
         &Frame::Standard(ref msg) => gen_standard_frame(input, &msg),
         &Frame::TimeSync(ts) => gen_timestamp_frame(input, ts),
@@ -283,20 +310,42 @@ mod tests {
         // From http://wiki.hping.org/124
         assert_eq!([0x13, 0x07, 0x03, 0x94], adler(&b"Mark Adler"[..]));
         assert_eq!([0x00, 0x0e, 0x00, 0x07], adler(&[0x00, 0x01, 0x02, 0x03]));
-        assert_eq!([0x00, 0x5c, 0x00, 0x1d], adler(&[0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07]));
-        assert_eq!([0x02, 0xb8, 0x00, 0x79],
-            adler(&[0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f]));
+        assert_eq!(
+            [0x00, 0x5c, 0x00, 0x1d],
+            adler(&[0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07])
+        );
+        assert_eq!(
+            [0x02, 0xb8, 0x00, 0x79],
+            adler(&[
+                0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d,
+                0x0e, 0x0f,
+            ])
+        );
         assert_eq!([0x02, 0x8e, 0x01, 0x05], adler(&[0x41, 0x41, 0x41, 0x41]));
-        assert_eq!([0x09, 0x50, 0x02, 0x11], adler(&[0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42]));
-        assert_eq!([0x23, 0xa8, 0x04, 0x31],
-            adler(&[0x43, 0x43, 0x43, 0x43, 0x43, 0x43, 0x43, 0x43, 0x43, 0x43, 0x43, 0x43, 0x43, 0x43, 0x43, 0x43]));
+        assert_eq!(
+            [0x09, 0x50, 0x02, 0x11],
+            adler(&[0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42, 0x42])
+        );
+        assert_eq!(
+            [0x23, 0xa8, 0x04, 0x31],
+            adler(&[
+                0x43, 0x43, 0x43, 0x43, 0x43, 0x43, 0x43, 0x43, 0x43, 0x43, 0x43, 0x43, 0x43, 0x43,
+                0x43, 0x43,
+            ])
+        );
         // From https://github.com/froydnj/ironclad/blob/master/testing/test-vectors/adler32.testvec
         assert_eq!([0x00, 0x00, 0x00, 0x01], adler(&b""[..]));
         assert_eq!([0x00, 0x62, 0x00, 0x62], adler(&b"a"[..]));
         assert_eq!([0x02, 0x4d, 0x01, 0x27], adler(&b"abc"[..]));
         assert_eq!([0x29, 0x75, 0x05, 0x86], adler(&b"message digest"[..]));
-        assert_eq!([0x90, 0x86, 0x0b, 0x20], adler(&b"abcdefghijklmnopqrstuvwxyz"[..]));
-        assert_eq!([0x8a, 0xdb, 0x15, 0x0c], adler(&b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"[..]));
+        assert_eq!(
+            [0x90, 0x86, 0x0b, 0x20],
+            adler(&b"abcdefghijklmnopqrstuvwxyz"[..])
+        );
+        assert_eq!(
+            [0x8a, 0xdb, 0x15, 0x0c],
+            adler(&b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"[..])
+        );
         assert_eq!([0x97, 0xb6, 0x10, 0x69],
             adler(&b"12345678901234567890123456789012345678901234567890123456789012345678901234567890"[..]));
     }
@@ -304,8 +353,9 @@ mod tests {
     #[test]
     fn get_adler_standard() {
         let data = [
-            0x00, 0x02, 0x01, 0x02, 0x01, 0x02, 0x03, 0x04,
-            0x05, 0x06, 0x07, 0x08, 0x00, 0xb6, 0x00, 0x2a];
+            0x00, 0x02, 0x01, 0x02, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x00, 0xb6,
+            0x00, 0x2a,
+        ];
         match get_adler(&data) {
             IResult::Done(i, cs) => {
                 assert_eq!(cs, &data[12..]);
@@ -322,10 +372,10 @@ mod tests {
     #[test]
     fn get_adler_standard_long() {
         let data = [
-            0x00, 0x10, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06,
-            0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
-            0x0f, 0x10, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06,
-            0x07, 0x08, 0x09, 0x0a, 0x0b, 0x28, 0x00, 0xd0];
+            0x00, 0x10, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c,
+            0x0d, 0x0e, 0x0f, 0x10, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a,
+            0x0b, 0x28, 0x00, 0xd0,
+        ];
         match get_adler(&data) {
             IResult::Done(i, cs) => {
                 assert_eq!(cs, &data[28..]);
@@ -342,8 +392,9 @@ mod tests {
     #[test]
     fn get_adler_timesync() {
         let data = [
-            0x00, 0x00, 0x01, 0x02, 0x03, 0x04, 0x01, 0x02,
-            0x03, 0x04, 0x05, 0x06, 0x00, 0x94, 0x00, 0x20];
+            0x00, 0x00, 0x01, 0x02, 0x03, 0x04, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x00, 0x94,
+            0x00, 0x20,
+        ];
         match get_adler(&data) {
             IResult::Done(i, cs) => {
                 assert_eq!(cs, &data[12..]);

@@ -10,12 +10,10 @@ pub fn rectify(bi: &BigUint, len: usize) -> Vec<u8> {
             println!("Warning: dh_pub is zero!");
             vec![0u8; len]
         }
-        sz if sz > len => {
-            match b[0] {
-                0 => Vec::from(&b[1..]),
-                _ => panic!("key too big ({}) max is {}", sz, len),
-            }
-        }
+        sz if sz > len => match b[0] {
+            0 => Vec::from(&b[1..]),
+            _ => panic!("key too big ({}) max is {}", sz, len),
+        },
         _ => {
             match b[0] & 0x80 {
                 0 => {

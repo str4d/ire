@@ -24,7 +24,7 @@ extern crate tokio_io;
 #[macro_use]
 extern crate pretty_assertions;
 
-use clap::{Arg, ArgMatches, App, SubCommand};
+use clap::{App, Arg, ArgMatches, SubCommand};
 use futures::{Future, Sink};
 use tokio_core::reactor::Core;
 
@@ -45,28 +45,43 @@ fn inner_main() -> i32 {
         .version("0.0.1")
         .author("Jack Grigg <str4d@i2pmail.org>")
         .about("The I2P Rust engine")
-        .subcommand(SubCommand::with_name("cli")
-                        .subcommand(SubCommand::with_name("gen")
-                                        .arg(Arg::with_name("routerKeys").help("Path to write the router.keys.dat to"))
-                                        .arg(Arg::with_name("routerId").help("Path to write the router.info to")))
-                        .subcommand(SubCommand::with_name("server")
-                                        .arg(Arg::with_name("routerKeys").help("Path to the server's router.keys.dat"))
-                                        .arg(Arg::with_name("bind").help("Address:Port to bind to")))
-                        .subcommand(SubCommand::with_name("client")
-                                        .arg(Arg::with_name("routerKeys").help("Path to the client's router.keys.dat"))
-                                        .arg(Arg::with_name("peerId").help("Path to the peer's router.info file"))
-                                        .arg(Arg::with_name("addr").help("Address:Port of the peer"))))
+        .subcommand(
+            SubCommand::with_name("cli")
+                .subcommand(
+                    SubCommand::with_name("gen")
+                        .arg(
+                            Arg::with_name("routerKeys")
+                                .help("Path to write the router.keys.dat to"),
+                        )
+                        .arg(Arg::with_name("routerId").help("Path to write the router.info to")),
+                )
+                .subcommand(
+                    SubCommand::with_name("server")
+                        .arg(
+                            Arg::with_name("routerKeys")
+                                .help("Path to the server's router.keys.dat"),
+                        )
+                        .arg(Arg::with_name("bind").help("Address:Port to bind to")),
+                )
+                .subcommand(
+                    SubCommand::with_name("client")
+                        .arg(
+                            Arg::with_name("routerKeys")
+                                .help("Path to the client's router.keys.dat"),
+                        )
+                        .arg(Arg::with_name("peerId").help("Path to the peer's router.info file"))
+                        .arg(Arg::with_name("addr").help("Address:Port of the peer")),
+                ),
+        )
         .get_matches();
 
     match matches.subcommand() {
-        ("cli", Some(matches)) => {
-            match matches.subcommand() {
-                ("gen", Some(matches)) => cli_gen(matches),
-                ("server", Some(matches)) => cli_server(matches),
-                ("client", Some(matches)) => cli_client(matches),
-                (&_, _) => panic!("Invalid matches for cli subcommand"),
-            }
-        }
+        ("cli", Some(matches)) => match matches.subcommand() {
+            ("gen", Some(matches)) => cli_gen(matches),
+            ("server", Some(matches)) => cli_server(matches),
+            ("client", Some(matches)) => cli_client(matches),
+            (&_, _) => panic!("Invalid matches for cli subcommand"),
+        },
         _ => 1,
     }
 }
@@ -80,10 +95,7 @@ fn cli_gen(args: &ArgMatches) -> i32 {
 
 fn cli_server(args: &ArgMatches) -> i32 {
     let rsk = data::RouterSecretKeys::from_file(args.value_of("routerKeys").unwrap());
-    let addr = args.value_of("bind")
-        .unwrap()
-        .parse()
-        .unwrap();
+    let addr = args.value_of("bind").unwrap().parse().unwrap();
 
     // Accept all incoming sockets
     info!("Listening on {}", addr);
@@ -98,10 +110,7 @@ fn cli_client(args: &ArgMatches) -> i32 {
 
     let rsk = data::RouterSecretKeys::from_file(args.value_of("routerKeys").unwrap());
     let peer_rid = data::RouterIdentity::from_file(args.value_of("peerId").unwrap());
-    let addr = args.value_of("addr")
-        .unwrap()
-        .parse()
-        .unwrap();
+    let addr = args.value_of("addr").unwrap().parse().unwrap();
 
     info!("Connecting to {}", addr);
     let ntcp = transport::ntcp::Engine::new();
@@ -112,7 +121,9 @@ fn cli_client(args: &ArgMatches) -> i32 {
             info!("Connection established!");
             let f = t.send(transport::ntcp::Frame::TimeSync(42));
             let f = f.and_then(|t| {
-                t.send(transport::ntcp::Frame::Standard(i2np::Message::dummy_data()))
+                t.send(transport::ntcp::Frame::Standard(
+                    i2np::Message::dummy_data(),
+                ))
             });
             match core.run(f) {
                 Ok(_) => {

@@ -1,6 +1,6 @@
 use cookie_factory::GenError;
 use bytes::BytesMut;
-use futures::{Async, Future, Poll, Sink, StartSend, Stream, future};
+use futures::{future, Async, Future, Poll, Sink, StartSend, Stream};
 use nom::{IResult, Offset};
 use std::io;
 use std::iter::repeat;
@@ -12,7 +12,7 @@ use tokio_core::reactor::{Core, Handle, Timeout};
 use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_io::codec::{Decoder, Encoder, Framed};
 
-use crypto::{AES_BLOCK_SIZE, Aes256, SigningPrivateKey, Signature};
+use crypto::{Aes256, Signature, SigningPrivateKey, AES_BLOCK_SIZE};
 use data::{Hash, RouterIdentity};
 use i2np::Message;
 use super::DHSessionKeyBuilder;
@@ -54,7 +54,7 @@ pub enum HandshakeFrame {
     SessionConfirmB(SessionConfirmB),
 }
 
-#[derive(Clone,Copy,Debug,Eq,PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum HandshakeState {
     SessionRequest,
     SessionCreated,
@@ -99,9 +99,10 @@ impl Decoder for InboundHandshakeCodec {
                 HandshakeState::SessionRequest => frame::session_request(buf),
                 HandshakeState::SessionConfirmA => {
                     match self.aes
-                              .as_mut()
-                              .unwrap()
-                              .decrypt_blocks(&mut buf[self.decrypted..]) {
+                        .as_mut()
+                        .unwrap()
+                        .decrypt_blocks(&mut buf[self.decrypted..])
+                    {
                         Some(end) => self.decrypted += end,
                         None => return Ok(None),
                     };
@@ -114,8 +115,10 @@ impl Decoder for InboundHandshakeCodec {
             match res {
                 IResult::Incomplete(_) => return Ok(None),
                 IResult::Error(e) => {
-                    return Err(io::Error::new(io::ErrorKind::Other,
-                                              format!("parse error: {:?}", e)))
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("parse error: {:?}", e),
+                    ))
                 }
                 IResult::Done(i, frame) => (buf.offset(i), frame),
             }
@@ -157,22 +160,20 @@ impl Encoder for InboundHandshakeCodec {
         let res = match (self.state, frame) {
             (HandshakeState::SessionCreated, HandshakeFrame::SessionCreated(ref sc)) => {
                 // Set up cryptor
-                let session_key =
-                    self.dh_key_builder.build_session_key(array_ref![self.dh_x, 0, 256]);
+                let session_key = self.dh_key_builder
+                    .build_session_key(array_ref![self.dh_x, 0, 256]);
                 self.aes = Some(Aes256::new(&session_key, &self.iv_enc, &self.iv_dec));
                 // Serialise inner part of SessionCreated
                 let mut tmp = [0u8; 48];
                 match frame::gen_session_created_dec((&mut tmp, 0), &sc).map(|tup| tup.1) {
                     Ok(inner_sz) => {
                         // Encrypt message in-place
-                        match self.aes
-                                  .as_mut()
-                                  .unwrap()
-                                  .encrypt_blocks(&mut tmp) {
+                        match self.aes.as_mut().unwrap().encrypt_blocks(&mut tmp) {
                             Some(end) if end == inner_sz => {
                                 // Serialise outer SessionCreated
                                 match frame::gen_session_created_enc((buf, 0), &sc.dh_y, &tmp)
-                                          .map(|tup| tup.1) {
+                                    .map(|tup| tup.1)
+                                {
                                     Ok(sz) => {
                                         buf.truncate(sz);
                                         Ok(())
@@ -181,8 +182,10 @@ impl Encoder for InboundHandshakeCodec {
                                 }
                             }
                             _ => {
-                                return Err(io::Error::new(io::ErrorKind::InvalidData,
-                                                          "invalid serialization"));
+                                return Err(io::Error::new(
+                                    io::ErrorKind::InvalidData,
+                                    "invalid serialization",
+                                ));
                             }
                         }
                     }
@@ -194,14 +197,13 @@ impl Encoder for InboundHandshakeCodec {
                     Ok(sz) => {
                         buf.truncate(sz);
                         // Encrypt message in-place
-                        match self.aes
-                                  .as_mut()
-                                  .unwrap()
-                                  .encrypt_blocks(buf) {
+                        match self.aes.as_mut().unwrap().encrypt_blocks(buf) {
                             Some(end) if end == sz => Ok(()),
                             _ => {
-                                return Err(io::Error::new(io::ErrorKind::InvalidData,
-                                                          "invalid serialization"))
+                                return Err(io::Error::new(
+                                    io::ErrorKind::InvalidData,
+                                    "invalid serialization",
+                                ))
                             }
                         }
                     }
@@ -209,8 +211,10 @@ impl Encoder for InboundHandshakeCodec {
                 }
             }
             _ => {
-                return Err(io::Error::new(io::ErrorKind::InvalidInput,
-                                          "incorrect state for sending"))
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "incorrect state for sending",
+                ))
             }
         };
 
@@ -224,21 +228,18 @@ impl Encoder for InboundHandshakeCodec {
                 };
                 Ok(())
             }
-            Err(e) => {
-                match e {
-                    GenError::BufferTooSmall(sz) => {
-                        Err(io::Error::new(io::ErrorKind::InvalidData,
-                                           format!("message ({}) larger than MTU ({})",
-                                                   sz,
-                                                   NTCP_MTU)))
-                    }
-                    GenError::InvalidOffset |
-                    GenError::CustomError(_) |
-                    GenError::NotYetImplemented => {
-                        Err(io::Error::new(io::ErrorKind::InvalidData, "could not generate"))
-                    }
-                }
-            }
+            Err(e) => match e {
+                GenError::BufferTooSmall(sz) => Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("message ({}) larger than MTU ({})", sz, NTCP_MTU),
+                )),
+                GenError::InvalidOffset
+                | GenError::CustomError(_)
+                | GenError::NotYetImplemented => Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "could not generate",
+                )),
+            },
         }
     }
 }
@@ -253,10 +254,11 @@ struct OutboundHandshakeCodec {
 }
 
 impl OutboundHandshakeCodec {
-    fn new(dh_key_builder: DHSessionKeyBuilder,
-           iv_enc: [u8; AES_BLOCK_SIZE],
-           ri_remote: RouterIdentity)
-           -> Self {
+    fn new(
+        dh_key_builder: DHSessionKeyBuilder,
+        iv_enc: [u8; AES_BLOCK_SIZE],
+        ri_remote: RouterIdentity,
+    ) -> Self {
         OutboundHandshakeCodec {
             dh_key_builder,
             iv_enc,
@@ -280,48 +282,55 @@ impl Decoder for OutboundHandshakeCodec {
                     match frame::session_created_enc(&buf) {
                         IResult::Incomplete(_) => return Ok(None),
                         IResult::Error(e) => {
-                            return Err(io::Error::new(io::ErrorKind::Other,
-                                                      format!("parse error: {:?}", e)))
+                            return Err(io::Error::new(
+                                io::ErrorKind::Other,
+                                format!("parse error: {:?}", e),
+                            ))
                         }
                         IResult::Done(i, mut sce) => {
                             // Set up cryptor
                             let session_key = self.dh_key_builder
                                 .build_session_key(array_ref![sce.0, 0, 256]);
-                            self.aes = Some(Aes256::new(&session_key,
-                                                        &self.iv_enc,
-                                                        array_ref![sce.0,
-                                                                   sce.0.len() - AES_BLOCK_SIZE,
-                                                                   AES_BLOCK_SIZE]));
+                            self.aes = Some(Aes256::new(
+                                &session_key,
+                                &self.iv_enc,
+                                array_ref![sce.0, sce.0.len() - AES_BLOCK_SIZE, AES_BLOCK_SIZE],
+                            ));
                             // Decrypt remainder of SessionCreated message
-                            match self.aes
-                                      .as_mut()
-                                      .unwrap()
-                                      .decrypt_blocks(&mut sce.1) {
+                            match self.aes.as_mut().unwrap().decrypt_blocks(&mut sce.1) {
                                 Some(end) if end == sce.1.len() => {
                                     match frame::session_created_dec(&sce.1) {
                                         IResult::Incomplete(_) => {
-                                            return Err(io::Error::new(io::ErrorKind::Other,
-                                                                      format!("incomplete parse error")))
+                                            return Err(io::Error::new(
+                                                io::ErrorKind::Other,
+                                                format!("incomplete parse error"),
+                                            ))
                                         }
                                         IResult::Error(e) => {
-                                            return Err(io::Error::new(io::ErrorKind::Other,
-                                                                      format!("parse error: {:?}",
-                                                                              e)))
+                                            return Err(io::Error::new(
+                                                io::ErrorKind::Other,
+                                                format!("parse error: {:?}", e),
+                                            ))
                                         }
-                                        IResult::Done(_, scd) => {
-                                            IResult::Done(i, HandshakeFrame::SessionCreated(SessionCreated {
+                                        IResult::Done(_, scd) => IResult::Done(
+                                            i,
+                                            HandshakeFrame::SessionCreated(SessionCreated {
                                                 dh_y: sce.0,
                                                 hash: scd.0,
                                                 ts_b: scd.1,
-                                            }))
-                                        }
+                                            }),
+                                        ),
                                     }
                                 }
                                 Some(sz) => {
-                                    return Err(io::Error::new(io::ErrorKind::Other,
-                                                              format!("incomplete encrypt error, encrypted {} out of {}",
-                                                                      sz,
-                                                                      sce.1.len())))
+                                    return Err(io::Error::new(
+                                        io::ErrorKind::Other,
+                                        format!(
+                                            "incomplete encrypt error, encrypted {} out of {}",
+                                            sz,
+                                            sce.1.len()
+                                        ),
+                                    ))
                                 }
                                 None => return Ok(None),
                             }
@@ -330,9 +339,10 @@ impl Decoder for OutboundHandshakeCodec {
                 }
                 HandshakeState::SessionConfirmB => {
                     match self.aes
-                              .as_mut()
-                              .unwrap()
-                              .decrypt_blocks(&mut buf[self.decrypted..]) {
+                        .as_mut()
+                        .unwrap()
+                        .decrypt_blocks(&mut buf[self.decrypted..])
+                    {
                         Some(end) => self.decrypted += end,
                         None => return Ok(None),
                     };
@@ -345,8 +355,10 @@ impl Decoder for OutboundHandshakeCodec {
             match res {
                 IResult::Incomplete(_) => return Ok(None),
                 IResult::Error(e) => {
-                    return Err(io::Error::new(io::ErrorKind::Other,
-                                              format!("parse error: {:?}", e)))
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("parse error: {:?}", e),
+                    ))
                 }
                 IResult::Done(i, frame) => (buf.offset(i), frame),
             }
@@ -394,14 +406,13 @@ impl Encoder for OutboundHandshakeCodec {
                     Ok(sz) => {
                         buf.truncate(sz);
                         // Encrypt message in-place
-                        match self.aes
-                                  .as_mut()
-                                  .unwrap()
-                                  .encrypt_blocks(buf) {
+                        match self.aes.as_mut().unwrap().encrypt_blocks(buf) {
                             Some(end) if end == sz => Ok(()),
                             _ => {
-                                return Err(io::Error::new(io::ErrorKind::InvalidData,
-                                                          "invalid serialization"))
+                                return Err(io::Error::new(
+                                    io::ErrorKind::InvalidData,
+                                    "invalid serialization",
+                                ))
                             }
                         }
                     }
@@ -409,8 +420,10 @@ impl Encoder for OutboundHandshakeCodec {
                 }
             }
             _ => {
-                return Err(io::Error::new(io::ErrorKind::InvalidInput,
-                                          "incorrect state for sending"))
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "incorrect state for sending",
+                ))
             }
         };
 
@@ -424,21 +437,18 @@ impl Encoder for OutboundHandshakeCodec {
                 };
                 Ok(())
             }
-            Err(e) => {
-                match e {
-                    GenError::BufferTooSmall(sz) => {
-                        Err(io::Error::new(io::ErrorKind::InvalidData,
-                                           format!("message ({}) larger than MTU ({})",
-                                                   sz,
-                                                   NTCP_MTU)))
-                    }
-                    GenError::InvalidOffset |
-                    GenError::CustomError(_) |
-                    GenError::NotYetImplemented => {
-                        Err(io::Error::new(io::ErrorKind::InvalidData, "could not generate"))
-                    }
-                }
-            }
+            Err(e) => match e {
+                GenError::BufferTooSmall(sz) => Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("message ({}) larger than MTU ({})", sz, NTCP_MTU),
+                )),
+                GenError::InvalidOffset
+                | GenError::CustomError(_)
+                | GenError::NotYetImplemented => Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "could not generate",
+                )),
+            },
         }
     }
 }
@@ -501,7 +511,10 @@ impl Decoder for Codec {
         let (consumed, f) = match frame::frame(&buf[0..self.decrypted]) {
             IResult::Incomplete(_) => return Ok(None),
             IResult::Error(e) => {
-                return Err(io::Error::new(io::ErrorKind::Other, format!("parse error: {:?}", e)))
+                return Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("parse error: {:?}", e),
+                ))
             }
             IResult::Done(i, frame) => (buf.offset(i), frame),
         };
@@ -529,24 +542,24 @@ impl Encoder for Codec {
                 // Encrypt message in-place
                 match self.aes.encrypt_blocks(buf) {
                     Some(end) if end == sz => Ok(()),
-                    _ => Err(io::Error::new(io::ErrorKind::InvalidData, "invalid serialization")),
+                    _ => Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "invalid serialization",
+                    )),
                 }
             }
-            Err(e) => {
-                match e {
-                    GenError::BufferTooSmall(sz) => {
-                        Err(io::Error::new(io::ErrorKind::InvalidData,
-                                           format!("message ({}) larger than MTU ({})",
-                                                   sz,
-                                                   NTCP_MTU)))
-                    }
-                    GenError::InvalidOffset |
-                    GenError::CustomError(_) |
-                    GenError::NotYetImplemented => {
-                        Err(io::Error::new(io::ErrorKind::InvalidData, "could not generate"))
-                    }
-                }
-            }
+            Err(e) => match e {
+                GenError::BufferTooSmall(sz) => Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("message ({}) larger than MTU ({})", sz, NTCP_MTU),
+                )),
+                GenError::InvalidOffset
+                | GenError::CustomError(_)
+                | GenError::NotYetImplemented => Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "could not generate",
+                )),
+            },
         }
     }
 }
@@ -565,25 +578,25 @@ fn gen_session_confirm_sig_msg(state: &SharedHandshakeState, own_ri: bool) -> Ve
     let mut buf = Vec::with_capacity(base_len);
     buf.extend(repeat(0).take(base_len));
     loop {
-        match frame::gen_session_confirm_sig_msg((&mut buf[..], 0),
-                                                 &state.dh_x,
-                                                 &state.dh_y,
-                                                 ri,
-                                                 state.ts_a,
-                                                 state.ts_b)
-                      .map(|tup| tup.1) {
+        match frame::gen_session_confirm_sig_msg(
+            (&mut buf[..], 0),
+            &state.dh_x,
+            &state.dh_y,
+            ri,
+            state.ts_a,
+            state.ts_b,
+        ).map(|tup| tup.1)
+        {
             Ok(sz) => {
                 buf.truncate(sz);
                 break;
             }
-            Err(e) => {
-                match e {
-                    GenError::BufferTooSmall(sz) => {
-                        buf.extend(repeat(0).take(sz - base_len));
-                    }
-                    _ => panic!("Couldn't serialize Signature message (Own RI? {})"),
+            Err(e) => match e {
+                GenError::BufferTooSmall(sz) => {
+                    buf.extend(repeat(0).take(sz - base_len));
                 }
-            }
+                _ => panic!("Couldn't serialize Signature message (Own RI? {})"),
+            },
         }
     }
     buf
@@ -655,15 +668,19 @@ struct OBSessionCreated {
 
 impl IBHandshake<OBSessionCreated> {
     fn next(self) -> (SessionCreated, IBHandshake<IBSessionConfirmA>) {
-        (SessionCreated {
-             dh_y: self.shared.dh_y.clone(),
-             hash: self.state.hxy,
-             ts_b: self.shared.ts_b,
-         },
-         IBHandshake {
-             shared: self.shared,
-             state: IBSessionConfirmA { rtt_timer: SystemTime::now() },
-         })
+        (
+            SessionCreated {
+                dh_y: self.shared.dh_y.clone(),
+                hash: self.state.hxy,
+                ts_b: self.shared.ts_b,
+            },
+            IBHandshake {
+                shared: self.shared,
+                state: IBSessionConfirmA {
+                    rtt_timer: SystemTime::now(),
+                },
+            },
+        )
     }
 }
 
@@ -690,11 +707,15 @@ struct OBSessionConfirmB {
 
 impl IBHandshake<OBSessionConfirmB> {
     fn next(self) -> (SessionConfirmB, IBHandshake<Established>) {
-        (SessionConfirmB { sig: self.state.sig },
-         IBHandshake {
-             shared: self.shared,
-             state: Established,
-         })
+        (
+            SessionConfirmB {
+                sig: self.state.sig,
+            },
+            IBHandshake {
+                shared: self.shared,
+                state: Established,
+            },
+        )
     }
 }
 
@@ -715,14 +736,19 @@ impl HandshakeStateTrait for IBHandshakeState {
                 // Part 2
                 debug!("Sending SessionCreated");
                 let (sc, sca_state) = state.next();
-                (Some(HandshakeFrame::SessionCreated(sc)),
-                 IBHandshakeState::SessionConfirmA(sca_state))
+                (
+                    Some(HandshakeFrame::SessionCreated(sc)),
+                    IBHandshakeState::SessionConfirmA(sca_state),
+                )
             }
             IBHandshakeState::SessionConfirmB(state) => {
                 // Part 4
                 debug!("Sending SessionConfirmB");
                 let (scb, e_state) = state.next();
-                (Some(HandshakeFrame::SessionConfirmB(scb)), IBHandshakeState::Established(e_state))
+                (
+                    Some(HandshakeFrame::SessionConfirmB(scb)),
+                    IBHandshakeState::Established(e_state),
+                )
             }
             state => (None, state),
         }
@@ -738,9 +764,13 @@ impl HandshakeStateTrait for IBHandshakeState {
                 let mut hxxorhb = Hash::digest(&sr.dh_x[..]);
                 hxxorhb.xor(&state.shared.own_ri.hash());
                 if hxxorhb != sr.hash {
-                    return (Err(io::Error::new(io::ErrorKind::InvalidData,
-                                               "Invalid SessionRequest HXxorHB")),
-                            IBHandshakeState::SessionRequest(state));
+                    return (
+                        Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "Invalid SessionRequest HXxorHB",
+                        )),
+                        IBHandshakeState::SessionRequest(state),
+                    );
                 }
                 // TODO check replays
                 let now = SystemTime::now();
@@ -754,12 +784,15 @@ impl HandshakeStateTrait for IBHandshakeState {
                 let hxy = Hash::digest(&xy);
                 (Ok(()), IBHandshakeState::SessionCreated(state.next(hxy)))
             }
-            (IBHandshakeState::SessionConfirmA(mut state),
-             HandshakeFrame::SessionConfirmA(sca)) => {
+            (
+                IBHandshakeState::SessionConfirmA(mut state),
+                HandshakeFrame::SessionConfirmA(sca),
+            ) => {
                 // Part 3
                 debug!("Received SessionConfirmA");
                 // Get peer skew
-                let rtt = state.state
+                let rtt = state
+                    .state
                     .rtt_timer
                     .elapsed()
                     .expect("Time went backwards?");
@@ -769,25 +802,34 @@ impl HandshakeStateTrait for IBHandshakeState {
                 state.shared.ts_a = sca.ts_a;
                 // Generate message to be verified
                 let msg = gen_session_confirm_sig_msg(&state.shared, true);
-                if !state.shared
-                        .ri_remote
-                        .as_ref()
-                        .unwrap()
-                        .signing_key
-                        .verify(&msg, &sca.sig) {
-                    return (Err(io::Error::new(io::ErrorKind::ConnectionRefused,
-                                               "Invalid SessionConfirmA signature")),
-                            IBHandshakeState::SessionConfirmA(state));
+                if !state
+                    .shared
+                    .ri_remote
+                    .as_ref()
+                    .unwrap()
+                    .signing_key
+                    .verify(&msg, &sca.sig)
+                {
+                    return (
+                        Err(io::Error::new(
+                            io::ErrorKind::ConnectionRefused,
+                            "Invalid SessionConfirmA signature",
+                        )),
+                        IBHandshakeState::SessionConfirmA(state),
+                    );
                 }
                 // Generate message to be signed
                 let msg = gen_session_confirm_sig_msg(&state.shared, false);
                 let sig = state.shared.own_key.sign(&msg);
                 (Ok(()), IBHandshakeState::SessionConfirmB(state.next(sig)))
             }
-            (state, _) => {
-                (Err(io::Error::new(io::ErrorKind::InvalidData, "Unexpected handshake frame")),
-                 state)
-            }
+            (state, _) => (
+                Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Unexpected handshake frame",
+                )),
+                state,
+            ),
         }
     }
 
@@ -817,12 +859,13 @@ struct OBSessionRequest {
 }
 
 impl OBHandshake<OBSessionRequest> {
-    fn new(own_ri: RouterIdentity,
-           own_key: SigningPrivateKey,
-           ri_remote: RouterIdentity,
-           dh_x: Vec<u8>,
-           hxxorhb: Hash)
-           -> Self {
+    fn new(
+        own_ri: RouterIdentity,
+        own_key: SigningPrivateKey,
+        ri_remote: RouterIdentity,
+        dh_x: Vec<u8>,
+        hxxorhb: Hash,
+    ) -> Self {
         OBHandshake {
             shared: SharedHandshakeState {
                 own_ri,
@@ -838,14 +881,18 @@ impl OBHandshake<OBSessionRequest> {
     }
 
     fn next(self) -> (SessionRequest, OBHandshake<IBSessionCreated>) {
-        (SessionRequest {
-             dh_x: self.shared.dh_x.clone(),
-             hash: self.state.hxxorhb,
-         },
-         OBHandshake {
-             shared: self.shared,
-             state: IBSessionCreated { rtt_timer: SystemTime::now() },
-         })
+        (
+            SessionRequest {
+                dh_x: self.shared.dh_x.clone(),
+                hash: self.state.hxxorhb,
+            },
+            OBHandshake {
+                shared: self.shared,
+                state: IBSessionCreated {
+                    rtt_timer: SystemTime::now(),
+                },
+            },
+        )
     }
 }
 
@@ -872,15 +919,17 @@ struct OBSessionConfirmA {
 
 impl OBHandshake<OBSessionConfirmA> {
     fn next(self) -> (SessionConfirmA, OBHandshake<IBSessionConfirmB>) {
-        (SessionConfirmA {
-             ri_a: self.shared.own_ri.clone(),
-             ts_a: self.shared.ts_a,
-             sig: self.state.sig,
-         },
-         OBHandshake {
-             shared: self.shared,
-             state: IBSessionConfirmB,
-         })
+        (
+            SessionConfirmA {
+                ri_a: self.shared.own_ri.clone(),
+                ts_a: self.shared.ts_a,
+                sig: self.state.sig,
+            },
+            OBHandshake {
+                shared: self.shared,
+                state: IBSessionConfirmB,
+            },
+        )
     }
 }
 
@@ -914,15 +963,19 @@ impl HandshakeStateTrait for OBHandshakeState {
                 // Part 1
                 debug!("Sending SessionRequest");
                 let (sr, sc_state) = state.next();
-                (Some(HandshakeFrame::SessionRequest(sr)),
-                 OBHandshakeState::SessionCreated(sc_state))
+                (
+                    Some(HandshakeFrame::SessionRequest(sr)),
+                    OBHandshakeState::SessionCreated(sc_state),
+                )
             }
             OBHandshakeState::SessionConfirmA(state) => {
                 // Part 3
                 debug!("Sending SessionConfirmA");
                 let (sca, scb_state) = state.next();
-                (Some(HandshakeFrame::SessionConfirmA(sca)),
-                 OBHandshakeState::SessionConfirmB(scb_state))
+                (
+                    Some(HandshakeFrame::SessionConfirmA(sca)),
+                    OBHandshakeState::SessionConfirmB(scb_state),
+                )
             }
             state => (None, state),
         }
@@ -934,7 +987,8 @@ impl HandshakeStateTrait for OBHandshakeState {
                 // Part 2
                 debug!("Received SessionCreated");
                 // Get peer skew
-                let rtt = state.state
+                let rtt = state
+                    .state
                     .rtt_timer
                     .elapsed()
                     .expect("Time went backwards?");
@@ -951,9 +1005,13 @@ impl HandshakeStateTrait for OBHandshakeState {
                 // Check part 2 (which happens to be hash of first part of signed message)
                 let hxy = Hash::digest(&msg[..512]);
                 if hxy != sc.hash {
-                    return (Err(io::Error::new(io::ErrorKind::InvalidData,
-                                               "Invalid SessionCreated hash")),
-                            OBHandshakeState::SessionCreated(state));
+                    return (
+                        Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "Invalid SessionCreated hash",
+                        )),
+                        OBHandshakeState::SessionCreated(state),
+                    );
                 }
                 let sig = state.shared.own_key.sign(&msg);
                 (Ok(()), OBHandshakeState::SessionConfirmA(state.next(sig)))
@@ -963,22 +1021,31 @@ impl HandshakeStateTrait for OBHandshakeState {
                 debug!("Received SessionConfirmB");
                 // Generate message to be verified
                 let msg = gen_session_confirm_sig_msg(&state.shared, true);
-                if !state.shared
-                        .ri_remote
-                        .as_ref()
-                        .unwrap()
-                        .signing_key
-                        .verify(&msg, &scb.sig) {
-                    return (Err(io::Error::new(io::ErrorKind::ConnectionRefused,
-                                               "Invalid SessionConfirmB signature")),
-                            OBHandshakeState::SessionConfirmB(state));
+                if !state
+                    .shared
+                    .ri_remote
+                    .as_ref()
+                    .unwrap()
+                    .signing_key
+                    .verify(&msg, &scb.sig)
+                {
+                    return (
+                        Err(io::Error::new(
+                            io::ErrorKind::ConnectionRefused,
+                            "Invalid SessionConfirmB signature",
+                        )),
+                        OBHandshakeState::SessionConfirmB(state),
+                    );
                 }
                 (Ok(()), OBHandshakeState::Established(state.next()))
             }
-            (state, _) => {
-                (Err(io::Error::new(io::ErrorKind::InvalidData, "Unexpected handshake frame")),
-                 state)
-            }
+            (state, _) => (
+                Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Unexpected handshake frame",
+                )),
+                state,
+            ),
         }
     }
 
@@ -1000,17 +1067,19 @@ struct HandshakeTransport<T, C, S> {
 }
 
 impl<T, C, S> HandshakeTransport<T, C, S>
-    where T: AsyncRead + AsyncWrite,
-          T: Send + 'static,
-          C: Decoder<Item = HandshakeFrame, Error = io::Error>,
-          C: Encoder<Item = HandshakeFrame, Error = io::Error>,
-          S: HandshakeStateTrait
+where
+    T: AsyncRead + AsyncWrite,
+    T: Send + 'static,
+    C: Decoder<Item = HandshakeFrame, Error = io::Error>,
+    C: Encoder<Item = HandshakeFrame, Error = io::Error>,
+    S: HandshakeStateTrait,
 {
     /// Returns a future of a stream of `Framed<T, Codec>`s that are connected
-    fn listen(stream: T,
-              own_ri: RouterIdentity,
-              own_key: SigningPrivateKey)
-              -> Box<Future<Item = Framed<T, Codec>, Error = io::Error>> {
+    fn listen(
+        stream: T,
+        own_ri: RouterIdentity,
+        own_key: SigningPrivateKey,
+    ) -> Box<Future<Item = Framed<T, Codec>, Error = io::Error>> {
         // Generate a new DH pair
         let dh_key_builder = DHSessionKeyBuilder::new();
         let dh_y = dh_key_builder.get_pub();
@@ -1021,30 +1090,41 @@ impl<T, C, S> HandshakeTransport<T, C, S>
         let codec = InboundHandshakeCodec::new(dh_key_builder, iv_enc);
         let mut t = HandshakeTransport {
             upstream: stream.framed(codec),
-            state: Some(IBHandshakeState::SessionRequest(IBHandshake::new(own_ri, own_key, dh_y))),
+            state: Some(IBHandshakeState::SessionRequest(IBHandshake::new(
+                own_ri,
+                own_key,
+                dh_y,
+            ))),
         };
 
         if let Err(e) = t.send_and_handle_frames() {
             let err = format!("Failed to handle frames: {:?}", e);
-            return Box::new(future::err(io::Error::new(io::ErrorKind::ConnectionAborted, err)));
+            return Box::new(future::err(io::Error::new(
+                io::ErrorKind::ConnectionAborted,
+                err,
+            )));
         }
 
         let mut connector = TransportConnector { transport: Some(t) };
 
         if let Err(e) = connector.poll() {
             let err = format!("Failed to handle frames: {:?}", e);
-            return Box::new(future::err(io::Error::new(io::ErrorKind::ConnectionAborted, err)));
+            return Box::new(future::err(io::Error::new(
+                io::ErrorKind::ConnectionAborted,
+                err,
+            )));
         }
 
         Box::new(connector)
     }
 
     /// Returns a future of an `Framed<T, Codec>` that is connected
-    fn connect(stream: T,
-               own_ri: RouterIdentity,
-               own_key: SigningPrivateKey,
-               ri_remote: RouterIdentity)
-               -> Box<Future<Item = Framed<T, Codec>, Error = io::Error>> {
+    fn connect(
+        stream: T,
+        own_ri: RouterIdentity,
+        own_key: SigningPrivateKey,
+        ri_remote: RouterIdentity,
+    ) -> Box<Future<Item = Framed<T, Codec>, Error = io::Error>> {
         // Generate a new DH pair
         let dh_key_builder = DHSessionKeyBuilder::new();
         let dh_x = dh_key_builder.get_pub();
@@ -1057,23 +1137,31 @@ impl<T, C, S> HandshakeTransport<T, C, S>
         let codec = OutboundHandshakeCodec::new(dh_key_builder, iv_enc, ri_remote.clone());
         let mut t = HandshakeTransport {
             upstream: stream.framed(codec),
-            state: Some(OBHandshakeState::SessionRequest(OBHandshake::new(own_ri,
-                                                                          own_key,
-                                                                          ri_remote,
-                                                                          dh_x,
-                                                                          hxxorhb))),
+            state: Some(OBHandshakeState::SessionRequest(OBHandshake::new(
+                own_ri,
+                own_key,
+                ri_remote,
+                dh_x,
+                hxxorhb,
+            ))),
         };
 
         if let Err(e) = t.send_and_handle_frames() {
             let err = format!("Failed to handle frames: {:?}", e);
-            return Box::new(future::err(io::Error::new(io::ErrorKind::ConnectionAborted, err)));
+            return Box::new(future::err(io::Error::new(
+                io::ErrorKind::ConnectionAborted,
+                err,
+            )));
         }
 
         let mut connector = TransportConnector { transport: Some(t) };
 
         if let Err(e) = connector.poll() {
             let err = format!("Failed to handle frames: {:?}", e);
-            return Box::new(future::err(io::Error::new(io::ErrorKind::ConnectionAborted, err)));
+            return Box::new(future::err(io::Error::new(
+                io::ErrorKind::ConnectionAborted,
+                err,
+            )));
         }
 
         Box::new(connector)
@@ -1128,11 +1216,12 @@ impl<T, C, S> HandshakeTransport<T, C, S>
 }
 
 impl<T, C, S> Stream for HandshakeTransport<T, C, S>
-    where T: AsyncRead + AsyncWrite,
-          T: Send + 'static,
-          C: Decoder<Item = HandshakeFrame, Error = io::Error>,
-          C: Encoder<Item = HandshakeFrame, Error = io::Error>,
-          S: HandshakeStateTrait
+where
+    T: AsyncRead + AsyncWrite,
+    T: Send + 'static,
+    C: Decoder<Item = HandshakeFrame, Error = io::Error>,
+    C: Encoder<Item = HandshakeFrame, Error = io::Error>,
+    S: HandshakeStateTrait,
 {
     type Item = ();
     type Error = io::Error;
@@ -1158,10 +1247,11 @@ impl<T, C, S> Stream for HandshakeTransport<T, C, S>
 }
 
 impl<T, C, S> Sink for HandshakeTransport<T, C, S>
-    where T: AsyncWrite,
-          T: Send,
-          C: Decoder<Item = HandshakeFrame, Error = io::Error>,
-          C: Encoder<Item = HandshakeFrame, Error = io::Error>
+where
+    T: AsyncWrite,
+    T: Send,
+    C: Decoder<Item = HandshakeFrame, Error = io::Error>,
+    C: Encoder<Item = HandshakeFrame, Error = io::Error>,
 {
     type SinkItem = HandshakeFrame;
     type SinkError = io::Error;
@@ -1184,7 +1274,8 @@ struct TransportConnector<T, C, S> {
 }
 
 impl<T, C, S> TransportConnector<T, C, S>
-    where Codec: From<C>
+where
+    Codec: From<C>,
 {
     fn transmute_transport(transport: HandshakeTransport<T, C, S>) -> Framed<T, Codec> {
         let (parts, established) = transport.upstream.into_parts_and_codec();
@@ -1193,12 +1284,13 @@ impl<T, C, S> TransportConnector<T, C, S>
 }
 
 impl<T, C, S> Future for TransportConnector<T, C, S>
-    where T: AsyncRead + AsyncWrite,
-          T: Send + 'static,
-          C: Decoder<Item = HandshakeFrame, Error = io::Error>,
-          C: Encoder<Item = HandshakeFrame, Error = io::Error>,
-          Codec: From<C>,
-          S: HandshakeStateTrait
+where
+    T: AsyncRead + AsyncWrite,
+    T: Send + 'static,
+    C: Decoder<Item = HandshakeFrame, Error = io::Error>,
+    C: Encoder<Item = HandshakeFrame, Error = io::Error>,
+    Codec: From<C>,
+    S: HandshakeStateTrait,
 {
     type Item = Framed<T, Codec>;
     type Error = io::Error;
@@ -1209,15 +1301,27 @@ impl<T, C, S> Future for TransportConnector<T, C, S>
         //we might have received a frame before here
         transport.send_and_handle_frames()?;
 
-        if transport.state.as_ref().map_or(false, |s| s.is_established()) {
-            return Ok(Async::Ready(TransportConnector::transmute_transport(transport)));
+        if transport
+            .state
+            .as_ref()
+            .map_or(false, |s| s.is_established())
+        {
+            return Ok(Async::Ready(TransportConnector::transmute_transport(
+                transport,
+            )));
         }
 
         match transport.poll()? {
             Async::Ready(Some(_)) => {
-                if transport.state.as_ref().map_or(false, |s| s.is_established()) {
+                if transport
+                    .state
+                    .as_ref()
+                    .map_or(false, |s| s.is_established())
+                {
                     // Upstream had frames available and we're connected, the transport is ready
-                    Ok(Async::Ready(TransportConnector::transmute_transport(transport)))
+                    Ok(Async::Ready(TransportConnector::transmute_transport(
+                        transport,
+                    )))
                 } else {
                     // Upstream had frames but we're not yet connected, continue polling
                     let poll_ret = transport.poll();
@@ -1258,21 +1362,21 @@ impl Engine {
             info!("Incoming socket!");
             // Execute the handshake
             let conn =
-                HandshakeTransport::<TcpStream,
-                                     InboundHandshakeCodec,
-                                     IBHandshakeState>::listen(socket,
-                                                               own_ri.clone(),
-                                                               own_key.clone());
+                HandshakeTransport::<TcpStream, InboundHandshakeCodec, IBHandshakeState>::listen(
+                    socket,
+                    own_ri.clone(),
+                    own_key.clone(),
+                );
 
             // Once connected:
             let process_conn = conn.and_then(|conn| {
                 info!("Connection established!");
                 // For every message received:
                 conn.for_each(|frame| {
-                                  debug!("Received frame: {:?}", frame);
-                                  // TODO: Do something
-                                  Ok(())
-                              })
+                    debug!("Received frame: {:?}", frame);
+                    // TODO: Do something
+                    Ok(())
+                })
             });
 
             handle.spawn(process_conn.map_err(|_| ()));
@@ -1283,19 +1387,25 @@ impl Engine {
         core.run(server).unwrap();
     }
 
-    pub fn connect(&self,
-                   own_ri: RouterIdentity,
-                   own_key: SigningPrivateKey,
-                   peer_ri: RouterIdentity,
-                   addr: &SocketAddr,
-                   handle: &Handle)
-                   -> Box<Future<Item = Framed<TcpStream, Codec>, Error = io::Error>> {
+    pub fn connect(
+        &self,
+        own_ri: RouterIdentity,
+        own_key: SigningPrivateKey,
+        peer_ri: RouterIdentity,
+        addr: &SocketAddr,
+        handle: &Handle,
+    ) -> Box<Future<Item = Framed<TcpStream, Codec>, Error = io::Error>> {
         // Connect to the peer
         // Return a transport ready for sending and receiving Frames
         // The layer above will convert I2NP packets to Frames
         // (or should the Engine handle timesync packets itself?)
         let transport = Box::new(TcpStream::connect(&addr, &handle).and_then(|socket| {
-            HandshakeTransport::<TcpStream, OutboundHandshakeCodec, OBHandshakeState>::connect(socket, own_ri, own_key, peer_ri)
+            HandshakeTransport::<TcpStream, OutboundHandshakeCodec, OBHandshakeState>::connect(
+                socket,
+                own_ri,
+                own_key,
+                peer_ri,
+            )
         }));
 
         // Add a timeout
@@ -1306,9 +1416,10 @@ impl Engine {
                 Ok((Ok(conn), _timeout)) => Ok(conn),
 
                 // The timeout fired before the handshake finished
-                Ok((Err(()), _handshake)) => {
-                    Err(io::Error::new(io::ErrorKind::Other, "timeout during handshake"))
-                }
+                Ok((Err(()), _handshake)) => Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    "timeout during handshake",
+                )),
 
                 // One of the futures (handshake or timeout) hit an error
                 Err((e, _other)) => Err(e),

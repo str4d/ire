@@ -2,14 +2,14 @@ use cookie_factory::*;
 use flate2::Compression;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
-use nom::{be_u8, be_u16, be_u32, ErrorKind};
-use sha2::{Sha256, Digest};
+use nom::{ErrorKind, be_u16, be_u32, be_u8};
+use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
 
 use crypto::frame::{gen_session_key, session_key};
-use data::frame::{certificate, gen_certificate, gen_hash, gen_i2p_date, gen_lease_set,
-                  gen_router_info, gen_session_tag, gen_tunnel_id, hash, i2p_date, lease_set,
-                  router_info, session_tag, tunnel_id};
+use data::frame::{certificate, gen_certificate, gen_hash, gen_lease_set, gen_router_info,
+                  gen_session_tag, gen_tunnel_id, hash, lease_set, router_info, session_tag,
+                  tunnel_id, gen_i2p_date, i2p_date};
 use super::*;
 
 //
@@ -32,35 +32,47 @@ fn iv<'a>(input: &'a [u8]) -> IResult<&'a [u8], [u8; 16]> {
 // Common structures
 //
 
-pub fn build_request_record<'a>(input: &'a [u8],
-                                to_peer: Hash)
-                                -> IResult<&'a [u8], BuildRequestRecord> {
-    do_parse!(input,
-              receive_tid: tunnel_id >> our_ident: hash >> next_tid: tunnel_id >>
-              next_ident: hash >> layer_key: session_key >> iv_key: session_key >>
-              reply_key: session_key >> reply_iv: iv >> flag: be_u8 >>
-              request_time: be_u32 >> send_msg_id: be_u32 >> take!(29) >>
-              (BuildRequestRecord {
-                   to_peer,
-                   receive_tid,
-                   our_ident,
-                   next_tid,
-                   next_ident,
-                   layer_key,
-                   iv_key,
-                   reply_key,
-                   reply_iv,
-                   flag,
-                   request_time,
-                   send_msg_id,
-               }))
+pub fn build_request_record<'a>(
+    input: &'a [u8],
+    to_peer: Hash,
+) -> IResult<&'a [u8], BuildRequestRecord> {
+    do_parse!(
+        input,
+        receive_tid:  tunnel_id >>
+        our_ident:    hash >>
+        next_tid:     tunnel_id >>
+        next_ident:   hash >>
+        layer_key:    session_key >>
+        iv_key:       session_key >>
+        reply_key:    session_key >>
+        reply_iv:     iv >>
+        flag:         be_u8 >>
+        request_time: be_u32 >>
+        send_msg_id:  be_u32 >>
+                      take!(29) >>
+        (BuildRequestRecord {
+            to_peer,
+            receive_tid,
+            our_ident,
+            next_tid,
+            next_ident,
+            layer_key,
+            iv_key,
+            reply_key,
+            reply_iv,
+            flag,
+            request_time,
+            send_msg_id,
+        })
+    )
 }
 
-fn validate_build_response_record<'a>(input: &'a [u8],
-                                      hash: Hash,
-                                      padding: &[u8],
-                                      reply: u8)
-                                      -> IResult<&'a [u8], ()> {
+fn validate_build_response_record<'a>(
+    input: &'a [u8],
+    hash: Hash,
+    padding: &[u8],
+    reply: u8,
+) -> IResult<&'a [u8], ()> {
     let mut hasher = Sha256::default();
     hasher.input(padding);
     hasher.input(&[reply]);
@@ -89,11 +101,7 @@ named!(pub build_response_record<BuildResponseRecord>,
 // DatabaseStore
 
 fn compressed_ri<'a>(input: &'a [u8]) -> IResult<&'a [u8], RouterInfo> {
-    match do_parse!(input,
-        size:    be_u16 >>
-        payload: take!(size) >>
-        (payload)
-    ) {
+    match do_parse!(input, size: be_u16 >> payload: take!(size) >> (payload)) {
         IResult::Done(i, payload) => {
             let mut buf = Vec::new();
             let mut d = GzDecoder::new(payload).unwrap();
@@ -112,9 +120,10 @@ fn compressed_ri<'a>(input: &'a [u8]) -> IResult<&'a [u8], RouterInfo> {
     }
 }
 
-fn gen_compressed_ri<'a>(input: (&'a mut [u8], usize),
-                         ri: &RouterInfo)
-                         -> Result<(&'a mut [u8], usize), GenError> {
+fn gen_compressed_ri<'a>(
+    input: (&'a mut [u8], usize),
+    ri: &RouterInfo,
+) -> Result<(&'a mut [u8], usize), GenError> {
     let mut buf = Vec::new();
     gen_router_info((&mut buf, 0), ri);
     let mut e = GzEncoder::new(Vec::new(), Compression::Best);
@@ -125,68 +134,82 @@ fn gen_compressed_ri<'a>(input: (&'a mut [u8], usize),
     }
 }
 
-named!(reply_path<Option<ReplyPath>>,
+named!(
+    reply_path<Option<ReplyPath>>,
     do_parse!(
         reply_tok: be_u32 >>
-        reply: cond!(reply_tok > 0, do_parse!(
-            reply_tid: tunnel_id >>
-            reply_gw:  hash >>
-            (ReplyPath {
-                token: reply_tok,
-                tid: reply_tid,
-                gateway: reply_gw,
-            })
-        )) >>
+        reply: cond!(
+            reply_tok > 0,
+            do_parse!(
+                reply_tid: tunnel_id >>
+                reply_gw:  hash >>
+                (ReplyPath {
+                    token: reply_tok,
+                    tid: reply_tid,
+                    gateway: reply_gw,
+                })
+            )
+        ) >>
         (reply)
     )
 );
 
-fn gen_reply_path<'a>(input: (&'a mut [u8], usize),
-                      reply: &Option<ReplyPath>)
-                      -> Result<(&'a mut [u8], usize), GenError> {
+fn gen_reply_path<'a>(
+    input: (&'a mut [u8], usize),
+    reply: &Option<ReplyPath>,
+) -> Result<(&'a mut [u8], usize), GenError> {
     match *reply {
-        Some(ref path) => {
-            do_gen!(input,
-                    gen_be_u32!(path.token) >> gen_tunnel_id(&path.tid) >>
-                    gen_hash(&path.gateway))
-        }
+        Some(ref path) => do_gen!(
+            input,
+            gen_be_u32!(path.token) >> gen_tunnel_id(&path.tid) >> gen_hash(&path.gateway)
+        ),
         None => gen_be_u32!(input, 0),
     }
 }
 
-named!(database_store<MessagePayload>,
+named!(
+    database_store<MessagePayload>,
     do_parse!(
-        key:       hash >>
-        ds_type:   be_u8 >>
-        reply:     reply_path >>
+        key:     hash >>
+        ds_type: be_u8 >>
+        reply:   reply_path >>
         data: switch!(value!(ds_type),
             0 => do_parse!(ri: compressed_ri >> (DatabaseStoreData::RI(ri))) |
             1 => do_parse!(ls: lease_set >> (DatabaseStoreData::LS(ls)))
-        ) >>
-        (MessagePayload::DatabaseStore(DatabaseStore { key, ds_type, reply, data }))
+        ) >> (MessagePayload::DatabaseStore(DatabaseStore {
+            key,
+            ds_type,
+            reply,
+            data,
+        }))
     )
 );
 
-fn gen_database_store_data<'a>(input: (&'a mut [u8], usize),
-                               data: &DatabaseStoreData)
-                               -> Result<(&'a mut [u8], usize), GenError> {
+fn gen_database_store_data<'a>(
+    input: (&'a mut [u8], usize),
+    data: &DatabaseStoreData,
+) -> Result<(&'a mut [u8], usize), GenError> {
     match data {
         &DatabaseStoreData::RI(ref ri) => gen_compressed_ri(input, &ri),
         &DatabaseStoreData::LS(ref ls) => gen_lease_set(input, &ls),
     }
 }
 
-fn gen_database_store<'a>(input: (&'a mut [u8], usize),
-                          ds: &DatabaseStore)
-                          -> Result<(&'a mut [u8], usize), GenError> {
-    do_gen!(input,
-            gen_hash(&ds.key) >> gen_be_u8!(ds.ds_type) >> gen_reply_path(&ds.reply) >>
-            gen_database_store_data(&ds.data))
+fn gen_database_store<'a>(
+    input: (&'a mut [u8], usize),
+    ds: &DatabaseStore,
+) -> Result<(&'a mut [u8], usize), GenError> {
+    do_gen!(
+        input,
+        gen_hash(&ds.key) >> gen_be_u8!(ds.ds_type) >> gen_reply_path(&ds.reply)
+            >> gen_database_store_data(&ds.data)
+    )
 }
 
 // DatabaseLookup
 
-named!(database_lookup_flags<DatabaseLookupFlags>,
+named!(
+    database_lookup_flags<DatabaseLookupFlags>,
     bits!(do_parse!(
                      take_bits!(u8, 4) >>
         lookup_type: take_bits!(u8, 2) >>
@@ -200,9 +223,10 @@ named!(database_lookup_flags<DatabaseLookupFlags>,
     ))
 );
 
-fn gen_database_lookup_flags<'a>(input: (&'a mut [u8], usize),
-                                 flags: &DatabaseLookupFlags)
-                                 -> Result<(&'a mut [u8], usize), GenError> {
+fn gen_database_lookup_flags<'a>(
+    input: (&'a mut [u8], usize),
+    flags: &DatabaseLookupFlags,
+) -> Result<(&'a mut [u8], usize), GenError> {
     let mut x: u8 = 0;
     if flags.delivery {
         x |= 0b01;
@@ -214,7 +238,8 @@ fn gen_database_lookup_flags<'a>(input: (&'a mut [u8], usize),
     gen_be_u8!(input, x)
 }
 
-named!(database_lookup<MessagePayload>,
+named!(
+    database_lookup<MessagePayload>,
     do_parse!(
         key:            hash >>
         from:           hash >>
@@ -235,31 +260,39 @@ named!(database_lookup<MessagePayload>,
     )
 );
 
-fn gen_database_lookup<'a>(input: (&'a mut [u8], usize),
-                           dl: &DatabaseLookup)
-                           -> Result<(&'a mut [u8], usize), GenError> {
-    do_gen!(input,
+fn gen_database_lookup<'a>(
+    input: (&'a mut [u8], usize),
+    dl: &DatabaseLookup,
+) -> Result<(&'a mut [u8], usize), GenError> {
+    do_gen!(
+        input,
         gen_hash(&dl.key) >>
         gen_hash(&dl.from) >>
         gen_database_lookup_flags(&dl.flags) >>
-        gen_cond!(dl.flags.delivery, do_gen!(
-            gen_tunnel_id(dl.reply_tid.as_ref().unwrap())
-        )) >>
+        gen_cond!(
+            dl.flags.delivery,
+            do_gen!(gen_tunnel_id(dl.reply_tid.as_ref().unwrap()))
+        ) >>
         gen_be_u16!(dl.excluded_peers.len() as u16) >>
         gen_many!(&dl.excluded_peers, gen_hash) >>
-        gen_cond!(dl.flags.encryption, do_gen!(
-            gen_session_key(dl.reply_key.as_ref().unwrap())
-        )) >>
-        gen_cond!(dl.flags.encryption, do_gen!(
-            gen_be_u8!(dl.tags.as_ref().unwrap().len() as u8) >>
-            gen_many!(dl.tags.as_ref().unwrap(), gen_session_tag)
-        ))
+        gen_cond!(
+            dl.flags.encryption,
+            do_gen!(gen_session_key(dl.reply_key.as_ref().unwrap()))
+        ) >>
+        gen_cond!(
+            dl.flags.encryption,
+            do_gen!(
+                gen_be_u8!(dl.tags.as_ref().unwrap().len() as u8) >>
+                gen_many!(dl.tags.as_ref().unwrap(), gen_session_tag)
+            )
+        )
     )
 }
 
 // DatabaseSearchReply
 
-named!(database_search_reply<MessagePayload>,
+named!(
+    database_search_reply<MessagePayload>,
     do_parse!(
         key:   hash >>
         peers: length_count!(be_u8, hash) >>
@@ -268,10 +301,12 @@ named!(database_search_reply<MessagePayload>,
     )
 );
 
-fn gen_database_search_reply<'a>(input: (&'a mut [u8], usize),
-                                 dsr: &DatabaseSearchReply)
-                                 -> Result<(&'a mut [u8], usize), GenError> {
-    do_gen!(input,
+fn gen_database_search_reply<'a>(
+    input: (&'a mut [u8], usize),
+    dsr: &DatabaseSearchReply,
+) -> Result<(&'a mut [u8], usize), GenError> {
+    do_gen!(
+        input,
         gen_hash(&dsr.key) >>
         gen_be_u8!(dsr.peers.len() as u8) >>
         gen_many!(&dsr.peers, gen_hash) >>
@@ -281,7 +316,8 @@ fn gen_database_search_reply<'a>(input: (&'a mut [u8], usize),
 
 // DeliveryStatus
 
-named!(delivery_status<MessagePayload>,
+named!(
+    delivery_status<MessagePayload>,
     do_parse!(
         msg_id:     be_u32 >>
         time_stamp: i2p_date >>
@@ -289,15 +325,20 @@ named!(delivery_status<MessagePayload>,
     )
 );
 
-fn gen_delivery_status<'a>(input: (&'a mut [u8], usize),
-                           ds: &DeliveryStatus)
-                           -> Result<(&'a mut [u8], usize), GenError> {
-    do_gen!(input, gen_be_u32!(ds.msg_id) >> gen_i2p_date(&ds.time_stamp))
+fn gen_delivery_status<'a>(
+    input: (&'a mut [u8], usize),
+    ds: &DeliveryStatus,
+) -> Result<(&'a mut [u8], usize), GenError> {
+    do_gen!(
+        input,
+        gen_be_u32!(ds.msg_id) >> gen_i2p_date(&ds.time_stamp)
+    )
 }
 
 // Garlic
 
-named!(garlic_clove_delivery_instructions<GarlicCloveDeliveryInstructions>,
+named!(
+    garlic_clove_delivery_instructions<GarlicCloveDeliveryInstructions>,
     do_parse!(
         flags: bits!(do_parse!(
             encrypted:     take_bits!(u8, 1) >>
@@ -322,9 +363,10 @@ named!(garlic_clove_delivery_instructions<GarlicCloveDeliveryInstructions>,
     )
 );
 
-fn gen_garlic_clove_delivery_instructions<'a>(input: (&'a mut [u8], usize),
-                                              gcdi: &GarlicCloveDeliveryInstructions)
-                                              -> Result<(&'a mut [u8], usize), GenError> {
+fn gen_garlic_clove_delivery_instructions<'a>(
+    input: (&'a mut [u8], usize),
+    gcdi: &GarlicCloveDeliveryInstructions,
+) -> Result<(&'a mut [u8], usize), GenError> {
     let mut flags: u8 = 0;
     if gcdi.encrypted {
         flags |= 0b10000000;
@@ -333,38 +375,52 @@ fn gen_garlic_clove_delivery_instructions<'a>(input: (&'a mut [u8], usize),
     if gcdi.delay_set {
         flags |= 0b10000;
     }
-    do_gen!(input,
+    do_gen!(
+        input,
         gen_be_u8!(flags) >>
-        gen_cond!(gcdi.encrypted, do_gen!(
-            gen_session_key(gcdi.session_key.as_ref().unwrap())
-        )) >>
-        gen_cond!(gcdi.delivery_type != 0, do_gen!(
-            gen_hash(gcdi.to_hash.as_ref().unwrap())
-        )) >>
-        gen_cond!(gcdi.delivery_type == 3, do_gen!(
-            gen_tunnel_id(gcdi.tid.as_ref().unwrap())
-        )) >>
-        gen_cond!(gcdi.delay_set, do_gen!(
-            gen_be_u32!(gcdi.delay.unwrap())
-        ))
+        gen_cond!(
+            gcdi.encrypted,
+            do_gen!(gen_session_key(gcdi.session_key.as_ref().unwrap()))
+        ) >>
+        gen_cond!(
+            gcdi.delivery_type != 0,
+            do_gen!(gen_hash(gcdi.to_hash.as_ref().unwrap()))
+        ) >>
+        gen_cond!(
+            gcdi.delivery_type == 3,
+            do_gen!(gen_tunnel_id(gcdi.tid.as_ref().unwrap()))
+        ) >>
+        gen_cond!(
+            gcdi.delay_set,
+            do_gen!(gen_be_u32!(gcdi.delay.unwrap()))
+        )
     )
 }
 
-named!(garlic_clove<GarlicClove>,
+named!(
+    garlic_clove<GarlicClove>,
     do_parse!(
         delivery_instructions: garlic_clove_delivery_instructions >>
         msg:                   message >>
         clove_id:              be_u32 >>
         expiration:            i2p_date >>
         cert:                  certificate >>
-        (GarlicClove { delivery_instructions, msg, clove_id, expiration, cert })
+        (GarlicClove {
+            delivery_instructions,
+            msg,
+            clove_id,
+            expiration,
+            cert,
+        })
     )
 );
 
-fn gen_garlic_clove<'a>(input: (&'a mut [u8], usize),
-                        clove: &GarlicClove)
-                        -> Result<(&'a mut [u8], usize), GenError> {
-    do_gen!(input,
+fn gen_garlic_clove<'a>(
+    input: (&'a mut [u8], usize),
+    clove: &GarlicClove,
+) -> Result<(&'a mut [u8], usize), GenError> {
+    do_gen!(
+        input,
         gen_garlic_clove_delivery_instructions(&clove.delivery_instructions) >>
         gen_message(&clove.msg) >>
         gen_be_u32!(clove.clove_id) >>
@@ -373,20 +429,28 @@ fn gen_garlic_clove<'a>(input: (&'a mut [u8], usize),
     )
 }
 
-named!(garlic<MessagePayload>,
+named!(
+    garlic<MessagePayload>,
     do_parse!(
         cloves:     length_count!(be_u8, garlic_clove) >>
         cert:       certificate >>
         msg_id:     be_u32 >>
         expiration: i2p_date >>
-        (MessagePayload::Garlic(Garlic { cloves, cert, msg_id, expiration }))
+        (MessagePayload::Garlic(Garlic {
+            cloves,
+            cert,
+            msg_id,
+            expiration,
+        }))
     )
 );
 
-fn gen_garlic<'a>(input: (&'a mut [u8], usize),
-                  g: &Garlic)
-                  -> Result<(&'a mut [u8], usize), GenError> {
-    do_gen!(input,
+fn gen_garlic<'a>(
+    input: (&'a mut [u8], usize),
+    g: &Garlic,
+) -> Result<(&'a mut [u8], usize), GenError> {
+    do_gen!(
+        input,
         gen_be_u8!(g.cloves.len() as u8) >>
         gen_many!(&g.cloves, gen_garlic_clove) >>
         gen_certificate(&g.cert) >>
@@ -397,7 +461,8 @@ fn gen_garlic<'a>(input: (&'a mut [u8], usize),
 
 // TunnelData
 
-named!(tunnel_data<MessagePayload>,
+named!(
+    tunnel_data<MessagePayload>,
     do_parse!(
         tid:  tunnel_id >>
         data: take!(1024) >>
@@ -405,37 +470,45 @@ named!(tunnel_data<MessagePayload>,
     )
 );
 
-fn gen_tunnel_data<'a>(input: (&'a mut [u8], usize),
-                       td: &TunnelData)
-                       -> Result<(&'a mut [u8], usize), GenError> {
+fn gen_tunnel_data<'a>(
+    input: (&'a mut [u8], usize),
+    td: &TunnelData,
+) -> Result<(&'a mut [u8], usize), GenError> {
     do_gen!(input, gen_tunnel_id(&td.tid) >> gen_slice!(td.data))
 }
 
 // TunnelGateway
 
-named!(tunnel_gateway<MessagePayload>,
+named!(
+    tunnel_gateway<MessagePayload>,
     do_parse!(
         tid:  tunnel_id >>
         data: length_bytes!(be_u16) >>
-        (MessagePayload::TunnelGateway(TunnelGateway { tid, data: Vec::from(data) }))
+        (MessagePayload::TunnelGateway(TunnelGateway {
+            tid,
+            data: Vec::from(data),
+        }))
     )
 );
 
-fn gen_tunnel_gateway<'a>(input: (&'a mut [u8], usize),
-                          tg: &TunnelGateway)
-                          -> Result<(&'a mut [u8], usize), GenError> {
+fn gen_tunnel_gateway<'a>(
+    input: (&'a mut [u8], usize),
+    tg: &TunnelGateway,
+) -> Result<(&'a mut [u8], usize), GenError> {
     do_gen!(input, gen_tunnel_id(&tg.tid) >> gen_slice!(tg.data))
 }
 
 // Data
 
-named!(data<MessagePayload>, do_parse!(
-    data: length_bytes!(be_u32) >> (MessagePayload::Data(Vec::from(data)))
-));
+named!(
+    data<MessagePayload>,
+    do_parse!(data: length_bytes!(be_u32) >> (MessagePayload::Data(Vec::from(data))))
+);
 
-fn gen_data<'a>(input: (&'a mut [u8], usize),
-                d: &Vec<u8>)
-                -> Result<(&'a mut [u8], usize), GenError> {
+fn gen_data<'a>(
+    input: (&'a mut [u8], usize),
+    d: &Vec<u8>,
+) -> Result<(&'a mut [u8], usize), GenError> {
     do_gen!(input, gen_be_u32!(d.len()) >> gen_slice!(d))
 }
 
@@ -453,12 +526,16 @@ fn tunnel_build<'a>(input: &'a [u8]) -> IResult<&'a [u8], MessagePayload> {
     }
 }
 
-fn gen_tunnel_build<'a>(input: (&'a mut [u8], usize),
-                        tb: &[[u8; 528]; 8])
-                        -> Result<(&'a mut [u8], usize), GenError> {
-    do_gen!(input,
-        gen_slice!(tb[0]) >> gen_slice!(tb[1]) >> gen_slice!(tb[2]) >> gen_slice!(tb[3]) >>
-        gen_slice!(tb[4]) >> gen_slice!(tb[5]) >> gen_slice!(tb[6]) >> gen_slice!(tb[7]))
+fn gen_tunnel_build<'a>(
+    input: (&'a mut [u8], usize),
+    tb: &[[u8; 528]; 8],
+) -> Result<(&'a mut [u8], usize), GenError> {
+    do_gen!(
+        input,
+        gen_slice!(tb[0]) >> gen_slice!(tb[1]) >> gen_slice!(tb[2]) >> gen_slice!(tb[3])
+            >> gen_slice!(tb[4]) >> gen_slice!(tb[5]) >> gen_slice!(tb[6])
+            >> gen_slice!(tb[7])
+    )
 }
 
 // TunnelBuildReply
@@ -475,36 +552,43 @@ fn tunnel_build_reply<'a>(input: &'a [u8]) -> IResult<&'a [u8], MessagePayload> 
     }
 }
 
-fn gen_tunnel_build_reply<'a>(input: (&'a mut [u8], usize),
-                              tb: &[[u8; 528]; 8])
-                              -> Result<(&'a mut [u8], usize), GenError> {
-    do_gen!(input,
-        gen_slice!(tb[0]) >> gen_slice!(tb[1]) >> gen_slice!(tb[2]) >> gen_slice!(tb[3]) >>
-        gen_slice!(tb[4]) >> gen_slice!(tb[5]) >> gen_slice!(tb[6]) >> gen_slice!(tb[7]))
+fn gen_tunnel_build_reply<'a>(
+    input: (&'a mut [u8], usize),
+    tb: &[[u8; 528]; 8],
+) -> Result<(&'a mut [u8], usize), GenError> {
+    do_gen!(
+        input,
+        gen_slice!(tb[0]) >> gen_slice!(tb[1]) >> gen_slice!(tb[2]) >> gen_slice!(tb[3])
+            >> gen_slice!(tb[4]) >> gen_slice!(tb[5]) >> gen_slice!(tb[6])
+            >> gen_slice!(tb[7])
+    )
 }
 
 // VariableTunnelBuild
 
 fn variable_tunnel_build<'a>(input: &'a [u8]) -> IResult<&'a [u8], MessagePayload> {
     match length_count!(input, be_u8, take!(528)) {
-        IResult::Done(i, r) => {
-            IResult::Done(i,
-                          MessagePayload::VariableTunnelBuild(r.iter()
-                                                                  .map(|&s| {
-                                                                           let mut x = [0u8; 528];
-                                                                           x.copy_from_slice(s);
-                                                                           x
-                                                                       })
-                                                                  .collect()))
-        }
+        IResult::Done(i, r) => IResult::Done(
+            i,
+            MessagePayload::VariableTunnelBuild(
+                r.iter()
+                    .map(|&s| {
+                        let mut x = [0u8; 528];
+                        x.copy_from_slice(s);
+                        x
+                    })
+                    .collect(),
+            ),
+        ),
         IResult::Error(e) => IResult::Error(e),
         IResult::Incomplete(n) => IResult::Incomplete(n),
     }
 }
 
-fn gen_variable_tunnel_build<'a>(input: (&'a mut [u8], usize),
-                                 tb: &Vec<[u8; 528]>)
-                                 -> Result<(&'a mut [u8], usize), GenError> {
+fn gen_variable_tunnel_build<'a>(
+    input: (&'a mut [u8], usize),
+    tb: &Vec<[u8; 528]>,
+) -> Result<(&'a mut [u8], usize), GenError> {
     // TODO: Fail if tb is too big
     let mut x = gen_be_u8!(input, tb.len() as u8)?;
     for record in tb {
@@ -517,21 +601,27 @@ fn gen_variable_tunnel_build<'a>(input: (&'a mut [u8], usize),
 
 fn variable_tunnel_build_reply<'a>(input: &'a [u8]) -> IResult<&'a [u8], MessagePayload> {
     match length_count!(input, be_u8, take!(528)) {
-        IResult::Done(i, r) => {
-            IResult::Done(i, MessagePayload::VariableTunnelBuildReply(r.iter().map(|&s| {
-                let mut x = [0u8; 528];
-                x.copy_from_slice(s);
-                x
-            }).collect()))
-        }
+        IResult::Done(i, r) => IResult::Done(
+            i,
+            MessagePayload::VariableTunnelBuildReply(
+                r.iter()
+                    .map(|&s| {
+                        let mut x = [0u8; 528];
+                        x.copy_from_slice(s);
+                        x
+                    })
+                    .collect(),
+            ),
+        ),
         IResult::Error(e) => IResult::Error(e),
         IResult::Incomplete(n) => IResult::Incomplete(n),
     }
 }
 
-fn gen_variable_tunnel_build_reply<'a>(input: (&'a mut [u8], usize),
-                                       tbr: &Vec<[u8; 528]>)
-                                       -> Result<(&'a mut [u8], usize), GenError> {
+fn gen_variable_tunnel_build_reply<'a>(
+    input: (&'a mut [u8], usize),
+    tbr: &Vec<[u8; 528]>,
+) -> Result<(&'a mut [u8], usize), GenError> {
     // TODO: Fail if tbr is too big
     let mut x = gen_be_u8!(input, tbr.len() as u8)?;
     for record in tbr {
@@ -559,14 +649,16 @@ fn validate_checksum<'a>(input: &'a [u8], cs: u8, buf: &[u8]) -> IResult<&'a [u8
     }
 }
 
-fn gen_checksum<'a>(input: (&'a mut [u8], usize),
-                    start: usize,
-                    end: usize)
-                    -> Result<(&'a mut [u8], usize), GenError> {
+fn gen_checksum<'a>(
+    input: (&'a mut [u8], usize),
+    start: usize,
+    end: usize,
+) -> Result<(&'a mut [u8], usize), GenError> {
     gen_be_u8!(input, checksum(&input.0[start..end]))
 }
 
-named!(header<(u8, u32, I2PDate, u16, u8)>,
+named!(
+    header<(u8, u32, I2PDate, u16, u8)>,
     do_parse!(
         msg_type:   be_u8 >>
         msg_id:     be_u32 >>
@@ -604,9 +696,10 @@ named!(pub message<Message>,
     )
 );
 
-fn gen_message_type<'a>(input: (&'a mut [u8], usize),
-                        msg: &Message)
-                        -> Result<(&'a mut [u8], usize), GenError> {
+fn gen_message_type<'a>(
+    input: (&'a mut [u8], usize),
+    msg: &Message,
+) -> Result<(&'a mut [u8], usize), GenError> {
     let msg_type = match &msg.payload {
         &MessagePayload::DatabaseStore(_) => 1,
         &MessagePayload::DatabaseLookup(_) => 2,
@@ -624,9 +717,10 @@ fn gen_message_type<'a>(input: (&'a mut [u8], usize),
     gen_be_u8!(input, msg_type)
 }
 
-fn gen_payload<'a>(input: (&'a mut [u8], usize),
-                   payload: &MessagePayload)
-                   -> Result<(&'a mut [u8], usize), GenError> {
+fn gen_payload<'a>(
+    input: (&'a mut [u8], usize),
+    payload: &MessagePayload,
+) -> Result<(&'a mut [u8], usize), GenError> {
     match payload {
         &MessagePayload::DatabaseStore(ref ds) => gen_database_store(input, &ds),
         &MessagePayload::DatabaseLookup(ref dl) => gen_database_lookup(input, &dl),
@@ -645,9 +739,10 @@ fn gen_payload<'a>(input: (&'a mut [u8], usize),
     }
 }
 
-pub fn gen_message<'a>(input: (&'a mut [u8], usize),
-                       msg: &Message)
-                       -> Result<(&'a mut [u8], usize), GenError> {
+pub fn gen_message<'a>(
+    input: (&'a mut [u8], usize),
+    msg: &Message,
+) -> Result<(&'a mut [u8], usize), GenError> {
     do_gen!(input,
                gen_message_type(msg) >>
                gen_be_u32!(msg.id) >>
@@ -667,8 +762,14 @@ mod tests {
     #[test]
     fn test_validate_checksum() {
         let a = b"payloadspam";
-        assert_eq!(validate_checksum(&a[..], 0x23, &a[..7]), IResult::Done(&a[..], ()));
-        assert_eq!(validate_checksum(&a[..], 0x23, &a[..8]), IResult::Error(ErrorKind::Custom(1)));
+        assert_eq!(
+            validate_checksum(&a[..], 0x23, &a[..7]),
+            IResult::Done(&a[..], ())
+        );
+        assert_eq!(
+            validate_checksum(&a[..], 0x23, &a[..8]),
+            IResult::Error(ErrorKind::Custom(1))
+        );
     }
 
     #[test]

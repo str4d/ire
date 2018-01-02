@@ -1,7 +1,7 @@
 use cookie_factory::GenError;
 use nom::IResult;
 use rand::{self, Rng};
-use sha2::{Sha256, Digest};
+use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Read, Write};
@@ -9,7 +9,8 @@ use std::iter::repeat;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use constants;
-use crypto::{EncType, PrivateKey, PublicKey, SigType, Signature, SigningPrivateKey, SigningPublicKey};
+use crypto::{EncType, PrivateKey, PublicKey, SigType, Signature, SigningPrivateKey,
+             SigningPublicKey};
 
 pub mod frame;
 
@@ -17,7 +18,7 @@ pub mod frame;
 // Simple data types
 //
 
-#[derive(Clone,Debug,PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Hash(pub [u8; 32]);
 
 impl Hash {
@@ -43,7 +44,7 @@ impl Hash {
 
 /// The number of milliseconds since midnight on January 1, 1970 in the GMT
 /// timezone. If the number is 0, the date is undefined or null.
-#[derive(Debug,PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct I2PDate(u64);
 
 impl I2PDate {
@@ -53,7 +54,7 @@ impl I2PDate {
     }
 }
 
-#[derive(Debug,Eq,Hash,Ord,PartialEq,PartialOrd)]
+#[derive(Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct I2PString(String);
 #[derive(Debug)]
 pub struct Mapping(HashMap<I2PString, I2PString>);
@@ -70,7 +71,7 @@ impl SessionTag {
 
 pub struct TunnelId(pub u32);
 
-#[derive(Clone,Debug)]
+#[derive(Clone, Debug)]
 pub struct KeyCertificate {
     pub sig_type: SigType,
     enc_type: EncType,
@@ -78,7 +79,7 @@ pub struct KeyCertificate {
     enc_data: Vec<u8>,
 }
 
-#[derive(Clone,Debug)]
+#[derive(Clone, Debug)]
 pub enum Certificate {
     Null,
     HashCash(Vec<u8>),
@@ -109,7 +110,7 @@ impl Certificate {
     }
 }
 
-#[derive(Clone,Debug)]
+#[derive(Clone, Debug)]
 pub struct RouterIdentity {
     public_key: PublicKey,
     padding: Option<Vec<u8>>,
@@ -166,14 +167,12 @@ impl RouterIdentity {
                     buf.truncate(sz);
                     return buf;
                 }
-                Err(e) => {
-                    match e {
-                        GenError::BufferTooSmall(sz) => {
-                            buf.extend(repeat(0).take(sz - base_len));
-                        }
-                        _ => panic!("Couldn't serialize RouterIdentity"),
+                Err(e) => match e {
+                    GenError::BufferTooSmall(sz) => {
+                        buf.extend(repeat(0).take(sz - base_len));
                     }
-                }
+                    _ => panic!("Couldn't serialize RouterIdentity"),
+                },
             }
         }
     }
@@ -222,14 +221,12 @@ impl RouterSecretKeys {
                     buf.truncate(sz);
                     return buf;
                 }
-                Err(e) => {
-                    match e {
-                        GenError::BufferTooSmall(sz) => {
-                            buf.extend(repeat(0).take(sz - base_len));
-                        }
-                        _ => panic!("Couldn't serialize RouterSecretKeys"),
+                Err(e) => match e {
+                    GenError::BufferTooSmall(sz) => {
+                        buf.extend(repeat(0).take(sz - base_len));
                     }
-                }
+                    _ => panic!("Couldn't serialize RouterSecretKeys"),
+                },
             }
         }
     }
@@ -304,9 +301,11 @@ mod tests {
     #[test]
     fn router_identity_hash() {
         let data = include_bytes!("../../assets/router.info");
-        let ri_hash = Hash([0x26, 0x7a, 0x87, 0x78, 0x0d, 0x0c, 0xa0, 0x9a, 0x21, 0xa0, 0x29,
-                            0xb7, 0x4d, 0x7b, 0xc3, 0x4d, 0x07, 0xc3, 0x53, 0x02, 0x72, 0xc6,
-                            0x30, 0xaa, 0x4c, 0xc1, 0x1d, 0x61, 0x90, 0xc7, 0xb6, 0xb4]);
+        let ri_hash = Hash([
+            0x26, 0x7a, 0x87, 0x78, 0x0d, 0x0c, 0xa0, 0x9a, 0x21, 0xa0, 0x29, 0xb7, 0x4d, 0x7b,
+            0xc3, 0x4d, 0x07, 0xc3, 0x53, 0x02, 0x72, 0xc6, 0x30, 0xaa, 0x4c, 0xc1, 0x1d, 0x61,
+            0x90, 0xc7, 0xb6, 0xb4,
+        ]);
         match frame::router_info(data) {
             IResult::Done(_, ri) => {
                 assert_eq!(ri.router_id.hash(), ri_hash);
