@@ -152,10 +152,8 @@ impl Encoder for InboundHandshakeCodec {
     type Error = io::Error;
 
     fn encode(&mut self, frame: HandshakeFrame, buf: &mut BytesMut) -> io::Result<()> {
-        let length = buf.len();
-        if length < NTCP_MTU {
-            buf.extend(repeat(0).take(NTCP_MTU - length));
-        }
+        let start = buf.len();
+        buf.extend(repeat(0).take(NTCP_MTU));
 
         let res = match (self.state, frame) {
             (HandshakeState::SessionCreated, HandshakeFrame::SessionCreated(ref sc)) => {
@@ -171,7 +169,7 @@ impl Encoder for InboundHandshakeCodec {
                         match self.aes.as_mut().unwrap().encrypt_blocks(&mut tmp) {
                             Some(end) if end == inner_sz => {
                                 // Serialise outer SessionCreated
-                                match frame::gen_session_created_enc((buf, 0), &sc.dh_y, &tmp)
+                                match frame::gen_session_created_enc((buf, start), &sc.dh_y, &tmp)
                                     .map(|tup| tup.1)
                                 {
                                     Ok(sz) => {
@@ -193,12 +191,12 @@ impl Encoder for InboundHandshakeCodec {
                 }
             }
             (HandshakeState::SessionConfirmB, HandshakeFrame::SessionConfirmB(ref scb)) => {
-                match frame::gen_session_confirm_b((buf, 0), &scb).map(|tup| tup.1) {
+                match frame::gen_session_confirm_b((buf, start), &scb).map(|tup| tup.1) {
                     Ok(sz) => {
                         buf.truncate(sz);
                         // Encrypt message in-place
-                        match self.aes.as_mut().unwrap().encrypt_blocks(buf) {
-                            Some(end) if end == sz => Ok(()),
+                        match self.aes.as_mut().unwrap().encrypt_blocks(&mut buf[start..]) {
+                            Some(end) if start + end == sz => Ok(()),
                             _ => {
                                 return Err(io::Error::new(
                                     io::ErrorKind::InvalidData,
@@ -231,7 +229,7 @@ impl Encoder for InboundHandshakeCodec {
             Err(e) => match e {
                 GenError::BufferTooSmall(sz) => Err(io::Error::new(
                     io::ErrorKind::InvalidData,
-                    format!("message ({}) larger than MTU ({})", sz, NTCP_MTU),
+                    format!("message ({}) larger than MTU ({})", sz - start, NTCP_MTU),
                 )),
                 GenError::InvalidOffset
                 | GenError::CustomError(_)
@@ -386,14 +384,12 @@ impl Encoder for OutboundHandshakeCodec {
     type Error = io::Error;
 
     fn encode(&mut self, frame: HandshakeFrame, buf: &mut BytesMut) -> io::Result<()> {
-        let length = buf.len();
-        if length < NTCP_MTU {
-            buf.extend(repeat(0).take(NTCP_MTU - length));
-        }
+        let start = buf.len();
+        buf.extend(repeat(0).take(NTCP_MTU));
 
         let res = match (self.state, frame) {
             (HandshakeState::SessionRequest, HandshakeFrame::SessionRequest(ref sr)) => {
-                match frame::gen_session_request((buf, 0), &sr).map(|tup| tup.1) {
+                match frame::gen_session_request((buf, start), &sr).map(|tup| tup.1) {
                     Ok(sz) => {
                         buf.truncate(sz);
                         Ok(())
@@ -402,12 +398,12 @@ impl Encoder for OutboundHandshakeCodec {
                 }
             }
             (HandshakeState::SessionConfirmA, HandshakeFrame::SessionConfirmA(ref sca)) => {
-                match frame::gen_session_confirm_a((buf, 0), &sca).map(|tup| tup.1) {
+                match frame::gen_session_confirm_a((buf, start), &sca).map(|tup| tup.1) {
                     Ok(sz) => {
                         buf.truncate(sz);
                         // Encrypt message in-place
-                        match self.aes.as_mut().unwrap().encrypt_blocks(buf) {
-                            Some(end) if end == sz => Ok(()),
+                        match self.aes.as_mut().unwrap().encrypt_blocks(&mut buf[start..]) {
+                            Some(end) if start + end == sz => Ok(()),
                             _ => {
                                 return Err(io::Error::new(
                                     io::ErrorKind::InvalidData,
@@ -440,7 +436,7 @@ impl Encoder for OutboundHandshakeCodec {
             Err(e) => match e {
                 GenError::BufferTooSmall(sz) => Err(io::Error::new(
                     io::ErrorKind::InvalidData,
-                    format!("message ({}) larger than MTU ({})", sz, NTCP_MTU),
+                    format!("message ({}) larger than MTU ({})", sz - start, NTCP_MTU),
                 )),
                 GenError::InvalidOffset
                 | GenError::CustomError(_)
@@ -531,17 +527,15 @@ impl Encoder for Codec {
     type Error = io::Error;
 
     fn encode(&mut self, frame: Frame, buf: &mut BytesMut) -> io::Result<()> {
-        let length = buf.len();
-        if length < NTCP_MTU {
-            buf.extend(repeat(0).take(NTCP_MTU - length));
-        }
+        let start = buf.len();
+        buf.extend(repeat(0).take(NTCP_MTU));
 
-        match frame::gen_frame((buf, 0), &frame).map(|tup| tup.1) {
+        match frame::gen_frame((buf, start), &frame).map(|tup| tup.1) {
             Ok(sz) => {
                 buf.truncate(sz);
                 // Encrypt message in-place
-                match self.aes.encrypt_blocks(buf) {
-                    Some(end) if end == sz => Ok(()),
+                match self.aes.encrypt_blocks(&mut buf[start..]) {
+                    Some(end) if start + end == sz => Ok(()),
                     _ => Err(io::Error::new(
                         io::ErrorKind::InvalidData,
                         "invalid serialization",
@@ -551,7 +545,7 @@ impl Encoder for Codec {
             Err(e) => match e {
                 GenError::BufferTooSmall(sz) => Err(io::Error::new(
                     io::ErrorKind::InvalidData,
-                    format!("message ({}) larger than MTU ({})", sz, NTCP_MTU),
+                    format!("message ({}) larger than MTU ({})", sz - start, NTCP_MTU),
                 )),
                 GenError::InvalidOffset
                 | GenError::CustomError(_)
