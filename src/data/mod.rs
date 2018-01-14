@@ -65,7 +65,7 @@ impl I2PDate {
 #[derive(Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct I2PString(String);
 #[derive(Debug)]
-pub struct Mapping(HashMap<I2PString, I2PString>);
+pub struct Mapping(pub HashMap<I2PString, I2PString>);
 
 pub struct SessionTag(pub [u8; 32]);
 
@@ -281,7 +281,93 @@ pub struct RouterInfo {
     addresses: Vec<RouterAddress>,
     peers: Vec<Hash>,
     options: Mapping,
-    signature: Signature,
+    signature: Option<Signature>,
+}
+
+impl RouterInfo {
+    pub fn new(rid: RouterIdentity) -> Self {
+        RouterInfo {
+            router_id: rid,
+            published: I2PDate::from_system_time(SystemTime::now()),
+            addresses: Vec::new(),
+            peers: Vec::new(),
+            options: Mapping(HashMap::new()),
+            signature: None,
+        }
+    }
+
+    /// Set the addresses in this RouterInfo.
+    ///
+    /// Caller must re-sign the RouterInfo afterwards.
+    pub fn set_addresses(&mut self, addrs: Vec<RouterAddress>) {
+        self.addresses = addrs;
+        self.signature = None;
+    }
+
+    pub fn from_file(path: &str) -> Self {
+        let mut ri = File::open(path).unwrap();
+        let mut data: Vec<u8> = Vec::new();
+        ri.read_to_end(&mut data).unwrap();
+        frame::router_info(&data[..]).unwrap().1
+    }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let base_len = 435; // 387 + 4 + 1 + 1 + 2 + 40
+        let mut buf = Vec::with_capacity(base_len);
+        buf.extend(repeat(0).take(base_len));
+        loop {
+            match frame::gen_router_info((&mut buf[..], 0), self).map(|tup| tup.1) {
+                Ok(sz) => {
+                    buf.truncate(sz);
+                    return buf;
+                }
+                Err(e) => match e {
+                    GenError::BufferTooSmall(sz) => {
+                        buf.extend(repeat(0).take(sz - base_len));
+                    }
+                    e => panic!("Couldn't serialize RouterInfo: {:?}", e),
+                },
+            }
+        }
+    }
+
+    pub fn to_file(&self, path: &str) {
+        let mut ri = File::create(path).unwrap();
+        ri.write(&self.to_bytes());
+    }
+
+    fn signature_bytes(&self) -> Vec<u8> {
+        let base_len = 395; // 387 + 4 + 1 + 1 + 2
+        let mut buf = Vec::with_capacity(base_len);
+        buf.extend(repeat(0).take(base_len));
+        loop {
+            match frame::gen_router_info_minus_sig((&mut buf[..], 0), self).map(|tup| tup.1) {
+                Ok(sz) => {
+                    buf.truncate(sz);
+                    break;
+                }
+                Err(e) => match e {
+                    GenError::BufferTooSmall(sz) => {
+                        buf.extend(repeat(0).take(sz - base_len));
+                    }
+                    _ => panic!("Couldn't serialize RouterInfo signature message"),
+                },
+            }
+        }
+        buf
+    }
+
+    pub fn sign(&mut self, spk: &SigningPrivateKey) {
+        let sig_msg = self.signature_bytes();
+        self.signature = Some(spk.sign(&sig_msg));
+    }
+
+    pub fn verify(&self) -> bool {
+        let sig_msg = self.signature_bytes();
+        self.router_id
+            .signing_key
+            .verify(&sig_msg, &self.signature.as_ref().unwrap())
+    }
 }
 
 #[cfg(test)]
@@ -317,6 +403,27 @@ mod tests {
         match frame::router_info(data) {
             IResult::Done(_, ri) => {
                 assert_eq!(ri.router_id.hash(), ri_hash);
+            }
+            _ => panic!("RI parsing failed"),
+        }
+    }
+
+    #[test]
+    fn router_info_sign() {
+        let rsk = RouterSecretKeys::new();
+        let mut ri = RouterInfo::new(rsk.rid);
+        assert!(ri.signature.is_none());
+        ri.sign(&rsk.signing_private_key);
+        assert!(ri.signature.is_some());
+        assert!(ri.verify());
+    }
+
+    #[test]
+    fn router_info_verify() {
+        let data = include_bytes!("../../assets/router.info");
+        match frame::router_info(data) {
+            IResult::Done(_, ri) => {
+                assert!(ri.verify());
             }
             _ => panic!("RI parsing failed"),
         }
