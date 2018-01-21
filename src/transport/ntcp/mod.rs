@@ -13,11 +13,15 @@ use tokio_io::codec::{Decoder, Encoder, Framed};
 use tokio_timer::Deadline;
 
 use crypto::{Aes256, SigningPrivateKey};
-use data::RouterIdentity;
+use data::{I2PString, RouterIdentity, RouterInfo};
 use i2np::Message;
 
 mod frame;
 mod handshake;
+
+lazy_static! {
+    pub static ref NTCP_STYLE: I2PString = I2PString::new("NTCP");
+}
 
 // Max NTCP message size is 16kB
 const NTCP_MTU: usize = 16384;
@@ -164,9 +168,11 @@ impl Engine {
         &self,
         own_ri: RouterIdentity,
         own_key: SigningPrivateKey,
-        peer_ri: RouterIdentity,
-        addr: &SocketAddr,
+        peer_ri: RouterInfo,
     ) -> IoFuture<Framed<TcpStream, Codec>> {
+        // TODO return error if there are no valid NTCP addresses (for some reason)
+        let addr = peer_ri.address(&NTCP_STYLE).unwrap().addr().unwrap();
+
         // Connect to the peer
         // Return a transport ready for sending and receiving Frames
         // The layer above will convert I2NP packets to Frames
@@ -176,7 +182,7 @@ impl Engine {
                 TcpStream,
                 handshake::OutboundHandshakeCodec,
                 handshake::OBHandshakeState,
-            >::connect(socket, own_ri, own_key, peer_ri)
+            >::connect(socket, own_ri, own_key, peer_ri.router_id)
         }));
 
         // Add a timeout

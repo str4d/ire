@@ -8,6 +8,7 @@ use std::fmt;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::iter::repeat;
+use std::net::SocketAddr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use constants;
@@ -52,7 +53,7 @@ impl fmt::Display for Hash {
 
 /// The number of milliseconds since midnight on January 1, 1970 in the GMT
 /// timezone. If the number is 0, the date is undefined or null.
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct I2PDate(u64);
 
 impl I2PDate {
@@ -62,9 +63,16 @@ impl I2PDate {
     }
 }
 
-#[derive(Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct I2PString(String);
-#[derive(Debug)]
+
+impl I2PString {
+    pub fn new(string: &str) -> Self {
+        I2PString(String::from(string))
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct Mapping(pub HashMap<I2PString, I2PString>);
 
 pub struct SessionTag(pub [u8; 32]);
@@ -266,12 +274,44 @@ pub struct LeaseSet {
     sig: Signature,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct RouterAddress {
     cost: u8,
     expiration: I2PDate,
     transport_style: I2PString,
     options: Mapping,
+}
+
+impl RouterAddress {
+    pub fn new(transport_style: &I2PString, addr: SocketAddr) -> Self {
+        let mut options = HashMap::new();
+        options.insert(
+            I2PString(String::from("host")),
+            I2PString(addr.ip().to_string()),
+        );
+        options.insert(
+            I2PString(String::from("port")),
+            I2PString(addr.port().to_string()),
+        );
+        RouterAddress {
+            cost: 0,
+            expiration: I2PDate(0),
+            transport_style: transport_style.clone(),
+            options: Mapping(options),
+        }
+    }
+
+    pub fn addr(&self) -> Option<SocketAddr> {
+        let host = self.options.0.get(&I2PString(String::from("host")));
+        let port = self.options.0.get(&I2PString(String::from("port")));
+        match (host, port) {
+            (Some(host), Some(port)) => match (host.0.parse(), port.0.parse()) {
+                (Ok(ip), Ok(port)) => Some(SocketAddr::new(ip, port)),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -302,6 +342,18 @@ impl RouterInfo {
     pub fn set_addresses(&mut self, addrs: Vec<RouterAddress>) {
         self.addresses = addrs;
         self.signature = None;
+    }
+
+    pub fn address(&self, style: &I2PString) -> Option<RouterAddress> {
+        let addrs: Vec<&RouterAddress> = self.addresses
+            .iter()
+            .filter(|a| a.transport_style == *style)
+            .collect();
+        if addrs.len() > 0 {
+            Some(addrs[0].clone())
+        } else {
+            None
+        }
     }
 
     pub fn from_file(path: &str) -> Self {

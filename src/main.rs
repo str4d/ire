@@ -12,6 +12,8 @@ extern crate flate2;
 extern crate futures;
 extern crate itertools;
 #[macro_use]
+extern crate lazy_static;
+#[macro_use]
 extern crate log;
 #[macro_use]
 extern crate nom;
@@ -54,7 +56,8 @@ fn inner_main() -> i32 {
                             Arg::with_name("routerKeys")
                                 .help("Path to write the router.keys.dat to"),
                         )
-                        .arg(Arg::with_name("routerId").help("Path to write the router.info to")),
+                        .arg(Arg::with_name("routerInfo").help("Path to write the router.info to"))
+                        .arg(Arg::with_name("bind").help("Address:Port to bind to")),
                 )
                 .subcommand(
                     SubCommand::with_name("server")
@@ -70,8 +73,9 @@ fn inner_main() -> i32 {
                             Arg::with_name("routerKeys")
                                 .help("Path to the client's router.keys.dat"),
                         )
-                        .arg(Arg::with_name("peerId").help("Path to the peer's router.info file"))
-                        .arg(Arg::with_name("addr").help("Address:Port of the peer")),
+                        .arg(
+                            Arg::with_name("peerInfo").help("Path to the peer's router.info file"),
+                        ),
                 ),
         )
         .get_matches();
@@ -88,8 +92,14 @@ fn inner_main() -> i32 {
 }
 
 fn cli_gen(args: &ArgMatches) -> i32 {
+    let addr = args.value_of("bind").unwrap().parse().unwrap();
+    let ra = data::RouterAddress::new(&transport::ntcp::NTCP_STYLE, addr);
+
     let pkf = data::RouterSecretKeys::new();
-    pkf.rid.to_file(args.value_of("routerId").unwrap());
+    let mut ri = data::RouterInfo::new(pkf.rid.clone());
+    ri.set_addresses(vec![ra]);
+    ri.sign(&pkf.signing_private_key);
+    ri.to_file(args.value_of("routerInfo").unwrap());
     pkf.to_file(args.value_of("routerKeys").unwrap());
     0
 }
@@ -108,12 +118,11 @@ fn cli_server(args: &ArgMatches) -> i32 {
 
 fn cli_client(args: &ArgMatches) -> i32 {
     let rsk = data::RouterSecretKeys::from_file(args.value_of("routerKeys").unwrap());
-    let peer_rid = data::RouterIdentity::from_file(args.value_of("peerId").unwrap());
-    let addr = args.value_of("addr").unwrap().parse().unwrap();
+    let peer_ri = data::RouterInfo::from_file(args.value_of("peerInfo").unwrap());
 
-    info!("Connecting to {}", addr);
+    info!("Connecting to {}", peer_ri.router_id.hash());
     let ntcp = transport::ntcp::Engine::new();
-    let conn = ntcp.connect(rsk.rid, rsk.signing_private_key, peer_rid, &addr)
+    let conn = ntcp.connect(rsk.rid, rsk.signing_private_key, peer_ri)
         .and_then(move |t| {
             info!("Connection established!");
             t.send(transport::ntcp::Frame::TimeSync(42))
