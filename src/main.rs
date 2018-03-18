@@ -35,7 +35,7 @@ mod i2np;
 mod transport;
 
 fn main() {
-    env_logger::init().unwrap();
+    env_logger::init();
     let exit_code = inner_main();
     std::process::exit(exit_code);
 }
