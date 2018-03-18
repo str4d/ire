@@ -104,7 +104,7 @@ fn compressed_ri<'a>(input: &'a [u8]) -> IResult<&'a [u8], RouterInfo> {
     match do_parse!(input, size: be_u16 >> payload: take!(size) >> (payload)) {
         IResult::Done(i, payload) => {
             let mut buf = Vec::new();
-            let mut d = GzDecoder::new(payload).unwrap();
+            let mut d = GzDecoder::new(payload);
             match d.read_to_end(&mut buf) {
                 Ok(_) => {}
                 Err(e) => return IResult::Error(ErrorKind::Custom(1)),
@@ -126,7 +126,7 @@ fn gen_compressed_ri<'a>(
 ) -> Result<(&'a mut [u8], usize), GenError> {
     let mut buf = Vec::new();
     gen_router_info((&mut buf, 0), ri);
-    let mut e = GzEncoder::new(Vec::new(), Compression::Best);
+    let mut e = GzEncoder::new(Vec::new(), Compression::best());
     e.write(&buf);
     match e.finish() {
         Ok(payload) => do_gen!(input, gen_be_u16!(payload.len()) >> gen_slice!(payload)),

@@ -1,5 +1,5 @@
 use cookie_factory::*;
-use nom::{IResult, be_u16};
+use nom::{ErrorKind, IResult, be_u16};
 
 use constants;
 use crypto::{EncType, PrivateKey, PublicKey, SessionKey, SigType, Signature, SigningPrivateKey,
@@ -77,10 +77,15 @@ pub fn gen_private_key<'a>(
 // SigningPublicKey
 
 pub fn signing_key<'a>(input: &'a [u8], sig_type: SigType) -> IResult<&'a [u8], SigningPublicKey> {
-    do_parse!(
+    match do_parse!(
         input,
         sig_key: take!(sig_type.pubkey_len()) >> (SigningPublicKey::from_bytes(&sig_type, sig_key))
-    )
+    ) {
+        IResult::Done(i, Ok(value)) => IResult::Done(i, value),
+        IResult::Done(_, Err(_)) => IResult::Error(ErrorKind::Custom(1)),
+        IResult::Error(e) => IResult::Error(e),
+        IResult::Incomplete(l) => IResult::Incomplete(l),
+    }
 }
 
 pub fn gen_signing_key<'a>(
@@ -96,11 +101,16 @@ pub fn signing_private_key<'a>(
     input: &'a [u8],
     sig_type: SigType,
 ) -> IResult<&'a [u8], SigningPrivateKey> {
-    do_parse!(
+    match do_parse!(
         input,
         sig_key: take!(sig_type.pubkey_len())
             >> (SigningPrivateKey::from_bytes(&sig_type, sig_key))
-    )
+    ) {
+        IResult::Done(i, Ok(value)) => IResult::Done(i, value),
+        IResult::Done(_, Err(_)) => IResult::Error(ErrorKind::Custom(1)),
+        IResult::Error(e) => IResult::Error(e),
+        IResult::Incomplete(l) => IResult::Incomplete(l),
+    }
 }
 
 pub fn gen_signing_private_key<'a>(
@@ -113,15 +123,20 @@ pub fn gen_signing_private_key<'a>(
 // Signature
 
 pub fn signature<'a>(input: &'a [u8], sig_type: &SigType) -> IResult<&'a [u8], Signature> {
-    do_parse!(
+    match do_parse!(
         input,
         sig: take!(sig_type.sig_len()) >> (Signature::from_bytes(sig_type, sig))
-    )
+    ) {
+        IResult::Done(i, Ok(value)) => IResult::Done(i, value),
+        IResult::Done(_, Err(_)) => IResult::Error(ErrorKind::Custom(1)),
+        IResult::Error(e) => IResult::Error(e),
+        IResult::Incomplete(l) => IResult::Incomplete(l),
+    }
 }
 
 pub fn gen_signature<'a>(
     input: (&'a mut [u8], usize),
     sig: &Signature,
 ) -> Result<(&'a mut [u8], usize), GenError> {
-    gen_slice!(input, sig.as_bytes())
+    gen_slice!(input, sig.to_bytes())
 }

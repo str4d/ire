@@ -1,6 +1,6 @@
 use cookie_factory::*;
 use itertools::Itertools;
-use nom::{be_u16, be_u32, be_u64, be_u8};
+use nom::{ErrorKind, be_u16, be_u32, be_u64, be_u8};
 
 use constants;
 use crypto::frame::{enc_type, gen_enc_type, gen_private_key, gen_public_key, gen_sig_type,
@@ -101,7 +101,7 @@ fn split_signing_key<'a>(
     base_data: &[u8; constants::KEYCERT_SIGKEY_BYTES],
     cert: &Certificate,
 ) -> IResult<&'a [u8], SigningPublicKey> {
-    let spk = match cert {
+    let res = match cert {
         &Certificate::Key(ref kc) => {
             if kc.sig_type.extra_data_len(&kc.enc_type) > 0 {
                 let mut data = Vec::from(&base_data[..]);
@@ -114,7 +114,10 @@ fn split_signing_key<'a>(
         }
         _ => SigningPublicKey::from_bytes(&SigType::DsaSha1, &base_data[..]),
     };
-    IResult::Done(input, spk)
+    match res {
+        Ok(spk) => IResult::Done(input, spk),
+        Err(_) => IResult::Error(ErrorKind::Custom(1)),
+    }
 }
 
 fn gen_truncated_signing_key<'a>(

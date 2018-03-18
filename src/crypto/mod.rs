@@ -1,5 +1,6 @@
 use aesti::Aes;
 use ed25519_dalek::SECRET_KEY_LENGTH as ED_SECRET_KEY_LENGTH;
+use ed25519_dalek::DecodingError as EdDecodingError;
 use ed25519_dalek::Keypair as EdKeypair;
 use ed25519_dalek::PublicKey as EdPublicKey;
 use ed25519_dalek::SecretKey as EdSecretKey;
@@ -16,6 +17,16 @@ pub mod frame;
 pub mod math;
 
 pub const AES_BLOCK_SIZE: usize = 16;
+
+pub enum DecodingError {
+    Ed25519(EdDecodingError),
+}
+
+impl From<EdDecodingError> for DecodingError {
+    fn from(e: EdDecodingError) -> Self {
+        DecodingError::Ed25519(e)
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SigType {
@@ -210,13 +221,13 @@ impl SigningPublicKey {
 }
 
 impl SigningPublicKey {
-    pub fn from_bytes(sig_type: &SigType, data: &[u8]) -> Self {
+    pub fn from_bytes(sig_type: &SigType, data: &[u8]) -> Result<Self, DecodingError> {
         match sig_type {
             &SigType::DsaSha1 => panic!("Not implemented"),
             &SigType::EcdsaSha256P256 => panic!("Not implemented"),
             &SigType::EcdsaSha384P384 => panic!("Not implemented"),
             &SigType::EcdsaSha512P521 => panic!("Not implemented"),
-            &SigType::Ed25519 => SigningPublicKey::Ed25519(EdPublicKey::from_bytes(data)),
+            &SigType::Ed25519 => Ok(SigningPublicKey::Ed25519(EdPublicKey::from_bytes(data)?)),
         }
     }
 
@@ -283,24 +294,27 @@ impl SigningPrivateKey {
             &SigType::EcdsaSha256P256 => panic!("Not implemented"),
             &SigType::EcdsaSha384P384 => panic!("Not implemented"),
             &SigType::EcdsaSha512P521 => panic!("Not implemented"),
-            &SigType::Ed25519 => {
+            &SigType::Ed25519 => loop {
                 let mut keydata = [0u8; ED_SECRET_KEY_LENGTH];
                 rng.fill_bytes(&mut keydata);
-                SigningPrivateKey::from_bytes(sig_type, &keydata)
-            }
+                match SigningPrivateKey::from_bytes(sig_type, &keydata) {
+                    Ok(spk) => return spk,
+                    Err(_) => continue,
+                }
+            },
         }
     }
 
-    pub fn from_bytes(sig_type: &SigType, data: &[u8]) -> Self {
+    pub fn from_bytes(sig_type: &SigType, data: &[u8]) -> Result<Self, DecodingError> {
         match sig_type {
             &SigType::DsaSha1 => panic!("Not implemented"),
             &SigType::EcdsaSha256P256 => panic!("Not implemented"),
             &SigType::EcdsaSha384P384 => panic!("Not implemented"),
             &SigType::EcdsaSha512P521 => panic!("Not implemented"),
             &SigType::Ed25519 => {
-                let secret = EdSecretKey::from_bytes(data);
+                let secret = EdSecretKey::from_bytes(data)?;
                 let public = EdPublicKey::from_secret::<Sha512>(&secret);
-                SigningPrivateKey::Ed25519(EdKeypair { public, secret })
+                Ok(SigningPrivateKey::Ed25519(EdKeypair { public, secret }))
             }
         }
     }
@@ -336,7 +350,7 @@ impl Clone for SigningPrivateKey {
             &SigningPrivateKey::EcdsaSha512P521 => panic!("Not implemented"),
             &SigningPrivateKey::Ed25519(ref kp) => SigningPrivateKey::Ed25519(EdKeypair {
                 public: kp.public.clone(),
-                secret: EdSecretKey::from_bytes(kp.secret.as_bytes()),
+                secret: EdSecretKey::from_bytes(kp.secret.as_bytes()).unwrap(),
             }),
         }
     }
@@ -352,23 +366,23 @@ pub enum Signature {
 }
 
 impl Signature {
-    pub fn from_bytes(sig_type: &SigType, data: &[u8]) -> Self {
+    pub fn from_bytes(sig_type: &SigType, data: &[u8]) -> Result<Self, DecodingError> {
         match sig_type {
             &SigType::DsaSha1 => panic!("Not implemented"),
             &SigType::EcdsaSha256P256 => panic!("Not implemented"),
             &SigType::EcdsaSha384P384 => panic!("Not implemented"),
             &SigType::EcdsaSha512P521 => panic!("Not implemented"),
-            &SigType::Ed25519 => Signature::Ed25519(EdSignature::from_bytes(data)),
+            &SigType::Ed25519 => Ok(Signature::Ed25519(EdSignature::from_bytes(data)?)),
         }
     }
 
-    pub fn as_bytes(&self) -> &[u8] {
+    pub fn to_bytes(&self) -> Vec<u8> {
         match self {
             &Signature::DsaSha1 => panic!("Not implemented"),
             &Signature::EcdsaSha256P256 => panic!("Not implemented"),
             &Signature::EcdsaSha384P384 => panic!("Not implemented"),
             &Signature::EcdsaSha512P521 => panic!("Not implemented"),
-            &Signature::Ed25519(ref s) => s.as_bytes(),
+            &Signature::Ed25519(ref s) => Vec::from(&s.to_bytes()[..]),
         }
     }
 }
