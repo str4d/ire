@@ -17,8 +17,9 @@ extern crate nom;
 extern crate num;
 extern crate rand;
 extern crate sha2;
-extern crate tokio_core;
+extern crate tokio;
 extern crate tokio_io;
+extern crate tokio_timer;
 
 #[cfg(test)]
 #[macro_use]
@@ -26,7 +27,6 @@ extern crate pretty_assertions;
 
 use clap::{App, Arg, ArgMatches, SubCommand};
 use futures::{Future, Sink};
-use tokio_core::reactor::Core;
 
 mod constants;
 mod crypto;
@@ -100,45 +100,34 @@ fn cli_server(args: &ArgMatches) -> i32 {
     // Accept all incoming sockets
     info!("Listening on {}", addr);
     let ntcp = transport::ntcp::Engine::new();
-    ntcp.listen(rsk.rid, rsk.signing_private_key, &addr);
+    let listener = ntcp.listen(rsk.rid, rsk.signing_private_key, &addr);
+    tokio::run(listener.map_err(|e| error!("Listener error: {}", e)));
     0
 }
 
 fn cli_client(args: &ArgMatches) -> i32 {
-    let mut core = Core::new().unwrap();
-    let handle = core.handle();
-
     let rsk = data::RouterSecretKeys::from_file(args.value_of("routerKeys").unwrap());
     let peer_rid = data::RouterIdentity::from_file(args.value_of("peerId").unwrap());
     let addr = args.value_of("addr").unwrap().parse().unwrap();
 
     info!("Connecting to {}", addr);
     let ntcp = transport::ntcp::Engine::new();
-    let conn = ntcp.connect(rsk.rid, rsk.signing_private_key, peer_rid, &addr, &handle);
-
-    match core.run(conn) {
-        Ok(t) => {
+    let conn = ntcp.connect(rsk.rid, rsk.signing_private_key, peer_rid, &addr)
+        .and_then(move |t| {
             info!("Connection established!");
-            let f = t.send(transport::ntcp::Frame::TimeSync(42));
-            let f = f.and_then(|t| {
-                t.send(transport::ntcp::Frame::Standard(
-                    i2np::Message::dummy_data(),
-                ))
-            });
-            match core.run(f) {
-                Ok(_) => {
-                    info!("Dummy data sent!");
-                    0
-                }
-                Err(e) => {
-                    error!("Failed to send dummy data: {:?}", e);
-                    1
-                }
-            }
-        }
-        Err(e) => {
-            error!("Handshake failed: {}", e);
-            1
-        }
-    }
+            t.send(transport::ntcp::Frame::TimeSync(42))
+        })
+        .and_then(|t| {
+            t.send(transport::ntcp::Frame::Standard(
+                i2np::Message::dummy_data(),
+            ))
+        })
+        .and_then(|_| {
+            info!("Dummy data sent!");
+            Ok(())
+        })
+        .map_err(|e| error!("Connection error: {}", e));
+
+    tokio::run(conn);
+    0
 }

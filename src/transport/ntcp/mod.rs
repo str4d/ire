@@ -6,11 +6,13 @@ use std::io;
 use std::iter::repeat;
 use std::net::SocketAddr;
 use std::ops::AddAssign;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tokio_core::net::{TcpListener, TcpStream};
-use tokio_core::reactor::{Core, Handle, Timeout};
-use tokio_io::{AsyncRead, AsyncWrite};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use tokio;
+use tokio::net::{TcpListener, TcpStream};
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio_io::IoFuture;
 use tokio_io::codec::{Decoder, Encoder, Framed};
+use tokio_timer::Deadline;
 
 use crypto::{Aes256, Signature, SigningPrivateKey, AES_BLOCK_SIZE};
 use data::{Hash, RouterIdentity};
@@ -1073,7 +1075,7 @@ where
         stream: T,
         own_ri: RouterIdentity,
         own_key: SigningPrivateKey,
-    ) -> Box<Future<Item = Framed<T, Codec>, Error = io::Error>> {
+    ) -> IoFuture<Framed<T, Codec>> {
         // Generate a new DH pair
         let dh_key_builder = DHSessionKeyBuilder::new();
         let dh_y = dh_key_builder.get_pub();
@@ -1118,7 +1120,7 @@ where
         own_ri: RouterIdentity,
         own_key: SigningPrivateKey,
         ri_remote: RouterIdentity,
-    ) -> Box<Future<Item = Framed<T, Codec>, Error = io::Error>> {
+    ) -> IoFuture<Framed<T, Codec>> {
         // Generate a new DH pair
         let dh_key_builder = DHSessionKeyBuilder::new();
         let dh_x = dh_key_builder.get_pub();
@@ -1344,20 +1346,22 @@ impl Engine {
         Engine
     }
 
-    pub fn listen(&self, own_ri: RouterIdentity, own_key: SigningPrivateKey, addr: &SocketAddr) {
-        let mut core = Core::new().unwrap();
-        let handle = core.handle();
-
+    pub fn listen(
+        &self,
+        own_ri: RouterIdentity,
+        own_key: SigningPrivateKey,
+        addr: &SocketAddr,
+    ) -> IoFuture<()> {
         // Bind to the address
-        let listener = TcpListener::bind(addr, &handle).unwrap();
+        let listener = TcpListener::bind(addr).unwrap();
 
         // For each incoming connection:
-        let server = listener.incoming().for_each(move |(socket, _)| {
-            info!("Incoming socket!");
+        Box::new(listener.incoming().for_each(move |conn| {
+            info!("Incoming connection!");
             // Execute the handshake
             let conn =
                 HandshakeTransport::<TcpStream, InboundHandshakeCodec, IBHandshakeState>::listen(
-                    socket,
+                    conn,
                     own_ri.clone(),
                     own_key.clone(),
                 );
@@ -1373,12 +1377,10 @@ impl Engine {
                 })
             });
 
-            handle.spawn(process_conn.map_err(|_| ()));
+            tokio::spawn(process_conn.map_err(|_| ()));
 
             Ok(())
-        });
-
-        core.run(server).unwrap();
+        }))
     }
 
     pub fn connect(
@@ -1387,13 +1389,12 @@ impl Engine {
         own_key: SigningPrivateKey,
         peer_ri: RouterIdentity,
         addr: &SocketAddr,
-        handle: &Handle,
-    ) -> Box<Future<Item = Framed<TcpStream, Codec>, Error = io::Error>> {
+    ) -> IoFuture<Framed<TcpStream, Codec>> {
         // Connect to the peer
         // Return a transport ready for sending and receiving Frames
         // The layer above will convert I2NP packets to Frames
         // (or should the Engine handle timesync packets itself?)
-        let transport = Box::new(TcpStream::connect(&addr, &handle).and_then(|socket| {
+        let transport = Box::new(TcpStream::connect(&addr).and_then(|socket| {
             HandshakeTransport::<TcpStream, OutboundHandshakeCodec, OBHandshakeState>::connect(
                 socket,
                 own_ri,
@@ -1403,21 +1404,9 @@ impl Engine {
         }));
 
         // Add a timeout
-        let timeout = Timeout::new(Duration::new(10, 0), &handle).unwrap();
-        Box::new(transport.map(Ok).select(timeout.map(Err)).then(|res| {
-            match res {
-                // The handshake finished before the timeout fired
-                Ok((Ok(conn), _timeout)) => Ok(conn),
-
-                // The timeout fired before the handshake finished
-                Ok((Err(()), _handshake)) => Err(io::Error::new(
-                    io::ErrorKind::Other,
-                    "timeout during handshake",
-                )),
-
-                // One of the futures (handshake or timeout) hit an error
-                Err((e, _other)) => Err(e),
-            }
-        }))
+        Box::new(
+            Deadline::new(transport, Instant::now() + Duration::new(10, 0))
+                .map_err(|_| io::Error::new(io::ErrorKind::Other, "timeout during handshake")),
+        )
     }
 }

@@ -26,8 +26,9 @@ nom = "3.2"
 num = "0.1"
 rand = "0.4"
 sha2 = "0.7"
+tokio = "0.1"
 tokio-io = "0.1"
-tokio-core = "0.1"
+tokio-timer = "0.2"
 
 [dev-dependencies]
 pretty_assertions = "0.5"
