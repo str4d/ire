@@ -241,6 +241,7 @@ fn gen_standard_frame<'a>(
     input: (&'a mut [u8], usize),
     msg: &Message,
 ) -> Result<(&'a mut [u8], usize), GenError> {
+    #[cfg_attr(rustfmt, rustfmt_skip)]
     do_gen!(
         input,
         start:     gen_skip!(2) >>
@@ -261,6 +262,7 @@ fn gen_timestamp_frame<'a>(
     input: (&'a mut [u8], usize),
     timestamp: u32,
 ) -> Result<(&'a mut [u8], usize), GenError> {
+    #[cfg_attr(rustfmt, rustfmt_skip)]
     do_gen!(
         input,
         start: gen_be_u16!(0) >>

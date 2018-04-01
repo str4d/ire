@@ -65,6 +65,7 @@ pub fn gen_mapping<'a>(
     input: (&'a mut [u8], usize),
     m: &Mapping,
 ) -> Result<(&'a mut [u8], usize), GenError> {
+    #[cfg_attr(rustfmt, rustfmt_skip)]
     do_gen!(
         input,
         size:  gen_skip!(2) >>
@@ -152,6 +153,7 @@ fn keycert_padding<'a>(
     IResult::Done(input, spk)
 }
 
+#[cfg_attr(rustfmt, rustfmt_skip)]
 named!(
     key_certificate<KeyCertificate>,
     do_parse!(
@@ -211,6 +213,7 @@ pub fn gen_certificate<'a>(
     input: (&'a mut [u8], usize),
     cert: &Certificate,
 ) -> Result<(&'a mut [u8], usize), GenError> {
+    #[cfg_attr(rustfmt, rustfmt_skip)]
     match cert {
         &Certificate::Null => gen_be_u8!(input, constants::NULL_CERT),
         &Certificate::HashCash(ref payload) => do_gen!(
@@ -268,6 +271,7 @@ pub fn gen_router_identity<'a>(
     input: (&'a mut [u8], usize),
     rid: &RouterIdentity,
 ) -> Result<(&'a mut [u8], usize), GenError> {
+    #[cfg_attr(rustfmt, rustfmt_skip)]
     do_gen!(
         input,
         gen_public_key(&rid.public_key) >>
@@ -305,6 +309,7 @@ pub fn gen_router_secret_keys<'a>(
 
 // Destination
 
+#[cfg_attr(rustfmt, rustfmt_skip)]
 named!(
     destination<Destination>,
     do_parse!(
@@ -348,6 +353,7 @@ fn gen_destination<'a>(
 
 // Lease
 
+#[cfg_attr(rustfmt, rustfmt_skip)]
 named!(
     lease<Lease>,
     do_parse!(
@@ -397,6 +403,7 @@ pub fn gen_lease_set<'a>(
     input: (&'a mut [u8], usize),
     ls: &LeaseSet,
 ) -> Result<(&'a mut [u8], usize), GenError> {
+    #[cfg_attr(rustfmt, rustfmt_skip)]
     do_gen!(
         input,
         gen_destination(&ls.dest) >>
@@ -410,6 +417,7 @@ pub fn gen_lease_set<'a>(
 
 // RouterAddress
 
+#[cfg_attr(rustfmt, rustfmt_skip)]
 named!(
     router_address<RouterAddress>,
     do_parse!(
@@ -430,6 +438,7 @@ fn gen_router_address<'a>(
     input: (&'a mut [u8], usize),
     addr: &RouterAddress,
 ) -> Result<(&'a mut [u8], usize), GenError> {
+    #[cfg_attr(rustfmt, rustfmt_skip)]
     do_gen!(
         input,
         gen_be_u8!(addr.cost) >>
@@ -464,6 +473,7 @@ pub fn gen_router_info<'a>(
     input: (&'a mut [u8], usize),
     ri: &RouterInfo,
 ) -> Result<(&'a mut [u8], usize), GenError> {
+    #[cfg_attr(rustfmt, rustfmt_skip)]
     do_gen!(
         input,
         gen_router_identity(&ri.router_id) >>

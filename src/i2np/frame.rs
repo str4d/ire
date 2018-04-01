@@ -36,6 +36,7 @@ pub fn build_request_record<'a>(
     input: &'a [u8],
     to_peer: Hash,
 ) -> IResult<&'a [u8], BuildRequestRecord> {
+    #[cfg_attr(rustfmt, rustfmt_skip)]
     do_parse!(
         input,
         receive_tid:  tunnel_id >>
@@ -134,6 +135,7 @@ fn gen_compressed_ri<'a>(
     }
 }
 
+#[cfg_attr(rustfmt, rustfmt_skip)]
 named!(
     reply_path<Option<ReplyPath>>,
     do_parse!(
@@ -167,6 +169,7 @@ fn gen_reply_path<'a>(
     }
 }
 
+#[cfg_attr(rustfmt, rustfmt_skip)]
 named!(
     database_store<MessagePayload>,
     do_parse!(
@@ -208,6 +211,7 @@ fn gen_database_store<'a>(
 
 // DatabaseLookup
 
+#[cfg_attr(rustfmt, rustfmt_skip)]
 named!(
     database_lookup_flags<DatabaseLookupFlags>,
     bits!(do_parse!(
@@ -238,6 +242,7 @@ fn gen_database_lookup_flags<'a>(
     gen_be_u8!(input, x)
 }
 
+#[cfg_attr(rustfmt, rustfmt_skip)]
 named!(
     database_lookup<MessagePayload>,
     do_parse!(
@@ -264,6 +269,7 @@ fn gen_database_lookup<'a>(
     input: (&'a mut [u8], usize),
     dl: &DatabaseLookup,
 ) -> Result<(&'a mut [u8], usize), GenError> {
+    #[cfg_attr(rustfmt, rustfmt_skip)]
     do_gen!(
         input,
         gen_hash(&dl.key) >>
@@ -337,6 +343,7 @@ fn gen_delivery_status<'a>(
 
 // Garlic
 
+#[cfg_attr(rustfmt, rustfmt_skip)]
 named!(
     garlic_clove_delivery_instructions<GarlicCloveDeliveryInstructions>,
     do_parse!(
@@ -375,6 +382,7 @@ fn gen_garlic_clove_delivery_instructions<'a>(
     if gcdi.delay_set {
         flags |= 0b10000;
     }
+    #[cfg_attr(rustfmt, rustfmt_skip)]
     do_gen!(
         input,
         gen_be_u8!(flags) >>
@@ -397,6 +405,7 @@ fn gen_garlic_clove_delivery_instructions<'a>(
     )
 }
 
+#[cfg_attr(rustfmt, rustfmt_skip)]
 named!(
     garlic_clove<GarlicClove>,
     do_parse!(
@@ -429,6 +438,7 @@ fn gen_garlic_clove<'a>(
     )
 }
 
+#[cfg_attr(rustfmt, rustfmt_skip)]
 named!(
     garlic<MessagePayload>,
     do_parse!(
