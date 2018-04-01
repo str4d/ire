@@ -1,8 +1,10 @@
 use cookie_factory::GenError;
+use data_encoding::BASE32;
 use nom::IResult;
 use rand::{self, Rng};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
+use std::fmt;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::iter::repeat;
@@ -39,6 +41,12 @@ impl Hash {
         for i in 0..32 {
             self.0[i] ^= other.0[i];
         }
+    }
+}
+
+impl fmt::Display for Hash {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", BASE32.encode(&self.0))
     }
 }
 

@@ -4,6 +4,7 @@ extern crate arrayref;
 extern crate bytes;
 extern crate clap;
 extern crate cookie_factory;
+extern crate data_encoding;
 extern crate ed25519_dalek;
 extern crate env_logger;
 extern crate flate2;
