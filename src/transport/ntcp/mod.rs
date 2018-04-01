@@ -182,7 +182,7 @@ impl Engine {
         // Add a timeout
         Box::new(
             Deadline::new(transport, Instant::now() + Duration::new(10, 0))
-                .map_err(|_| io::Error::new(io::ErrorKind::Other, "timeout during handshake")),
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, e)),
         )
     }
 }
