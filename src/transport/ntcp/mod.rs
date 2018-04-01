@@ -145,8 +145,8 @@ impl Engine {
             let conn = handshake::IBHandshake::new(conn, own_ri.clone(), own_key.clone());
 
             // Once connected:
-            let process_conn = conn.and_then(|conn| {
-                info!("Connection established!");
+            let process_conn = conn.and_then(|(rid, conn)| {
+                info!("Connection established! Peer ID: {}", rid.hash());
                 // For every message received:
                 conn.for_each(|frame| {
                     debug!("Received frame: {:?}", frame);
@@ -166,7 +166,7 @@ impl Engine {
         own_ri: RouterIdentity,
         own_key: SigningPrivateKey,
         peer_ri: RouterInfo,
-    ) -> IoFuture<Framed<TcpStream, Codec>> {
+    ) -> IoFuture<(RouterIdentity, Framed<TcpStream, Codec>)> {
         // TODO return error if there are no valid NTCP addresses (for some reason)
         let addr = peer_ri
             .address(&NTCP_STYLE, |_| true)

@@ -177,7 +177,7 @@ fn cli_client(args: &ArgMatches) -> i32 {
             let ntcp = transport::ntcp::Engine::new("127.0.0.1:0".parse().unwrap());
             let conn = ntcp
                 .connect(rsk.rid, rsk.signing_private_key, peer_ri)
-                .and_then(move |t| {
+                .and_then(move |(ri, t)| {
                     info!("Connection established!");
                     t.send(transport::ntcp::Frame::TimeSync(42))
                 })
