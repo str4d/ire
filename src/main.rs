@@ -160,7 +160,7 @@ fn cli_server(args: &ArgMatches) -> i32 {
         .listen(rsk.rid)
         .map_err(|e| error!("NTCP2 listener error: {}", e));
 
-    tokio::run(listener.join(listener2).map(|_| ()));
+    tokio::run(ntcp.join3(listener, listener2).map(|_| ()));
     0
 }
 

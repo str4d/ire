@@ -22,7 +22,7 @@ pub mod frame;
 // Simple data types
 //
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Hash(pub [u8; 32]);
 
 impl Hash {

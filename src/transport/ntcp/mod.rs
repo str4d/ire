@@ -1,10 +1,13 @@
 use bytes::BytesMut;
 use cookie_factory::GenError;
-use futures::{Future, Stream};
+use futures::sync::mpsc;
+use futures::{task, Async, Future, Poll, Sink, Stream};
 use nom::{Err, Offset};
+use std::collections::HashMap;
 use std::io;
 use std::iter::repeat;
 use std::net::SocketAddr;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio;
 use tokio::net::{TcpListener, TcpStream};
@@ -13,7 +16,7 @@ use tokio_io::IoFuture;
 use tokio_timer::Deadline;
 
 use crypto::{Aes256, SigningPrivateKey};
-use data::{I2PString, RouterAddress, RouterIdentity, RouterInfo};
+use data::{Hash, I2PString, RouterAddress, RouterIdentity, RouterInfo};
 use i2np::Message;
 
 mod frame;
@@ -118,16 +121,145 @@ impl Encoder for Codec {
 }
 
 //
+// Session state
+//
+
+/// Shorthand for the transmit half of an Engine-bound message channel.
+type EngineTx = mpsc::UnboundedSender<(Hash, Frame)>;
+
+/// Shorthand for the receive half of an Engine-bound message channel.
+type EngineRx = mpsc::UnboundedReceiver<(Hash, Frame)>;
+
+/// Shorthand for the transmit half of a Session-bound message channel.
+type SessionTx = mpsc::UnboundedSender<Frame>;
+
+/// Shorthand for the receive half of a Session-bound message channel.
+type SessionRx = mpsc::UnboundedReceiver<Frame>;
+
+struct Shared {
+    sessions: HashMap<Hash, SessionTx>,
+}
+
+impl Shared {
+    fn new() -> Self {
+        Shared {
+            sessions: HashMap::new(),
+        }
+    }
+}
+
+struct Session {
+    ri: RouterIdentity,
+    upstream: Framed<TcpStream, Codec>,
+    state: Arc<Mutex<Shared>>,
+    engine: EngineTx,
+    outbound: SessionRx,
+}
+
+impl Session {
+    fn new(
+        ri: RouterIdentity,
+        upstream: Framed<TcpStream, Codec>,
+        state: Arc<Mutex<Shared>>,
+        engine: EngineTx,
+    ) -> Self {
+        info!("Session established with {}", ri.hash());
+        let (tx, rx) = mpsc::unbounded();
+        state.lock().unwrap().sessions.insert(ri.hash(), tx);
+        Session {
+            ri,
+            upstream,
+            state,
+            engine,
+            outbound: rx,
+        }
+    }
+}
+
+impl Future for Session {
+    type Item = ();
+    type Error = io::Error;
+
+    fn poll(&mut self) -> Poll<(), io::Error> {
+        // Write frames
+        const FRAMES_PER_TICK: usize = 10;
+        for i in 0..FRAMES_PER_TICK {
+            match self.outbound.poll().unwrap() {
+                Async::Ready(Some(f)) => {
+                    self.upstream.start_send(f)?;
+
+                    // If this is the last iteration, the loop will break even
+                    // though there could still be frames to read. Because we did
+                    // not reach `Async::NotReady`, we have to notify ourselves
+                    // in order to tell the executor to schedule the task again.
+                    if i + 1 == FRAMES_PER_TICK {
+                        task::current().notify();
+                    }
+                }
+                _ => break,
+            }
+        }
+
+        // Flush frames
+        self.upstream.poll_complete()?;
+
+        // Read frames
+        while let Async::Ready(f) = self.upstream.poll()? {
+            if let Some(frame) = f {
+                self.engine.unbounded_send((self.ri.hash(), frame)).unwrap();
+            } else {
+                // EOF was reached. The remote peer has disconnected.
+                return Ok(Async::Ready(()));
+            }
+        }
+
+        // We know we got a `NotReady` from either `self.outbound` or `self.upstream`,
+        // so the contract is respected.
+        Ok(Async::NotReady)
+    }
+}
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        info!("Session ended with {}", self.ri.hash());
+        self.state.lock().unwrap().sessions.remove(&self.ri.hash());
+    }
+}
+
+//
 // Connection management engine
 //
 
+struct SessionRefs {
+    state: Arc<Mutex<Shared>>,
+    engine: EngineTx,
+}
+
+impl Stream for SessionRefs {
+    type Item = (Arc<Mutex<Shared>>, EngineTx);
+    type Error = io::Error;
+
+    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
+        Ok(Async::Ready(Some((
+            self.state.clone(),
+            self.engine.clone(),
+        ))))
+    }
+}
+
 pub struct Engine {
     addr: SocketAddr,
+    state: Arc<Mutex<Shared>>,
+    inbound: (EngineTx, EngineRx),
 }
 
 impl Engine {
     pub fn new(addr: SocketAddr) -> Self {
-        Engine { addr }
+        Engine {
+            addr,
+            state: Arc::new(Mutex::new(Shared::new())),
+            inbound: mpsc::unbounded(),
+        }
     }
 
     pub fn address(&self) -> RouterAddress {
@@ -138,22 +270,21 @@ impl Engine {
         // Bind to the address
         let listener = TcpListener::bind(&self.addr).unwrap();
 
+        // Give each incoming connection the references it needs
+        let session_refs = SessionRefs {
+            state: self.state.clone(),
+            engine: self.inbound.0.clone(),
+        };
+        let conns = listener.incoming().zip(session_refs);
+
         // For each incoming connection:
-        Box::new(listener.incoming().for_each(move |conn| {
+        Box::new(conns.for_each(move |(conn, (state, engine))| {
             info!("Incoming connection!");
             // Execute the handshake
             let conn = handshake::IBHandshake::new(conn, own_ri.clone(), own_key.clone());
 
             // Once connected:
-            let process_conn = conn.and_then(|(rid, conn)| {
-                info!("Connection established! Peer ID: {}", rid.hash());
-                // For every message received:
-                conn.for_each(|frame| {
-                    debug!("Received frame: {:?}", frame);
-                    // TODO: Do something
-                    Ok(())
-                })
-            });
+            let process_conn = conn.and_then(|(ri, conn)| Session::new(ri, conn, state, engine));
 
             tokio::spawn(process_conn.map_err(|_| ()));
 
@@ -187,5 +318,27 @@ impl Engine {
             Deadline::new(transport, Instant::now() + Duration::new(10, 0))
                 .map_err(|e| io::Error::new(io::ErrorKind::Other, e)),
         )
+    }
+}
+
+impl Future for Engine {
+    type Item = ();
+    type Error = ();
+
+    fn poll(&mut self) -> Poll<(), ()> {
+        // Read frames
+        while let Async::Ready(f) = self.inbound.1.poll()? {
+            if let Some((hash, frame)) = f {
+                // TODO: Do something
+                debug!("Received frame from {}: {:?}", hash, frame);
+            } else {
+                // EOF was reached. The remote peer has disconnected.
+                return Ok(Async::Ready(()));
+            }
+        }
+
+        // We know we got a `NotReady` from `self.inbound.1`,
+        // so the contract is respected.
+        Ok(Async::NotReady)
     }
 }
