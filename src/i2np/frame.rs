@@ -300,10 +300,8 @@ fn gen_database_lookup<'a>(
 named!(
     database_search_reply<MessagePayload>,
     do_parse!(
-        key:   hash >>
-        peers: length_count!(be_u8, hash) >>
-        from:  hash >>
-        (MessagePayload::DatabaseSearchReply(DatabaseSearchReply { key, peers, from }))
+        key: hash >> peers: length_count!(be_u8, hash) >> from: hash
+            >> (MessagePayload::DatabaseSearchReply(DatabaseSearchReply { key, peers, from }))
     )
 );
 
@@ -313,10 +311,8 @@ fn gen_database_search_reply<'a>(
 ) -> Result<(&'a mut [u8], usize), GenError> {
     do_gen!(
         input,
-        gen_hash(&dsr.key) >>
-        gen_be_u8!(dsr.peers.len() as u8) >>
-        gen_many!(&dsr.peers, gen_hash) >>
-        gen_hash(&dsr.from)
+        gen_hash(&dsr.key) >> gen_be_u8!(dsr.peers.len() as u8) >> gen_many!(&dsr.peers, gen_hash)
+            >> gen_hash(&dsr.from)
     )
 }
 
@@ -325,9 +321,8 @@ fn gen_database_search_reply<'a>(
 named!(
     delivery_status<MessagePayload>,
     do_parse!(
-        msg_id:     be_u32 >>
-        time_stamp: i2p_date >>
-        (MessagePayload::DeliveryStatus(DeliveryStatus { msg_id, time_stamp }))
+        msg_id: be_u32 >> time_stamp: i2p_date
+            >> (MessagePayload::DeliveryStatus(DeliveryStatus { msg_id, time_stamp }))
     )
 );
 
@@ -430,11 +425,9 @@ fn gen_garlic_clove<'a>(
 ) -> Result<(&'a mut [u8], usize), GenError> {
     do_gen!(
         input,
-        gen_garlic_clove_delivery_instructions(&clove.delivery_instructions) >>
-        gen_message(&clove.msg) >>
-        gen_be_u32!(clove.clove_id) >>
-        gen_i2p_date(&clove.expiration) >>
-        gen_certificate(&clove.cert)
+        gen_garlic_clove_delivery_instructions(&clove.delivery_instructions)
+            >> gen_message(&clove.msg) >> gen_be_u32!(clove.clove_id)
+            >> gen_i2p_date(&clove.expiration) >> gen_certificate(&clove.cert)
     )
 }
 
@@ -461,11 +454,9 @@ fn gen_garlic<'a>(
 ) -> Result<(&'a mut [u8], usize), GenError> {
     do_gen!(
         input,
-        gen_be_u8!(g.cloves.len() as u8) >>
-        gen_many!(&g.cloves, gen_garlic_clove) >>
-        gen_certificate(&g.cert) >>
-        gen_be_u32!(g.msg_id) >>
-        gen_i2p_date(&g.expiration)
+        gen_be_u8!(g.cloves.len() as u8) >> gen_many!(&g.cloves, gen_garlic_clove)
+            >> gen_certificate(&g.cert) >> gen_be_u32!(g.msg_id)
+            >> gen_i2p_date(&g.expiration)
     )
 }
 
@@ -474,9 +465,8 @@ fn gen_garlic<'a>(
 named!(
     tunnel_data<MessagePayload>,
     do_parse!(
-        tid:  tunnel_id >>
-        data: take!(1024) >>
-        (MessagePayload::TunnelData(TunnelData::from(tid, array_ref![data, 0, 1024])))
+        tid: tunnel_id >> data: take!(1024)
+            >> (MessagePayload::TunnelData(TunnelData::from(tid, array_ref![data, 0, 1024])))
     )
 );
 
@@ -492,12 +482,11 @@ fn gen_tunnel_data<'a>(
 named!(
     tunnel_gateway<MessagePayload>,
     do_parse!(
-        tid:  tunnel_id >>
-        data: length_bytes!(be_u16) >>
-        (MessagePayload::TunnelGateway(TunnelGateway {
-            tid,
-            data: Vec::from(data),
-        }))
+        tid: tunnel_id >> data: length_bytes!(be_u16)
+            >> (MessagePayload::TunnelGateway(TunnelGateway {
+                tid,
+                data: Vec::from(data),
+            }))
     )
 );
 
@@ -670,12 +659,8 @@ fn gen_checksum<'a>(
 named!(
     header<(u8, u32, I2PDate, u16, u8)>,
     do_parse!(
-        msg_type:   be_u8 >>
-        msg_id:     be_u32 >>
-        expiration: i2p_date >>
-        size:       be_u16 >>
-        cs:         be_u8 >>
-        ((msg_type, msg_id, expiration, size, cs))
+        msg_type: be_u8 >> msg_id: be_u32 >> expiration: i2p_date >> size: be_u16 >> cs: be_u8
+            >> ((msg_type, msg_id, expiration, size, cs))
     )
 );
 

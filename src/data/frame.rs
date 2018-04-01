@@ -176,10 +176,8 @@ fn gen_key_certificate<'a>(
 ) -> Result<(&'a mut [u8], usize), GenError> {
     do_gen!(
         input,
-        gen_sig_type(&kc.sig_type) >>
-        gen_enc_type(&kc.enc_type) >>
-        gen_slice!(&kc.sig_data) >>
-        gen_slice!(&kc.enc_data)
+        gen_sig_type(&kc.sig_type) >> gen_enc_type(&kc.enc_type) >> gen_slice!(&kc.sig_data)
+            >> gen_slice!(&kc.enc_data)
     )
 }
 
@@ -301,9 +299,8 @@ pub fn gen_router_secret_keys<'a>(
 ) -> Result<(&'a mut [u8], usize), GenError> {
     do_gen!(
         input,
-        gen_router_identity(&rsk.rid) >>
-        gen_private_key(&rsk.private_key) >>
-        gen_signing_private_key(&rsk.signing_private_key)
+        gen_router_identity(&rsk.rid) >> gen_private_key(&rsk.private_key)
+            >> gen_signing_private_key(&rsk.signing_private_key)
     )
 }
 
@@ -341,13 +338,12 @@ fn gen_destination<'a>(
 ) -> Result<(&'a mut [u8], usize), GenError> {
     do_gen!(
         input,
-        gen_public_key(&dest.public_key) >>
-        gen_cond!(
-            dest.padding.is_some(),
-            gen_slice!(dest.padding.as_ref().unwrap())
-        ) >>
-        gen_truncated_signing_key(&dest.signing_key) >>
-        gen_certificate(&dest.certificate)
+        gen_public_key(&dest.public_key)
+            >> gen_cond!(
+                dest.padding.is_some(),
+                gen_slice!(dest.padding.as_ref().unwrap())
+            ) >> gen_truncated_signing_key(&dest.signing_key)
+            >> gen_certificate(&dest.certificate)
     )
 }
 
@@ -374,9 +370,7 @@ fn gen_lease<'a>(
 ) -> Result<(&'a mut [u8], usize), GenError> {
     do_gen!(
         input,
-        gen_hash(&lease.tunnel_gw) >>
-        gen_tunnel_id(&lease.tid) >>
-        gen_i2p_date(&lease.end_date)
+        gen_hash(&lease.tunnel_gw) >> gen_tunnel_id(&lease.tid) >> gen_i2p_date(&lease.end_date)
     )
 }
 

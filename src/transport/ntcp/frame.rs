@@ -174,9 +174,9 @@ pub fn session_confirm_b<'a>(
 ) -> IResult<&'a [u8], HandshakeFrame> {
     do_parse!(
         input,
-        sig: call!(signature, &ri_b.signing_key.sig_type()) >>
-             take!(padding_len(ri_b.signing_key.sig_type().sig_len() as usize)) >>
-        (HandshakeFrame::SessionConfirmB(SessionConfirmB { sig }))
+        sig: call!(signature, &ri_b.signing_key.sig_type())
+            >> take!(padding_len(ri_b.signing_key.sig_type().sig_len() as usize))
+            >> (HandshakeFrame::SessionConfirmB(SessionConfirmB { sig }))
     )
 }
 
@@ -215,7 +215,8 @@ fn adler(input: &[u8]) -> [u8; 4] {
 named!(
     get_adler<[u8; 4]>,
     peek!(do_parse!(
-        data: switch!(peek!(be_u16),
+        data:
+            switch!(peek!(be_u16),
             0 => take!(12) |
             size => take!((size+2) as usize + padding_len((size+6) as usize))
         ) >> (adler(data))
