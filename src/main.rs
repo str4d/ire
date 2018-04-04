@@ -34,6 +34,7 @@ extern crate pretty_assertions;
 
 use clap::{App, Arg, ArgMatches, SubCommand};
 use futures::{Future, Sink};
+use std::io;
 
 mod constants;
 mod crypto;
@@ -167,6 +168,7 @@ fn cli_server(args: &ArgMatches) -> i32 {
 fn cli_client(args: &ArgMatches) -> i32 {
     let rsk = data::RouterSecretKeys::from_file(args.value_of("routerKeys").unwrap()).unwrap();
     let peer_ri = data::RouterInfo::from_file(args.value_of("peerInfo").unwrap()).unwrap();
+    let hash = peer_ri.router_id.hash();
 
     let mut ri = data::RouterInfo::new(rsk.rid.clone());
     ri.sign(&rsk.signing_private_key);
@@ -175,19 +177,31 @@ fn cli_client(args: &ArgMatches) -> i32 {
     match args.value_of("transport") {
         Some("NTCP") => {
             let ntcp = transport::ntcp::Engine::new("127.0.0.1:0".parse().unwrap());
+            let handle = ntcp.handle();
             let conn = ntcp
                 .connect(rsk.rid, rsk.signing_private_key, peer_ri)
-                .and_then(move |(ri, t)| {
-                    info!("Connection established!");
-                    t.send(transport::ntcp::Frame::TimeSync(42))
+                .and_then(move |_| {
+                    match handle
+                        .unbounded_send((hash.clone(), transport::ntcp::Frame::TimeSync(42)))
+                    {
+                        Ok(()) => Ok((handle, hash)),
+                        Err(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
+                    }
                 })
-                .and_then(|t| t.send(transport::ntcp::Frame::Standard(i2np::Message::dummy_data())))
+                .and_then(|(handle, hash)| {
+                    handle
+                        .unbounded_send((
+                            hash.clone(),
+                            transport::ntcp::Frame::Standard(i2np::Message::dummy_data()),
+                        ))
+                        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+                })
                 .and_then(|_| {
                     info!("Dummy data sent!");
                     Ok(())
                 })
                 .map_err(|e| error!("Connection error: {}", e));
-            tokio::run(conn);
+            tokio::run(ntcp.join(conn).map(|_| ()));
         }
         Some("NTCP2") => {
             let ntcp2 = transport::ntcp2::Engine::new("127.0.0.1:0".parse().unwrap());

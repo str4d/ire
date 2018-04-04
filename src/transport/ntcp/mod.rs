@@ -251,6 +251,7 @@ pub struct Engine {
     addr: SocketAddr,
     state: Arc<Mutex<Shared>>,
     inbound: (EngineTx, EngineRx),
+    outbound: (EngineTx, EngineRx),
 }
 
 impl Engine {
@@ -259,7 +260,12 @@ impl Engine {
             addr,
             state: Arc::new(Mutex::new(Shared::new())),
             inbound: mpsc::unbounded(),
+            outbound: mpsc::unbounded(),
         }
+    }
+
+    pub fn handle(&self) -> EngineTx {
+        self.outbound.0.clone()
     }
 
     pub fn address(&self) -> RouterAddress {
@@ -297,7 +303,9 @@ impl Engine {
         own_ri: RouterIdentity,
         own_key: SigningPrivateKey,
         peer_ri: RouterInfo,
-    ) -> IoFuture<(RouterIdentity, Framed<TcpStream, Codec>)> {
+    ) -> IoFuture<()> {
+        let state = self.state.clone();
+        let engine = self.inbound.0.clone();
         // TODO return error if there are no valid NTCP addresses (for some reason)
         let addr = peer_ri
             .address(&NTCP_STYLE, |_| true)
@@ -306,18 +314,20 @@ impl Engine {
             .unwrap();
 
         // Connect to the peer
-        // Return a transport ready for sending and receiving Frames
-        // The layer above will convert I2NP packets to Frames
-        // (or should the Engine handle timesync packets itself?)
-        let transport = Box::new(TcpStream::connect(&addr).and_then(|socket| {
+        let conn = TcpStream::connect(&addr).and_then(|socket| {
             handshake::OBHandshake::new(socket, own_ri, own_key, peer_ri.router_id)
-        }));
+        });
 
         // Add a timeout
-        Box::new(
-            Deadline::new(transport, Instant::now() + Duration::new(10, 0))
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, e)),
-        )
+        let timed = Deadline::new(conn, Instant::now() + Duration::new(10, 0))
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e));
+
+        // Once connected:
+        Box::new(timed.and_then(|(ri, conn)| {
+            let session = Session::new(ri, conn, state, engine);
+            tokio::spawn(session.map_err(|_| ()));
+            Ok(())
+        }))
     }
 }
 
@@ -326,6 +336,30 @@ impl Future for Engine {
     type Error = ();
 
     fn poll(&mut self) -> Poll<(), ()> {
+        // Write frames
+        const FRAMES_PER_TICK: usize = 10;
+        for i in 0..FRAMES_PER_TICK {
+            match self.outbound.1.poll().unwrap() {
+                Async::Ready(Some((hash, frame))) => {
+                    match self.state.lock().unwrap().sessions.get(&hash) {
+                        Some(session) => {
+                            session.unbounded_send(frame).unwrap();
+                        }
+                        None => error!("No open session for {}", hash), // TODO: Open session instead of dropping
+                    }
+
+                    // If this is the last iteration, the loop will break even
+                    // though there could still be frames to read. Because we did
+                    // not reach `Async::NotReady`, we have to notify ourselves
+                    // in order to tell the executor to schedule the task again.
+                    if i + 1 == FRAMES_PER_TICK {
+                        task::current().notify();
+                    }
+                }
+                _ => break,
+            }
+        }
+
         // Read frames
         while let Async::Ready(f) = self.inbound.1.poll()? {
             if let Some((hash, frame)) = f {
@@ -337,7 +371,7 @@ impl Future for Engine {
             }
         }
 
-        // We know we got a `NotReady` from `self.inbound.1`,
+        // We know we got a `NotReady` from both `self.outbound.1` and `self.inbound.1`,
         // so the contract is respected.
         Ok(Async::NotReady)
     }
