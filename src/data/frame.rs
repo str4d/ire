@@ -458,12 +458,12 @@ named!(pub router_info<RouterInfo>,
             addresses,
             peers,
             options,
-            signature,
+            signature: Some(signature),
         })
     )
 );
 
-pub fn gen_router_info<'a>(
+pub fn gen_router_info_minus_sig<'a>(
     input: (&'a mut [u8], usize),
     ri: &RouterInfo,
 ) -> Result<(&'a mut [u8], usize), GenError> {
@@ -476,9 +476,18 @@ pub fn gen_router_info<'a>(
         gen_many_ref!(&ri.addresses, gen_router_address) >>
         gen_be_u8!(ri.peers.len() as u8) >>
         gen_many_ref!(&ri.peers, gen_hash) >>
-        gen_mapping(&ri.options) >>
-        gen_signature(&ri.signature)
+        gen_mapping(&ri.options)
     )
+}
+
+pub fn gen_router_info<'a>(
+    input: (&'a mut [u8], usize),
+    ri: &RouterInfo,
+) -> Result<(&'a mut [u8], usize), GenError> {
+    match &ri.signature {
+        &Some(ref s) => do_gen!(input, gen_router_info_minus_sig(&ri) >> gen_signature(s)),
+        &None => Err(GenError::CustomError(1)),
+    }
 }
 
 #[cfg(test)]

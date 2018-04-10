@@ -8,6 +8,7 @@ use std::fmt;
 use std::fs::File;
 use std::io::{Read, Write};
 use std::iter::repeat;
+use std::net::SocketAddr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use constants;
@@ -52,7 +53,7 @@ impl fmt::Display for Hash {
 
 /// The number of milliseconds since midnight on January 1, 1970 in the GMT
 /// timezone. If the number is 0, the date is undefined or null.
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct I2PDate(u64);
 
 impl I2PDate {
@@ -62,10 +63,17 @@ impl I2PDate {
     }
 }
 
-#[derive(Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct I2PString(String);
-#[derive(Debug)]
-pub struct Mapping(HashMap<I2PString, I2PString>);
+
+impl I2PString {
+    pub fn new(string: &str) -> Self {
+        I2PString(String::from(string))
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct Mapping(pub HashMap<I2PString, I2PString>);
 
 pub struct SessionTag(pub [u8; 32]);
 
@@ -266,12 +274,44 @@ pub struct LeaseSet {
     sig: Signature,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct RouterAddress {
     cost: u8,
     expiration: I2PDate,
     transport_style: I2PString,
     options: Mapping,
+}
+
+impl RouterAddress {
+    pub fn new(transport_style: &I2PString, addr: SocketAddr) -> Self {
+        let mut options = HashMap::new();
+        options.insert(
+            I2PString(String::from("host")),
+            I2PString(addr.ip().to_string()),
+        );
+        options.insert(
+            I2PString(String::from("port")),
+            I2PString(addr.port().to_string()),
+        );
+        RouterAddress {
+            cost: 0,
+            expiration: I2PDate(0),
+            transport_style: transport_style.clone(),
+            options: Mapping(options),
+        }
+    }
+
+    pub fn addr(&self) -> Option<SocketAddr> {
+        let host = self.options.0.get(&I2PString(String::from("host")));
+        let port = self.options.0.get(&I2PString(String::from("port")));
+        match (host, port) {
+            (Some(host), Some(port)) => match (host.0.parse(), port.0.parse()) {
+                (Ok(ip), Ok(port)) => Some(SocketAddr::new(ip, port)),
+                _ => None,
+            },
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -281,7 +321,105 @@ pub struct RouterInfo {
     addresses: Vec<RouterAddress>,
     peers: Vec<Hash>,
     options: Mapping,
-    signature: Signature,
+    signature: Option<Signature>,
+}
+
+impl RouterInfo {
+    pub fn new(rid: RouterIdentity) -> Self {
+        RouterInfo {
+            router_id: rid,
+            published: I2PDate::from_system_time(SystemTime::now()),
+            addresses: Vec::new(),
+            peers: Vec::new(),
+            options: Mapping(HashMap::new()),
+            signature: None,
+        }
+    }
+
+    /// Set the addresses in this RouterInfo.
+    ///
+    /// Caller must re-sign the RouterInfo afterwards.
+    pub fn set_addresses(&mut self, addrs: Vec<RouterAddress>) {
+        self.addresses = addrs;
+        self.signature = None;
+    }
+
+    pub fn address(&self, style: &I2PString) -> Option<RouterAddress> {
+        let addrs: Vec<&RouterAddress> = self.addresses
+            .iter()
+            .filter(|a| a.transport_style == *style)
+            .collect();
+        if addrs.len() > 0 {
+            Some(addrs[0].clone())
+        } else {
+            None
+        }
+    }
+
+    pub fn from_file(path: &str) -> Self {
+        let mut ri = File::open(path).unwrap();
+        let mut data: Vec<u8> = Vec::new();
+        ri.read_to_end(&mut data).unwrap();
+        frame::router_info(&data[..]).unwrap().1
+    }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let base_len = 435; // 387 + 4 + 1 + 1 + 2 + 40
+        let mut buf = Vec::with_capacity(base_len);
+        buf.extend(repeat(0).take(base_len));
+        loop {
+            match frame::gen_router_info((&mut buf[..], 0), self).map(|tup| tup.1) {
+                Ok(sz) => {
+                    buf.truncate(sz);
+                    return buf;
+                }
+                Err(e) => match e {
+                    GenError::BufferTooSmall(sz) => {
+                        buf.extend(repeat(0).take(sz - base_len));
+                    }
+                    e => panic!("Couldn't serialize RouterInfo: {:?}", e),
+                },
+            }
+        }
+    }
+
+    pub fn to_file(&self, path: &str) {
+        let mut ri = File::create(path).unwrap();
+        ri.write(&self.to_bytes());
+    }
+
+    fn signature_bytes(&self) -> Vec<u8> {
+        let base_len = 395; // 387 + 4 + 1 + 1 + 2
+        let mut buf = Vec::with_capacity(base_len);
+        buf.extend(repeat(0).take(base_len));
+        loop {
+            match frame::gen_router_info_minus_sig((&mut buf[..], 0), self).map(|tup| tup.1) {
+                Ok(sz) => {
+                    buf.truncate(sz);
+                    break;
+                }
+                Err(e) => match e {
+                    GenError::BufferTooSmall(sz) => {
+                        buf.extend(repeat(0).take(sz - base_len));
+                    }
+                    _ => panic!("Couldn't serialize RouterInfo signature message"),
+                },
+            }
+        }
+        buf
+    }
+
+    pub fn sign(&mut self, spk: &SigningPrivateKey) {
+        let sig_msg = self.signature_bytes();
+        self.signature = Some(spk.sign(&sig_msg));
+    }
+
+    pub fn verify(&self) -> bool {
+        let sig_msg = self.signature_bytes();
+        self.router_id
+            .signing_key
+            .verify(&sig_msg, &self.signature.as_ref().unwrap())
+    }
 }
 
 #[cfg(test)]
@@ -317,6 +455,27 @@ mod tests {
         match frame::router_info(data) {
             IResult::Done(_, ri) => {
                 assert_eq!(ri.router_id.hash(), ri_hash);
+            }
+            _ => panic!("RI parsing failed"),
+        }
+    }
+
+    #[test]
+    fn router_info_sign() {
+        let rsk = RouterSecretKeys::new();
+        let mut ri = RouterInfo::new(rsk.rid);
+        assert!(ri.signature.is_none());
+        ri.sign(&rsk.signing_private_key);
+        assert!(ri.signature.is_some());
+        assert!(ri.verify());
+    }
+
+    #[test]
+    fn router_info_verify() {
+        let data = include_bytes!("../../assets/router.info");
+        match frame::router_info(data) {
+            IResult::Done(_, ri) => {
+                assert!(ri.verify());
             }
             _ => panic!("RI parsing failed"),
         }
