@@ -436,10 +436,13 @@ impl RouterInfo {
     }
 
     pub fn verify(&self) -> bool {
-        let sig_msg = self.signature_bytes();
-        self.router_id
-            .signing_key
-            .verify(&sig_msg, &self.signature.as_ref().unwrap())
+        match &self.signature.as_ref() {
+            &Some(s) => {
+                let sig_msg = self.signature_bytes();
+                self.router_id.signing_key.verify(&sig_msg, s)
+            }
+            &None => false,
+        }
     }
 }
 
