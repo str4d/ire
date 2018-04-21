@@ -517,7 +517,9 @@ fn tunnel_build<'a>(input: &'a [u8]) -> IResult<&'a [u8], MessagePayload> {
     match count!(input, take!(528), 8) {
         IResult::Done(i, r) => {
             let mut xs = [[0u8; 528]; 8];
-            r.iter().enumerate().map(|(i, &s)| xs[i].copy_from_slice(s));
+            for (i, &s) in r.iter().enumerate() {
+                xs[i].copy_from_slice(s);
+            }
             IResult::Done(i, MessagePayload::TunnelBuild(xs))
         }
         IResult::Error(e) => IResult::Error(e),
@@ -543,7 +545,9 @@ fn tunnel_build_reply<'a>(input: &'a [u8]) -> IResult<&'a [u8], MessagePayload> 
     match count!(input, take!(528), 8) {
         IResult::Done(i, r) => {
             let mut xs = [[0u8; 528]; 8];
-            r.iter().enumerate().map(|(i, &s)| xs[i].copy_from_slice(s));
+            for (i, &s) in r.iter().enumerate() {
+                xs[i].copy_from_slice(s);
+            }
             IResult::Done(i, MessagePayload::TunnelBuildReply(xs))
         }
         IResult::Error(e) => IResult::Error(e),
