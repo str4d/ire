@@ -99,13 +99,13 @@ fn cli_gen(args: &ArgMatches) -> i32 {
     let mut ri = data::RouterInfo::new(pkf.rid.clone());
     ri.set_addresses(vec![ra]);
     ri.sign(&pkf.signing_private_key);
-    ri.to_file(args.value_of("routerInfo").unwrap());
-    pkf.to_file(args.value_of("routerKeys").unwrap());
+    ri.to_file(args.value_of("routerInfo").unwrap()).unwrap();
+    pkf.to_file(args.value_of("routerKeys").unwrap()).unwrap();
     0
 }
 
 fn cli_server(args: &ArgMatches) -> i32 {
-    let rsk = data::RouterSecretKeys::from_file(args.value_of("routerKeys").unwrap());
+    let rsk = data::RouterSecretKeys::from_file(args.value_of("routerKeys").unwrap()).unwrap();
     let addr = args.value_of("bind").unwrap().parse().unwrap();
 
     // Accept all incoming sockets
@@ -117,8 +117,8 @@ fn cli_server(args: &ArgMatches) -> i32 {
 }
 
 fn cli_client(args: &ArgMatches) -> i32 {
-    let rsk = data::RouterSecretKeys::from_file(args.value_of("routerKeys").unwrap());
-    let peer_ri = data::RouterInfo::from_file(args.value_of("peerInfo").unwrap());
+    let rsk = data::RouterSecretKeys::from_file(args.value_of("routerKeys").unwrap()).unwrap();
+    let peer_ri = data::RouterInfo::from_file(args.value_of("peerInfo").unwrap()).unwrap();
 
     info!("Connecting to {}", peer_ri.router_id.hash());
     let ntcp = transport::ntcp::Engine::new();

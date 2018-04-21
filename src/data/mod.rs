@@ -6,7 +6,7 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fmt;
 use std::fs::File;
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 use std::iter::repeat;
 use std::net::SocketAddr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -135,11 +135,18 @@ pub struct RouterIdentity {
 }
 
 impl RouterIdentity {
-    pub fn from_file(path: &str) -> Self {
-        let mut rid = File::open(path).unwrap();
+    pub fn from_file(path: &str) -> io::Result<Self> {
+        let mut rid = File::open(path)?;
         let mut data: Vec<u8> = Vec::new();
-        rid.read_to_end(&mut data).unwrap();
-        frame::router_identity(&data[..]).unwrap().1
+        rid.read_to_end(&mut data)?;
+        match frame::router_identity(&data[..]) {
+            IResult::Done(_, res) => Ok(res),
+            IResult::Error(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
+            IResult::Incomplete(n) => Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                format!("needed: {:?}", n),
+            )),
+        }
     }
 
     fn from_secrets(private_key: &PrivateKey, signing_private_key: &SigningPrivateKey) -> Self {
@@ -193,9 +200,9 @@ impl RouterIdentity {
         }
     }
 
-    pub fn to_file(&self, path: &str) {
-        let mut rid = File::create(path).unwrap();
-        rid.write(&self.to_bytes());
+    pub fn to_file(&self, path: &str) -> io::Result<()> {
+        let mut rid = File::create(path)?;
+        rid.write(&self.to_bytes()).map(|_| ())
     }
 
     pub fn hash(&self) -> Hash {
@@ -220,11 +227,18 @@ impl RouterSecretKeys {
         }
     }
 
-    pub fn from_file(path: &str) -> Self {
-        let mut rsk = File::open(path).unwrap();
+    pub fn from_file(path: &str) -> io::Result<Self> {
+        let mut rsk = File::open(path)?;
         let mut data: Vec<u8> = Vec::new();
-        rsk.read_to_end(&mut data).unwrap();
-        frame::router_secret_keys(&data[..]).unwrap().1
+        rsk.read_to_end(&mut data)?;
+        match frame::router_secret_keys(&data[..]) {
+            IResult::Done(_, res) => Ok(res),
+            IResult::Error(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
+            IResult::Incomplete(n) => Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                format!("needed: {:?}", n),
+            )),
+        }
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
@@ -247,9 +261,9 @@ impl RouterSecretKeys {
         }
     }
 
-    pub fn to_file(&self, path: &str) {
-        let mut rid = File::create(path).unwrap();
-        rid.write(&self.to_bytes());
+    pub fn to_file(&self, path: &str) -> io::Result<()> {
+        let mut rid = File::create(path)?;
+        rid.write(&self.to_bytes()).map(|_| ())
     }
 }
 
@@ -356,11 +370,18 @@ impl RouterInfo {
         }
     }
 
-    pub fn from_file(path: &str) -> Self {
-        let mut ri = File::open(path).unwrap();
+    pub fn from_file(path: &str) -> io::Result<Self> {
+        let mut ri = File::open(path)?;
         let mut data: Vec<u8> = Vec::new();
-        ri.read_to_end(&mut data).unwrap();
-        frame::router_info(&data[..]).unwrap().1
+        ri.read_to_end(&mut data)?;
+        match frame::router_info(&data[..]) {
+            IResult::Done(_, res) => Ok(res),
+            IResult::Error(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
+            IResult::Incomplete(n) => Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                format!("needed: {:?}", n),
+            )),
+        }
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
@@ -383,9 +404,9 @@ impl RouterInfo {
         }
     }
 
-    pub fn to_file(&self, path: &str) {
-        let mut ri = File::create(path).unwrap();
-        ri.write(&self.to_bytes());
+    pub fn to_file(&self, path: &str) -> io::Result<()> {
+        let mut ri = File::create(path)?;
+        ri.write(&self.to_bytes()).map(|_| ())
     }
 
     fn signature_bytes(&self) -> Vec<u8> {
