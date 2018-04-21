@@ -108,10 +108,10 @@ fn compressed_ri<'a>(input: &'a [u8]) -> IResult<&'a [u8], RouterInfo> {
             let mut d = GzDecoder::new(payload);
             match d.read_to_end(&mut buf) {
                 Ok(_) => {}
-                Err(e) => return IResult::Error(ErrorKind::Custom(1)),
+                Err(_) => return IResult::Error(ErrorKind::Custom(1)),
             };
             match router_info(&buf) {
-                IResult::Done(x, ri) => IResult::Done(i, ri),
+                IResult::Done(_, ri) => IResult::Done(i, ri),
                 IResult::Error(e) => IResult::Error(e),
                 IResult::Incomplete(n) => IResult::Incomplete(n),
             }
@@ -126,12 +126,15 @@ fn gen_compressed_ri<'a>(
     ri: &RouterInfo,
 ) -> Result<(&'a mut [u8], usize), GenError> {
     let mut buf = Vec::new();
-    gen_router_info((&mut buf, 0), ri);
+    gen_router_info((&mut buf, 0), ri)?;
     let mut e = GzEncoder::new(Vec::new(), Compression::best());
-    e.write(&buf);
-    match e.finish() {
-        Ok(payload) => do_gen!(input, gen_be_u16!(payload.len()) >> gen_slice!(payload)),
-        Err(e) => Err(GenError::CustomError(1)),
+    match e.write(&buf) {
+        Ok(n) if n < buf.len() => Err(GenError::CustomError(1)),
+        Ok(_) => match e.finish() {
+            Ok(payload) => do_gen!(input, gen_be_u16!(payload.len()) >> gen_slice!(payload)),
+            Err(_) => Err(GenError::CustomError(1)),
+        },
+        Err(_) => Err(GenError::CustomError(1)),
     }
 }
 
@@ -517,7 +520,9 @@ fn tunnel_build<'a>(input: &'a [u8]) -> IResult<&'a [u8], MessagePayload> {
     match count!(input, take!(528), 8) {
         IResult::Done(i, r) => {
             let mut xs = [[0u8; 528]; 8];
-            r.iter().enumerate().map(|(i, &s)| xs[i].copy_from_slice(s));
+            for (i, &s) in r.iter().enumerate() {
+                xs[i].copy_from_slice(s);
+            }
             IResult::Done(i, MessagePayload::TunnelBuild(xs))
         }
         IResult::Error(e) => IResult::Error(e),
@@ -543,7 +548,9 @@ fn tunnel_build_reply<'a>(input: &'a [u8]) -> IResult<&'a [u8], MessagePayload> 
     match count!(input, take!(528), 8) {
         IResult::Done(i, r) => {
             let mut xs = [[0u8; 528]; 8];
-            r.iter().enumerate().map(|(i, &s)| xs[i].copy_from_slice(s));
+            for (i, &s) in r.iter().enumerate() {
+                xs[i].copy_from_slice(s);
+            }
             IResult::Done(i, MessagePayload::TunnelBuildReply(xs))
         }
         IResult::Error(e) => IResult::Error(e),
