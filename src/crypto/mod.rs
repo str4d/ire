@@ -5,7 +5,7 @@ use ed25519_dalek::Keypair as EdKeypair;
 use ed25519_dalek::PublicKey as EdPublicKey;
 use ed25519_dalek::SecretKey as EdSecretKey;
 use ed25519_dalek::Signature as EdSignature;
-use nom::IResult;
+use nom::Err;
 use num::BigUint;
 use rand::{self, Rng};
 use sha2::Sha512;
@@ -40,9 +40,9 @@ pub enum SigType {
 impl SigType {
     pub fn from_bytes(buf: &[u8]) -> Option<Self> {
         match frame::sig_type(buf) {
-            IResult::Done(i, s) => Some(s),
-            IResult::Incomplete(_) => None,
-            IResult::Error(_) => panic!("Unsupported SigType"),
+            Ok((_, s)) => Some(s),
+            Err(Err::Incomplete(_)) => None,
+            Err(Err::Error(_)) | Err(Err::Failure(_)) => panic!("Unsupported SigType"),
         }
     }
 
@@ -114,9 +114,9 @@ pub enum EncType {
 impl EncType {
     pub fn from_bytes(buf: &[u8]) -> Option<Self> {
         match frame::enc_type(buf) {
-            IResult::Done(i, s) => Some(s),
-            IResult::Incomplete(_) => None,
-            IResult::Error(_) => panic!("Unsupported EncType"),
+            Ok((_, s)) => Some(s),
+            Err(Err::Incomplete(_)) => None,
+            Err(Err::Error(_)) | Err(Err::Failure(_)) => panic!("Unsupported EncType"),
         }
     }
 

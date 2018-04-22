@@ -1,7 +1,7 @@
 use bytes::BytesMut;
 use cookie_factory::GenError;
 use futures::{future, Async, Future, Poll, Sink, StartSend, Stream};
-use nom::{IResult, Offset};
+use nom::{Err, Offset};
 use std::io;
 use std::iter::repeat;
 use std::ops::AddAssign;
@@ -117,14 +117,14 @@ impl Decoder for InboundHandshakeCodec {
 
             // Handle errors
             match res {
-                IResult::Incomplete(_) => return Ok(None),
-                IResult::Error(e) => {
+                Err(Err::Incomplete(_)) => return Ok(None),
+                Err(Err::Error(e)) | Err(Err::Failure(e)) => {
                     return Err(io::Error::new(
                         io::ErrorKind::Other,
                         format!("parse error: {:?}", e),
                     ))
                 }
-                IResult::Done(i, frame) => (buf.offset(i), frame),
+                Ok((i, frame)) => (buf.offset(i), frame),
             }
         };
 
@@ -291,14 +291,14 @@ impl Decoder for OutboundHandshakeCodec {
             let res = match self.state {
                 HandshakeState::SessionCreated => {
                     match frame::session_created_enc(&buf) {
-                        IResult::Incomplete(_) => return Ok(None),
-                        IResult::Error(e) => {
+                        Err(Err::Incomplete(_)) => return Ok(None),
+                        Err(Err::Error(e)) | Err(Err::Failure(e)) => {
                             return Err(io::Error::new(
                                 io::ErrorKind::Other,
                                 format!("parse error: {:?}", e),
                             ))
                         }
-                        IResult::Done(i, mut sce) => {
+                        Ok((i, mut sce)) => {
                             // Set up cryptor
                             let session_key = self.dh_key_builder
                                 .build_session_key(array_ref![sce.0, 0, 256]);
@@ -311,26 +311,26 @@ impl Decoder for OutboundHandshakeCodec {
                             match self.aes.as_mut().unwrap().decrypt_blocks(&mut sce.1) {
                                 Some(end) if end == sce.1.len() => {
                                     match frame::session_created_dec(&sce.1) {
-                                        IResult::Incomplete(_) => {
+                                        Err(Err::Incomplete(_)) => {
                                             return Err(io::Error::new(
                                                 io::ErrorKind::Other,
                                                 format!("incomplete parse error"),
                                             ))
                                         }
-                                        IResult::Error(e) => {
+                                        Err(Err::Error(e)) | Err(Err::Failure(e)) => {
                                             return Err(io::Error::new(
                                                 io::ErrorKind::Other,
                                                 format!("parse error: {:?}", e),
                                             ))
                                         }
-                                        IResult::Done(_, scd) => IResult::Done(
+                                        Ok((_, scd)) => Ok((
                                             i,
                                             HandshakeFrame::SessionCreated(SessionCreated {
                                                 dh_y: sce.0,
                                                 hash: scd.0,
                                                 ts_b: scd.1,
                                             }),
-                                        ),
+                                        )),
                                     }
                                 }
                                 Some(sz) => {
@@ -364,14 +364,14 @@ impl Decoder for OutboundHandshakeCodec {
 
             // Handle parser result
             match res {
-                IResult::Incomplete(_) => return Ok(None),
-                IResult::Error(e) => {
+                Err(Err::Incomplete(_)) => return Ok(None),
+                Err(Err::Error(e)) | Err(Err::Failure(e)) => {
                     return Err(io::Error::new(
                         io::ErrorKind::Other,
                         format!("parse error: {:?}", e),
                     ))
                 }
-                IResult::Done(i, frame) => (buf.offset(i), frame),
+                Ok((i, frame)) => (buf.offset(i), frame),
             }
         };
 

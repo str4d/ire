@@ -142,6 +142,8 @@ pub fn gen_frame<'a>(
 
 #[cfg(test)]
 mod tests {
+    use nom::Err;
+
     use super::*;
 
     #[test]
@@ -196,13 +198,13 @@ mod tests {
             0x00, 0x2a,
         ];
         match get_adler(&data) {
-            IResult::Done(i, cs) => {
+            Ok((_, cs)) => {
                 assert_eq!(cs, &data[12..]);
             }
-            IResult::Error(e) => {
+            Err(Err::Error(e)) | Err(Err::Failure(e)) => {
                 panic!("error in get_adler: {:?}", e);
             }
-            IResult::Incomplete(n) => {
+            Err(Err::Incomplete(n)) => {
                 panic!("incomplete get_adler: {:?}", n);
             }
         }
@@ -216,13 +218,13 @@ mod tests {
             0x0b, 0x28, 0x00, 0xd0,
         ];
         match get_adler(&data) {
-            IResult::Done(i, cs) => {
+            Ok((_, cs)) => {
                 assert_eq!(cs, &data[28..]);
             }
-            IResult::Error(e) => {
+            Err(Err::Error(e)) | Err(Err::Failure(e)) => {
                 panic!("error in get_adler: {:?}", e);
             }
-            IResult::Incomplete(n) => {
+            Err(Err::Incomplete(n)) => {
                 panic!("incomplete get_adler: {:?}", n);
             }
         }
@@ -235,13 +237,13 @@ mod tests {
             0x00, 0x20,
         ];
         match get_adler(&data) {
-            IResult::Done(i, cs) => {
+            Ok((_, cs)) => {
                 assert_eq!(cs, &data[12..]);
             }
-            IResult::Error(e) => {
+            Err(Err::Error(e)) | Err(Err::Failure(e)) => {
                 panic!("error in get_adler: {:?}", e);
             }
-            IResult::Incomplete(n) => {
+            Err(Err::Incomplete(n)) => {
                 panic!("incomplete get_adler: {:?}", n);
             }
         }
