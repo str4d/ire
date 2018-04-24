@@ -2,7 +2,7 @@ use cookie_factory::*;
 use flate2::Compression;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
-use nom::{ErrorKind, be_u16, be_u32, be_u8};
+use nom::{Context, Err, ErrorKind, be_u16, be_u32, be_u8};
 use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
 
@@ -17,15 +17,10 @@ use super::*;
 //
 
 fn iv<'a>(input: &'a [u8]) -> IResult<&'a [u8], [u8; 16]> {
-    match take!(input, 16) {
-        IResult::Done(i, iv) => {
-            let mut x = [0u8; 16];
-            x.copy_from_slice(iv);
-            IResult::Done(i, x)
-        }
-        IResult::Error(e) => IResult::Error(e),
-        IResult::Incomplete(n) => IResult::Incomplete(n),
-    }
+    let (i, iv) = take!(input, 16)?;
+    let mut x = [0u8; 16];
+    x.copy_from_slice(iv);
+    Ok((i, x))
 }
 
 //
@@ -79,9 +74,9 @@ fn validate_build_response_record<'a>(
     hasher.input(&[reply]);
     let res = hasher.result();
     if hash.eq(&Hash::from_bytes(array_ref![res, 0, 32])) {
-        IResult::Done(input, ())
+        Ok((input, ()))
     } else {
-        IResult::Error(error_code!(ErrorKind::Custom(1)))
+        Err(Err::Error(error_position!(input, ErrorKind::Custom(1))))
     }
 }
 
@@ -102,22 +97,17 @@ named!(pub build_response_record<BuildResponseRecord>,
 // DatabaseStore
 
 fn compressed_ri<'a>(input: &'a [u8]) -> IResult<&'a [u8], RouterInfo> {
-    match do_parse!(input, size: be_u16 >> payload: take!(size) >> (payload)) {
-        IResult::Done(i, payload) => {
-            let mut buf = Vec::new();
-            let mut d = GzDecoder::new(payload);
-            match d.read_to_end(&mut buf) {
-                Ok(_) => {}
-                Err(_) => return IResult::Error(ErrorKind::Custom(1)),
-            };
-            match router_info(&buf) {
-                IResult::Done(_, ri) => IResult::Done(i, ri),
-                IResult::Error(e) => IResult::Error(e),
-                IResult::Incomplete(n) => IResult::Incomplete(n),
-            }
-        }
-        IResult::Error(e) => IResult::Error(e),
-        IResult::Incomplete(n) => IResult::Incomplete(n),
+    let (i, payload) = do_parse!(input, size: be_u16 >> payload: take!(size) >> (payload))?;
+    let mut buf = Vec::new();
+    let mut d = GzDecoder::new(payload);
+    match d.read_to_end(&mut buf) {
+        Ok(_) => match router_info(&buf) {
+            Ok((_, ri)) => Ok((i, ri)),
+            Err(Err::Incomplete(n)) => Err(Err::Incomplete(n)),
+            Err(Err::Error(c)) => Err(Err::Error(Context::Code(input, c.into_error_kind()))),
+            Err(Err::Failure(c)) => Err(Err::Failure(Context::Code(input, c.into_error_kind()))),
+        },
+        Err(_) => Err(Err::Error(error_position!(input, ErrorKind::Custom(1)))),
     }
 }
 
@@ -517,17 +507,12 @@ fn gen_data<'a>(
 // TunnelBuild
 
 fn tunnel_build<'a>(input: &'a [u8]) -> IResult<&'a [u8], MessagePayload> {
-    match count!(input, take!(528), 8) {
-        IResult::Done(i, r) => {
-            let mut xs = [[0u8; 528]; 8];
-            for (i, &s) in r.iter().enumerate() {
-                xs[i].copy_from_slice(s);
-            }
-            IResult::Done(i, MessagePayload::TunnelBuild(xs))
-        }
-        IResult::Error(e) => IResult::Error(e),
-        IResult::Incomplete(n) => IResult::Incomplete(n),
+    let (i, r) = count!(input, take!(528), 8)?;
+    let mut xs = [[0u8; 528]; 8];
+    for (i, &s) in r.iter().enumerate() {
+        xs[i].copy_from_slice(s);
     }
+    Ok((i, MessagePayload::TunnelBuild(xs)))
 }
 
 fn gen_tunnel_build<'a>(
@@ -545,17 +530,12 @@ fn gen_tunnel_build<'a>(
 // TunnelBuildReply
 
 fn tunnel_build_reply<'a>(input: &'a [u8]) -> IResult<&'a [u8], MessagePayload> {
-    match count!(input, take!(528), 8) {
-        IResult::Done(i, r) => {
-            let mut xs = [[0u8; 528]; 8];
-            for (i, &s) in r.iter().enumerate() {
-                xs[i].copy_from_slice(s);
-            }
-            IResult::Done(i, MessagePayload::TunnelBuildReply(xs))
-        }
-        IResult::Error(e) => IResult::Error(e),
-        IResult::Incomplete(n) => IResult::Incomplete(n),
+    let (i, r) = count!(input, take!(528), 8)?;
+    let mut xs = [[0u8; 528]; 8];
+    for (i, &s) in r.iter().enumerate() {
+        xs[i].copy_from_slice(s);
     }
+    Ok((i, MessagePayload::TunnelBuildReply(xs)))
 }
 
 fn gen_tunnel_build_reply<'a>(
@@ -573,22 +553,19 @@ fn gen_tunnel_build_reply<'a>(
 // VariableTunnelBuild
 
 fn variable_tunnel_build<'a>(input: &'a [u8]) -> IResult<&'a [u8], MessagePayload> {
-    match length_count!(input, be_u8, take!(528)) {
-        IResult::Done(i, r) => IResult::Done(
-            i,
-            MessagePayload::VariableTunnelBuild(
-                r.iter()
-                    .map(|&s| {
-                        let mut x = [0u8; 528];
-                        x.copy_from_slice(s);
-                        x
-                    })
-                    .collect(),
-            ),
+    let (i, r) = length_count!(input, be_u8, take!(528))?;
+    Ok((
+        i,
+        MessagePayload::VariableTunnelBuild(
+            r.iter()
+                .map(|&s| {
+                    let mut x = [0u8; 528];
+                    x.copy_from_slice(s);
+                    x
+                })
+                .collect(),
         ),
-        IResult::Error(e) => IResult::Error(e),
-        IResult::Incomplete(n) => IResult::Incomplete(n),
-    }
+    ))
 }
 
 fn gen_variable_tunnel_build<'a>(
@@ -606,22 +583,19 @@ fn gen_variable_tunnel_build<'a>(
 // VariableTunnelBuildReply
 
 fn variable_tunnel_build_reply<'a>(input: &'a [u8]) -> IResult<&'a [u8], MessagePayload> {
-    match length_count!(input, be_u8, take!(528)) {
-        IResult::Done(i, r) => IResult::Done(
-            i,
-            MessagePayload::VariableTunnelBuildReply(
-                r.iter()
-                    .map(|&s| {
-                        let mut x = [0u8; 528];
-                        x.copy_from_slice(s);
-                        x
-                    })
-                    .collect(),
-            ),
+    let (i, r) = length_count!(input, be_u8, take!(528))?;
+    Ok((
+        i,
+        MessagePayload::VariableTunnelBuildReply(
+            r.iter()
+                .map(|&s| {
+                    let mut x = [0u8; 528];
+                    x.copy_from_slice(s);
+                    x
+                })
+                .collect(),
         ),
-        IResult::Error(e) => IResult::Error(e),
-        IResult::Incomplete(n) => IResult::Incomplete(n),
-    }
+    ))
 }
 
 fn gen_variable_tunnel_build_reply<'a>(
@@ -649,9 +623,9 @@ fn checksum(buf: &[u8]) -> u8 {
 
 fn validate_checksum<'a>(input: &'a [u8], cs: u8, buf: &[u8]) -> IResult<&'a [u8], ()> {
     if cs.eq(&checksum(&buf)) {
-        IResult::Done(input, ())
+        Ok((input, ()))
     } else {
-        IResult::Error(error_code!(ErrorKind::Custom(1)))
+        Err(Err::Error(error_position!(input, ErrorKind::Custom(1))))
     }
 }
 
@@ -764,13 +738,10 @@ mod tests {
     #[test]
     fn test_validate_checksum() {
         let a = b"payloadspam";
-        assert_eq!(
-            validate_checksum(&a[..], 0x23, &a[..7]),
-            IResult::Done(&a[..], ())
-        );
+        assert_eq!(validate_checksum(&a[..], 0x23, &a[..7]), Ok((&a[..], ())));
         assert_eq!(
             validate_checksum(&a[..], 0x23, &a[..8]),
-            IResult::Error(ErrorKind::Custom(1))
+            Err(Err::Error(error_position!(&a[..], ErrorKind::Custom(1))))
         );
     }
 

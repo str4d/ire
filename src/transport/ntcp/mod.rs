@@ -1,7 +1,7 @@
 use cookie_factory::GenError;
 use bytes::BytesMut;
 use futures::{Future, Stream};
-use nom::{IResult, Offset};
+use nom::{Err, Offset};
 use std::io;
 use std::iter::repeat;
 use std::net::SocketAddr;
@@ -64,14 +64,14 @@ impl Decoder for Codec {
 
         // Parse a frame
         let (consumed, f) = match frame::frame(&buf[0..self.decrypted]) {
-            IResult::Incomplete(_) => return Ok(None),
-            IResult::Error(e) => {
+            Err(Err::Incomplete(_)) => return Ok(None),
+            Err(Err::Error(e)) | Err(Err::Failure(e)) => {
                 return Err(io::Error::new(
                     io::ErrorKind::Other,
                     format!("parse error: {:?}", e),
                 ))
             }
-            IResult::Done(i, frame) => (buf.offset(i), frame),
+            Ok((i, frame)) => (buf.offset(i), frame),
         };
 
         buf.split_to(consumed);

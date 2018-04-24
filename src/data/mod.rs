@@ -1,6 +1,6 @@
 use cookie_factory::GenError;
 use data_encoding::BASE32;
-use nom::IResult;
+use nom::{Err, IResult};
 use rand::{self, Rng};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -108,9 +108,9 @@ pub enum Certificate {
 impl Certificate {
     pub fn from(buf: &[u8]) -> Option<Self> {
         match frame::certificate(buf) {
-            IResult::Done(i, s) => Some(s),
-            IResult::Incomplete(_) => None,
-            IResult::Error(_) => panic!("Unsupported Certificate"),
+            Ok((_, s)) => Some(s),
+            Err(Err::Incomplete(_)) => None,
+            Err(Err::Error(_)) | Err(Err::Failure(_)) => panic!("Unsupported Certificate"),
         }
     }
 
@@ -140,11 +140,14 @@ impl RouterIdentity {
         let mut data: Vec<u8> = Vec::new();
         rid.read_to_end(&mut data)?;
         match frame::router_identity(&data[..]) {
-            IResult::Done(_, res) => Ok(res),
-            IResult::Error(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
-            IResult::Incomplete(n) => Err(io::Error::new(
+            Ok((_, res)) => Ok(res),
+            Err(Err::Incomplete(n)) => Err(io::Error::new(
                 io::ErrorKind::UnexpectedEof,
                 format!("needed: {:?}", n),
+            )),
+            Err(Err::Error(e)) | Err(Err::Failure(e)) => Err(io::Error::new(
+                io::ErrorKind::Other,
+                e.into_error_kind().description(),
             )),
         }
     }
@@ -232,11 +235,14 @@ impl RouterSecretKeys {
         let mut data: Vec<u8> = Vec::new();
         rsk.read_to_end(&mut data)?;
         match frame::router_secret_keys(&data[..]) {
-            IResult::Done(_, res) => Ok(res),
-            IResult::Error(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
-            IResult::Incomplete(n) => Err(io::Error::new(
+            Ok((_, res)) => Ok(res),
+            Err(Err::Incomplete(n)) => Err(io::Error::new(
                 io::ErrorKind::UnexpectedEof,
                 format!("needed: {:?}", n),
+            )),
+            Err(Err::Error(e)) | Err(Err::Failure(e)) => Err(io::Error::new(
+                io::ErrorKind::Other,
+                e.into_error_kind().description(),
             )),
         }
     }
@@ -375,11 +381,14 @@ impl RouterInfo {
         let mut data: Vec<u8> = Vec::new();
         ri.read_to_end(&mut data)?;
         match frame::router_info(&data[..]) {
-            IResult::Done(_, res) => Ok(res),
-            IResult::Error(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
-            IResult::Incomplete(n) => Err(io::Error::new(
+            Ok((_, res)) => Ok(res),
+            Err(Err::Incomplete(n)) => Err(io::Error::new(
                 io::ErrorKind::UnexpectedEof,
                 format!("needed: {:?}", n),
+            )),
+            Err(Err::Error(e)) | Err(Err::Failure(e)) => Err(io::Error::new(
+                io::ErrorKind::Other,
+                e.into_error_kind().description(),
             )),
         }
     }
@@ -477,10 +486,10 @@ mod tests {
             0x90, 0xc7, 0xb6, 0xb4,
         ]);
         match frame::router_info(data) {
-            IResult::Done(_, ri) => {
+            Ok((_, ri)) => {
                 assert_eq!(ri.router_id.hash(), ri_hash);
             }
-            _ => panic!("RI parsing failed"),
+            _ => panic!("RouterIdentity parsing failed"),
         }
     }
 
@@ -498,10 +507,10 @@ mod tests {
     fn router_info_verify() {
         let data = include_bytes!("../../assets/router.info");
         match frame::router_info(data) {
-            IResult::Done(_, ri) => {
+            Ok((_, ri)) => {
                 assert!(ri.verify());
             }
-            _ => panic!("RI parsing failed"),
+            _ => panic!("RouterInfo parsing failed"),
         }
     }
 }
