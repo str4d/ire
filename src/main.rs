@@ -54,27 +54,44 @@ fn inner_main() -> i32 {
                     SubCommand::with_name("gen")
                         .arg(
                             Arg::with_name("routerKeys")
-                                .help("Path to write the router.keys.dat to"),
+                                .help("Path to write the router.keys.dat to")
+                                .required(true),
                         )
-                        .arg(Arg::with_name("routerInfo").help("Path to write the router.info to"))
-                        .arg(Arg::with_name("bind").help("Address:Port to bind to")),
+                        .arg(
+                            Arg::with_name("routerInfo")
+                                .help("Path to write the router.info to")
+                                .required(true),
+                        )
+                        .arg(
+                            Arg::with_name("bind")
+                                .help("Address:Port to bind to")
+                                .required(true),
+                        ),
                 )
                 .subcommand(
                     SubCommand::with_name("server")
                         .arg(
                             Arg::with_name("routerKeys")
-                                .help("Path to the server's router.keys.dat"),
+                                .help("Path to the server's router.keys.dat")
+                                .required(true),
                         )
-                        .arg(Arg::with_name("bind").help("Address:Port to bind to")),
+                        .arg(
+                            Arg::with_name("bind")
+                                .help("Address:Port to bind to")
+                                .required(true),
+                        ),
                 )
                 .subcommand(
                     SubCommand::with_name("client")
                         .arg(
                             Arg::with_name("routerKeys")
-                                .help("Path to the client's router.keys.dat"),
+                                .help("Path to the client's router.keys.dat")
+                                .required(true),
                         )
                         .arg(
-                            Arg::with_name("peerInfo").help("Path to the peer's router.info file"),
+                            Arg::with_name("peerInfo")
+                                .help("Path to the peer's router.info file")
+                                .required(true),
                         ),
                 ),
         )
