@@ -40,20 +40,20 @@ handshake:
 1. Generate keys for the server and client:
 
   ```bash
-$ cargo run --release cli gen server.router.keys.dat server.router.info 127.0.0.1:12345
+$ cargo run --release cli gen server.router.keys.dat server.router.info 127.0.0.1:12345 127.0.0.1:12346
 $ cargo run --release cli gen client.router.keys.dat client.router.info 127.0.0.1:23456
   ```
 
 2. Run the server:
 
   ```bash
-$ RUST_LOG=ire=debug cargo run --release cli server server.router.keys.dat 127.0.0.1:12345
+$ RUST_LOG=ire=debug cargo run --release cli server server.router.keys.dat 127.0.0.1:12345 127.0.0.1:12346
   ```
 
 3. Run a client:
 
   ```bash
-$ RUST_LOG=ire=debug cargo run --release cli client client.router.keys.dat server.router.info
+$ RUST_LOG=ire=debug cargo run --release cli client client.router.keys.dat server.router.info [NTCP|NTCP2]
   ```
 
 ## Code of Conduct

@@ -65,8 +65,13 @@ fn inner_main() -> i32 {
                                 .required(true),
                         )
                         .arg(
-                            Arg::with_name("bind")
-                                .help("Address:Port to bind to")
+                            Arg::with_name("ntcp")
+                                .help("Address:Port to bind NTCP to")
+                                .required(true),
+                        )
+                        .arg(
+                            Arg::with_name("ntcp2")
+                                .help("Address:Port to bind NTCP2 to")
                                 .required(true),
                         ),
                 )
@@ -78,8 +83,13 @@ fn inner_main() -> i32 {
                                 .required(true),
                         )
                         .arg(
-                            Arg::with_name("bind")
-                                .help("Address:Port to bind to")
+                            Arg::with_name("ntcp")
+                                .help("Address:Port to bind NTCP to")
+                                .required(true),
+                        )
+                        .arg(
+                            Arg::with_name("ntcp2")
+                                .help("Address:Port to bind NTCP2 to")
                                 .required(true),
                         ),
                 )
@@ -93,6 +103,12 @@ fn inner_main() -> i32 {
                         .arg(
                             Arg::with_name("peerInfo")
                                 .help("Path to the peer's router.info file")
+                                .required(true),
+                        )
+                        .arg(
+                            Arg::with_name("transport")
+                                .help("Transport to test")
+                                .possible_values(&["NTCP", "NTCP2"])
                                 .required(true),
                         ),
                 ),
@@ -111,12 +127,14 @@ fn inner_main() -> i32 {
 }
 
 fn cli_gen(args: &ArgMatches) -> i32 {
-    let addr = args.value_of("bind").unwrap().parse().unwrap();
-    let ra = data::RouterAddress::new(&transport::ntcp::NTCP_STYLE, addr);
+    let ntcp_addr = args.value_of("ntcp").unwrap().parse().unwrap();
+    let ntcp2_addr = args.value_of("ntcp2").unwrap().parse().unwrap();
+    let ra = data::RouterAddress::new(&transport::ntcp::NTCP_STYLE, ntcp_addr);
+    let ra2 = data::RouterAddress::new(&transport::ntcp2::NTCP2_STYLE, ntcp2_addr);
 
     let pkf = data::RouterSecretKeys::new();
     let mut ri = data::RouterInfo::new(pkf.rid.clone());
-    ri.set_addresses(vec![ra]);
+    ri.set_addresses(vec![ra, ra2]);
     ri.sign(&pkf.signing_private_key);
     ri.to_file(args.value_of("routerInfo").unwrap()).unwrap();
     pkf.to_file(args.value_of("routerKeys").unwrap()).unwrap();
@@ -125,13 +143,23 @@ fn cli_gen(args: &ArgMatches) -> i32 {
 
 fn cli_server(args: &ArgMatches) -> i32 {
     let rsk = data::RouterSecretKeys::from_file(args.value_of("routerKeys").unwrap()).unwrap();
-    let addr = args.value_of("bind").unwrap().parse().unwrap();
+    let ntcp_addr = args.value_of("ntcp").unwrap().parse().unwrap();
+    let ntcp2_addr = args.value_of("ntcp2").unwrap().parse().unwrap();
 
     // Accept all incoming sockets
-    info!("Listening on {}", addr);
+    info!("NTCP:  Listening on {}", ntcp_addr);
     let ntcp = transport::ntcp::Engine::new();
-    let listener = ntcp.listen(rsk.rid, rsk.signing_private_key, &addr);
-    tokio::run(listener.map_err(|e| error!("Listener error: {}", e)));
+    let listener = ntcp
+        .listen(rsk.rid.clone(), rsk.signing_private_key.clone(), &ntcp_addr)
+        .map_err(|e| error!("NTCP listener error: {}", e));
+
+    info!("NTCP2: Listening on {}", ntcp2_addr);
+    let ntcp2 = transport::ntcp2::Engine::new();
+    let listener2 = ntcp2
+        .listen(&ntcp2_addr)
+        .map_err(|e| error!("NTCP2 listener error: {}", e));
+
+    tokio::run(listener.join(listener2).map(|_| ()));
     0
 }
 
@@ -140,20 +168,45 @@ fn cli_client(args: &ArgMatches) -> i32 {
     let peer_ri = data::RouterInfo::from_file(args.value_of("peerInfo").unwrap()).unwrap();
 
     info!("Connecting to {}", peer_ri.router_id.hash());
-    let ntcp = transport::ntcp::Engine::new();
-    let conn = ntcp
-        .connect(rsk.rid, rsk.signing_private_key, peer_ri)
-        .and_then(move |t| {
-            info!("Connection established!");
-            t.send(transport::ntcp::Frame::TimeSync(42))
-        })
-        .and_then(|t| t.send(transport::ntcp::Frame::Standard(i2np::Message::dummy_data())))
-        .and_then(|_| {
-            info!("Dummy data sent!");
-            Ok(())
-        })
-        .map_err(|e| error!("Connection error: {}", e));
-
-    tokio::run(conn);
+    match args.value_of("transport") {
+        Some("NTCP") => {
+            let ntcp = transport::ntcp::Engine::new();
+            let conn = ntcp
+                .connect(rsk.rid, rsk.signing_private_key, peer_ri)
+                .and_then(move |t| {
+                    info!("Connection established!");
+                    t.send(transport::ntcp::Frame::TimeSync(42))
+                })
+                .and_then(|t| t.send(transport::ntcp::Frame::Standard(i2np::Message::dummy_data())))
+                .and_then(|_| {
+                    info!("Dummy data sent!");
+                    Ok(())
+                })
+                .map_err(|e| error!("Connection error: {}", e));
+            tokio::run(conn);
+        }
+        Some("NTCP2") => {
+            let ntcp2 = transport::ntcp2::Engine::new();
+            let conn = ntcp2
+                .connect(peer_ri)
+                .and_then(move |t| {
+                    info!("Connection established!");
+                    t.send(vec![transport::ntcp2::Block::DateTime(42)])
+                })
+                .and_then(|t| {
+                    t.send(vec![transport::ntcp2::Block::Message(
+                        i2np::Message::dummy_data(),
+                    )])
+                })
+                .and_then(|_| {
+                    info!("Dummy data sent!");
+                    Ok(())
+                })
+                .map_err(|e| error!("Connection error: {}", e));
+            tokio::run(conn);
+        }
+        Some(_) => panic!("Unknown transport specified"),
+        None => panic!("No transport specified"),
+    };
     0
 }
