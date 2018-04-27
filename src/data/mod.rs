@@ -73,7 +73,7 @@ impl I2PString {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Mapping(pub HashMap<I2PString, I2PString>);
 
 pub struct SessionTag(pub [u8; 32]);
@@ -89,7 +89,7 @@ impl SessionTag {
 #[derive(Debug)]
 pub struct TunnelId(pub u32);
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct KeyCertificate {
     pub sig_type: SigType,
     enc_type: EncType,
@@ -97,7 +97,7 @@ pub struct KeyCertificate {
     enc_data: Vec<u8>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Certificate {
     Null,
     HashCash(Vec<u8>),
@@ -128,7 +128,7 @@ impl Certificate {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct RouterIdentity {
     public_key: PublicKey,
     padding: Option<Vec<u8>>,
@@ -296,7 +296,7 @@ pub struct LeaseSet {
     sig: Signature,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct RouterAddress {
     cost: u8,
     expiration: I2PDate,
@@ -336,7 +336,7 @@ impl RouterAddress {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct RouterInfo {
     pub router_id: RouterIdentity,
     published: I2PDate,
