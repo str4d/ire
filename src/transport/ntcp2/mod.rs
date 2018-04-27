@@ -1,16 +1,28 @@
 use bytes::BytesMut;
 use cookie_factory::GenError;
+use futures::{Future, Stream};
 use nom::Err;
-use snow;
+use snow::{self, Builder};
 use std::fmt;
 use std::io;
 use std::iter::repeat;
-use tokio_io::codec::{Decoder, Encoder};
+use std::net::SocketAddr;
+use std::time::{Duration, Instant};
+use tokio;
+use tokio::net::{TcpListener, TcpStream};
+use tokio_codec::{Decoder, Encoder, Framed};
+use tokio_io::{self, IoFuture};
+use tokio_timer::Deadline;
 
-use data::RouterInfo;
+use data::{I2PString, RouterInfo};
 use i2np::Message;
 
 mod frame;
+
+lazy_static! {
+    pub static ref NTCP2_STYLE: I2PString = I2PString::new("NTCP2");
+    pub static ref NTCP2_NOISE_PROTOCOL_NAME: &'static str = "Noise_XX_25519_ChaChaPoly_SHA256";
+}
 
 // Max NTCP2 message size is ~64kB
 const NTCP2_MTU: usize = 65535;
@@ -165,5 +177,136 @@ impl Encoder for Codec {
                 | GenError::NotYetImplemented => io_err!(InvalidData, "could not generate"),
             },
         }
+    }
+}
+
+//
+// Connection management engine
+//
+
+pub struct Engine;
+
+impl Engine {
+    pub fn new() -> Self {
+        Engine
+    }
+
+    pub fn listen(&self, addr: &SocketAddr) -> IoFuture<()> {
+        // Bind to the address
+        let listener = TcpListener::bind(addr).unwrap();
+
+        // For each incoming connection:
+        Box::new(listener.incoming().for_each(move |conn| {
+            info!("Incoming connection!");
+
+            // Initialize our responder NoiseSession using a builder.
+            let builder: Builder = Builder::new(NTCP2_NOISE_PROTOCOL_NAME.parse().unwrap());
+            let static_key = builder.generate_keypair().unwrap();
+            let mut noise = builder
+                .local_private_key(&static_key.private)
+                .build_responder()
+                .unwrap();
+
+            let process_conn = tokio_io::io::read_exact(conn, [0u8; 32])
+                .and_then(|(conn, msg)| {
+                    // <- e
+                    debug!("S <- e");
+                    let mut buf = [0u8; 0];
+                    noise.read_message(&msg, &mut buf).unwrap();
+
+                    // -> e, ee, s, es
+                    debug!("S -> e, ee, s, es");
+                    let mut buf = vec![0u8; 96];
+                    noise.write_message(&[], &mut buf).unwrap();
+                    tokio_io::io::write_all(conn, buf)
+                        .and_then(|(conn, _)| tokio_io::io::read_exact(conn, vec![0u8; 64]))
+                        .map(|(c, m)| (c, noise, m))
+                })
+                .and_then(|(conn, mut noise, msg)| {
+                    // <- s, se
+                    debug!("S <- s, se");
+                    let mut buf = [0u8; 0];
+                    noise.read_message(&msg, &mut buf).unwrap();
+
+                    // Transition the state machine into transport mode now that the handshake is complete.
+                    let noise = noise.into_transport_mode().unwrap();
+                    info!("Connection established!");
+
+                    let codec = Codec {
+                        noise,
+                        noise_buf: [0u8; NTCP2_MTU],
+                        next_len: None,
+                    };
+
+                    codec.framed(conn).for_each(|frame| {
+                        for block in frame {
+                            debug!("Received block: {:?}", block);
+                        }
+
+                        Ok(())
+                    })
+                });
+
+            tokio::spawn(process_conn.map_err(|e| error!("Error while listening: {:?}", e)));
+
+            Ok(())
+        }))
+    }
+
+    pub fn connect(&self, peer_ri: RouterInfo) -> IoFuture<Framed<TcpStream, Codec>> {
+        // TODO return error if there are no valid NTCP2 addresses (for some reason)
+        let addr = peer_ri.address(&NTCP2_STYLE).unwrap().addr().unwrap();
+
+        // Connect to the peer
+        // Return a transport ready for sending and receiving Frames
+        // The layer above will convert I2NP packets to Frames
+        // (or should the Engine handle timesync packets itself?)
+        let transport = Box::new(TcpStream::connect(&addr).and_then(|socket| {
+            // Initialize our initiator NoiseSession using a builder.
+            let builder: Builder = Builder::new(NTCP2_NOISE_PROTOCOL_NAME.parse().unwrap());
+            let static_key = builder.generate_keypair().unwrap();
+            let mut noise = builder
+                .local_private_key(&static_key.private)
+                .build_initiator()
+                .unwrap();
+
+            // -> e
+            debug!("C -> e");
+            let mut buf = vec![0u8; 48];
+            let len = noise.write_message(&[], &mut buf).unwrap();
+            buf.truncate(len);
+            tokio_io::io::write_all(socket, buf)
+                .and_then(|(conn, _)| tokio_io::io::read_exact(conn, vec![0u8; 96]))
+                .and_then(move |(conn, msg)| {
+                    // <- e, ee, s, es
+                    debug!("C <- e, ee, s, es");
+                    let mut buf = [0u8; 0];
+                    noise.read_message(&msg, &mut buf).unwrap();
+
+                    // -> s, se
+                    debug!("C -> s, se");
+                    let mut buf = vec![0u8; 64];
+                    noise.write_message(&[], &mut buf).unwrap();
+                    tokio_io::io::write_all(conn, buf).map(|(conn, _)| (conn, noise))
+                })
+                .and_then(|(conn, noise)| {
+                    // Transition the state machine into transport mode now that the handshake is complete.
+                    let noise = noise.into_transport_mode().unwrap();
+
+                    let codec = Codec {
+                        noise,
+                        noise_buf: [0u8; NTCP2_MTU],
+                        next_len: None,
+                    };
+
+                    Ok(codec.framed(conn))
+                })
+        }));
+
+        // Add a timeout
+        let timed = Deadline::new(transport, Instant::now() + Duration::new(10, 0))
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e));
+
+        Box::new(timed)
     }
 }
