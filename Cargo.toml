@@ -33,5 +33,9 @@ tokio-codec = "0.1"
 tokio-io = "0.1"
 tokio-timer = "0.2"
 
+[dependencies.snow]
+git = "https://github.com/str4d/snow"
+rev = "c22f1eeb9c60353b4633c917f64d80cfb27f41d6"
+
 [dev-dependencies]
 pretty_assertions = "0.5"
