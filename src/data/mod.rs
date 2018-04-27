@@ -86,6 +86,7 @@ impl SessionTag {
     }
 }
 
+#[derive(Debug)]
 pub struct TunnelId(pub u32);
 
 #[derive(Clone, Debug)]

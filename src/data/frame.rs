@@ -33,6 +33,15 @@ pub fn gen_i2p_date<'a>(
 ) -> Result<(&'a mut [u8], usize), GenError> {
     gen_be_u64!(input, date.0)
 }
+named!(pub short_expiry<I2PDate>, do_parse!(
+    seconds: be_u32 >> (I2PDate((seconds as u64) * 1_000))
+));
+pub fn gen_short_expiry<'a>(
+    input: (&'a mut [u8], usize),
+    date: &I2PDate,
+) -> Result<(&'a mut [u8], usize), GenError> {
+    gen_be_u32!(input, date.0 / 1_000)
+}
 
 named!(pub i2p_string<I2PString>, do_parse!(
     len: be_u8 >> s: take_str!(len) >> (I2PString(String::from(s)))
