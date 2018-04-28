@@ -7,7 +7,8 @@ use std::fmt;
 use std::io;
 use std::iter::repeat;
 use std::net::SocketAddr;
-use std::time::{Duration, Instant};
+use std::ops::AddAssign;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_codec::{Decoder, Encoder, Framed};
@@ -29,6 +30,11 @@ lazy_static! {
 
 // Max NTCP2 message size is ~64kB
 const NTCP2_MTU: usize = 65535;
+
+const SESSION_REQUEST_PT_LEN: usize = 16;
+const SESSION_REQUEST_CT_LEN: usize = 32 + SESSION_REQUEST_PT_LEN + 16;
+const SESSION_CREATED_PT_LEN: usize = 16;
+const SESSION_CREATED_CT_LEN: usize = 32 + SESSION_CREATED_PT_LEN + 16;
 
 macro_rules! io_err {
     ($err_kind:ident, $err_msg:expr) => {
@@ -230,26 +236,81 @@ impl Engine {
                 .build_responder()
                 .unwrap();
 
-            let process_conn = tokio_io::io::read_exact(conn, vec![0u8; 48])
+            let process_conn = tokio_io::io::read_exact(conn, vec![0u8; SESSION_REQUEST_CT_LEN])
                 .and_then(|(conn, msg)| {
                     // <- e, es
                     debug!("S <- e, es");
-                    let mut buf = [0u8; 0];
+                    let mut buf = [0u8; SESSION_REQUEST_PT_LEN];
                     noise.read_message(&msg, &mut buf).unwrap();
+
+                    // SessionRequest
+                    let (padlen, sclen, ts_a) = match frame::session_request(&buf) {
+                        Err(e) => {
+                            return io_err!(Other, format!("SessionRequest parse error: {:?}", e))
+                        }
+                        Ok((_, (ver, _, _, _))) if ver != 2 => {
+                            return io_err!(InvalidData, "Unsupported version")
+                        }
+                        Ok((_, (_, padlen, sclen, ts_a))) => {
+                            (padlen as usize, sclen as usize, ts_a)
+                        }
+                    };
+
+                    let now = SystemTime::now();
+                    let mut ts_b = now.duration_since(UNIX_EPOCH).expect("Time went backwards");
+                    ts_b.add_assign(Duration::from_millis(500));
+                    let ts_b = ts_b.as_secs() as u32;
+
+                    // SessionCreated
+                    let mut sc_buf = [0u8; SESSION_CREATED_PT_LEN];
+                    match frame::gen_session_created((&mut sc_buf, 0), 0, ts_b).map(|tup| tup.1) {
+                        Ok(sz) if sz == sc_buf.len() => (),
+                        Ok(_) => panic!("Size mismatch"),
+                        Err(e) => match e {
+                            GenError::BufferTooSmall(_) => panic!("Size mismatch"),
+                            GenError::InvalidOffset
+                            | GenError::CustomError(_)
+                            | GenError::NotYetImplemented => {
+                                return io_err!(InvalidData, "could not generate")
+                            }
+                        },
+                    };
 
                     // -> e, ee
                     debug!("S -> e, ee");
-                    let mut buf = vec![0u8; 48];
-                    noise.write_message(&[], &mut buf).unwrap();
-                    tokio_io::io::write_all(conn, buf)
-                        .and_then(|(conn, _)| tokio_io::io::read_exact(conn, vec![0u8; 64]))
-                        .map(|(c, m)| (c, noise, m))
+                    let mut buf = vec![0u8; SESSION_CREATED_CT_LEN];
+                    noise.write_message(&sc_buf, &mut buf).unwrap();
+                    Ok(tokio_io::io::read_exact(conn, vec![0u8; padlen])
+                        .and_then(move |(conn, _)| tokio_io::io::write_all(conn, buf))
+                        .and_then(move |(conn, _)| {
+                            tokio_io::io::read_exact(conn, vec![0u8; sclen + 48])
+                        })
+                        .map(move |(c, m)| (c, noise, now, m)))
                 })
-                .and_then(|(conn, mut noise, msg)| {
+                .and_then(|f| f)
+                .and_then(|(conn, mut noise, rtt_timer, msg)| {
                     // <- s, se
                     debug!("S <- s, se");
-                    let mut buf = [0u8; 0];
-                    noise.read_message(&msg, &mut buf).unwrap();
+                    let mut buf = vec![0u8; msg.len()];
+                    let len = noise.read_message(&msg, &mut buf).unwrap();
+
+                    // SessionConfirmed
+                    let ri_a = match frame::session_confirmed(&buf[..len]) {
+                        Err(Err::Incomplete(n)) => {
+                            return io_err!(
+                                Other,
+                                format!("received incomplete SessionConfirmed, needed: {:?}", n)
+                            )
+                        }
+                        Err(Err::Error(e)) | Err(Err::Failure(e)) => {
+                            return io_err!(Other, format!("SessionConfirmed parse error: {:?}", e))
+                        }
+                        Ok((_, ri_a)) => ri_a,
+                    };
+
+                    // Get peer skew
+                    let rtt = rtt_timer.elapsed().expect("Time went backwards?");
+                    debug!("Peer RTT: {:?}", rtt);
 
                     // Transition the state machine into transport mode now that the handshake is complete.
                     let noise = noise.into_transport_mode().unwrap();
@@ -261,14 +322,15 @@ impl Engine {
                         next_len: None,
                     };
 
-                    codec.framed(conn).for_each(|frame| {
+                    Ok(codec.framed(conn).for_each(|frame| {
                         for block in frame {
                             debug!("Received block: {:?}", block);
                         }
 
                         Ok(())
-                    })
-                });
+                    }))
+                })
+                .and_then(|f| f);
 
             tokio::spawn(process_conn.map_err(|e| error!("Error while listening: {:?}", e)));
 
@@ -276,7 +338,11 @@ impl Engine {
         }))
     }
 
-    pub fn connect(&self, peer_ri: RouterInfo) -> IoFuture<Framed<TcpStream, Codec>> {
+    pub fn connect(
+        &self,
+        own_ri: RouterInfo,
+        peer_ri: RouterInfo,
+    ) -> io::Result<IoFuture<Framed<TcpStream, Codec>>> {
         // TODO return error if there are no valid NTCP2 addresses (for some reason)
         let ra = peer_ri.address(&NTCP2_STYLE).unwrap();
         let addr = ra.addr().unwrap();
@@ -291,37 +357,107 @@ impl Engine {
             None => return io_err!(InvalidData, format!("No static key in address")),
         };
 
+        let mut sc_buf = vec![0u8; NTCP2_MTU - 16];
+        let sc_len = match frame::gen_session_confirmed((&mut sc_buf, 0), &own_ri).map(|tup| tup.1)
+        {
+            Ok(sz) => sz,
+            Err(e) => match e {
+                GenError::BufferTooSmall(sz) => {
+                    return io_err!(
+                        InvalidData,
+                        format!(
+                            "SessionConfirmed message ({}) larger than MTU ({})",
+                            sz,
+                            NTCP2_MTU - 16
+                        )
+                    )
+                }
+                GenError::InvalidOffset
+                | GenError::CustomError(_)
+                | GenError::NotYetImplemented => return io_err!(InvalidData, "could not generate"),
+            },
+        };
+        sc_buf.truncate(sc_len);
+        let sc_len = sc_len + 16;
+
         // Connect to the peer
         // Return a transport ready for sending and receiving Frames
         // The layer above will convert I2NP packets to Frames
         // (or should the Engine handle timesync packets itself?)
-        let transport = Box::new(TcpStream::connect(&addr).and_then(move |socket| {
-            // Initialize our initiator NoiseSession using a builder.
-            let builder: Builder = Builder::new(NTCP2_NOISE_PROTOCOL_NAME.parse().unwrap());
-            let mut noise = builder
-                .local_private_key(&static_key)
-                .remote_public_key(&remote_key)
-                .build_initiator()
-                .unwrap();
+        let transport = Box::new(
+            TcpStream::connect(&addr)
+                .and_then(move |socket| {
+                    // Initialize our initiator NoiseSession using a builder.
+                    let builder: Builder = Builder::new(NTCP2_NOISE_PROTOCOL_NAME.parse().unwrap());
+                    let mut noise = builder
+                        .local_private_key(&static_key)
+                        .remote_public_key(&remote_key)
+                        .build_initiator()
+                        .unwrap();
 
-            // -> e, es
-            debug!("C -> e, es");
-            let mut buf = vec![0u8; 48];
-            noise.write_message(&[], &mut buf).unwrap();
-            tokio_io::io::write_all(socket, buf)
-                .and_then(|(conn, _)| tokio_io::io::read_exact(conn, vec![0u8; 48]))
-                .and_then(move |(conn, msg)| {
+                    let now = SystemTime::now();
+                    let mut ts_a = now.duration_since(UNIX_EPOCH).expect("Time went backwards");
+                    ts_a.add_assign(Duration::from_millis(500));
+                    let ts_a = ts_a.as_secs() as u32;
+
+                    // SessionRequest
+                    let mut sr_buf = [0u8; SESSION_REQUEST_PT_LEN];
+                    match frame::gen_session_request((&mut sr_buf, 0), 2, 0, sc_len as u16, ts_a)
+                        .map(|tup| tup.1)
+                    {
+                        Ok(sz) if sz == sr_buf.len() => (),
+                        Ok(_) => panic!("Size mismatch"),
+                        Err(e) => match e {
+                            GenError::BufferTooSmall(_) => panic!("Size mismatch"),
+                            GenError::InvalidOffset
+                            | GenError::CustomError(_)
+                            | GenError::NotYetImplemented => {
+                                return io_err!(InvalidData, "could not generate")
+                            }
+                        },
+                    };
+
+                    // -> e, es
+                    debug!("C -> e, es");
+                    let mut buf = vec![0u8; SESSION_REQUEST_CT_LEN];
+                    noise.write_message(&sr_buf, &mut buf).unwrap();
+                    Ok(tokio_io::io::write_all(socket, buf)
+                        .and_then(|(conn, _)| {
+                            tokio_io::io::read_exact(conn, vec![0u8; SESSION_CREATED_CT_LEN])
+                        })
+                        .map(move |(c, m)| (c, noise, now, m)))
+                })
+                .and_then(|f| f)
+                .and_then(move |(conn, mut noise, rtt_timer, msg)| {
                     // <- e, ee
                     debug!("C <- e, ee");
-                    let mut buf = [0u8; 0];
+                    let mut buf = [0u8; SESSION_CREATED_PT_LEN];
                     noise.read_message(&msg, &mut buf).unwrap();
+
+                    // SessionCreated
+                    let (padlen, ts_b) = match frame::session_created(&buf) {
+                        Err(e) => {
+                            return io_err!(Other, format!("SessionCreated parse error: {:?}", e))
+                        }
+                        Ok((_, (padlen, ts_b))) => (padlen as usize, ts_b),
+                    };
+
+                    // Get peer skew
+                    let rtt = rtt_timer.elapsed().expect("Time went backwards?");
+                    debug!("Peer RTT: {:?}", rtt);
+
+                    // SessionConfirmed
 
                     // -> s, se
                     debug!("C -> s, se");
-                    let mut buf = vec![0u8; 64];
-                    noise.write_message(&[], &mut buf).unwrap();
-                    tokio_io::io::write_all(conn, buf).map(|(conn, _)| (conn, noise))
+                    let mut buf = vec![0u8; NTCP2_MTU];
+                    let len = noise.write_message(&sc_buf, &mut buf).unwrap();
+                    buf.truncate(len);
+                    Ok(tokio_io::io::read_exact(conn, vec![0u8; padlen])
+                        .and_then(|(conn, _)| tokio_io::io::write_all(conn, buf))
+                        .map(|(conn, _)| (conn, noise)))
                 })
+                .and_then(|f| f)
                 .and_then(|(conn, noise)| {
                     // Transition the state machine into transport mode now that the handshake is complete.
                     let noise = noise.into_transport_mode().unwrap();
@@ -333,13 +469,13 @@ impl Engine {
                     };
 
                     Ok(codec.framed(conn))
-                })
-        }));
+                }),
+        );
 
         // Add a timeout
         let timed = Deadline::new(transport, Instant::now() + Duration::new(10, 0))
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e));
 
-        Box::new(timed)
+        Ok(Box::new(timed))
     }
 }

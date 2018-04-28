@@ -153,6 +153,9 @@ fn cli_client(args: &ArgMatches) -> i32 {
     let rsk = data::RouterSecretKeys::from_file(args.value_of("routerKeys").unwrap()).unwrap();
     let peer_ri = data::RouterInfo::from_file(args.value_of("peerInfo").unwrap()).unwrap();
 
+    let mut ri = data::RouterInfo::new(rsk.rid.clone());
+    ri.sign(&rsk.signing_private_key);
+
     info!("Connecting to {}", peer_ri.router_id.hash());
     match args.value_of("transport") {
         Some("NTCP") => {
@@ -174,7 +177,8 @@ fn cli_client(args: &ArgMatches) -> i32 {
         Some("NTCP2") => {
             let ntcp2 = transport::ntcp2::Engine::new("127.0.0.1:0".parse().unwrap());
             let conn = ntcp2
-                .connect(peer_ri)
+                .connect(ri, peer_ri)
+                .unwrap()
                 .and_then(move |t| {
                     info!("Connection established!");
                     t.send(vec![transport::ntcp2::Block::DateTime(42)])
