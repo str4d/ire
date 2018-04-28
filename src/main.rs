@@ -125,25 +125,24 @@ fn cli_server(args: &ArgMatches) -> i32 {
     let rsk = data::RouterSecretKeys::from_file(args.value_of("routerKeys").unwrap()).unwrap();
     let ntcp_addr = args.value_of("ntcp").unwrap().parse().unwrap();
     let ntcp2_addr = args.value_of("ntcp2").unwrap().parse().unwrap();
-    let ra = data::RouterAddress::new(&transport::ntcp::NTCP_STYLE, ntcp_addr);
-    let ra2 = data::RouterAddress::new(&transport::ntcp2::NTCP2_STYLE, ntcp2_addr);
+
+    let ntcp = transport::ntcp::Engine::new(ntcp_addr);
+    let ntcp2 = transport::ntcp2::Engine::new(ntcp2_addr);
 
     let mut ri = data::RouterInfo::new(rsk.rid.clone());
-    ri.set_addresses(vec![ra, ra2]);
+    ri.set_addresses(vec![ntcp.address(), ntcp2.address()]);
     ri.sign(&rsk.signing_private_key);
     ri.to_file(args.value_of("routerInfo").unwrap()).unwrap();
 
     // Accept all incoming sockets
     info!("NTCP:  Listening on {}", ntcp_addr);
-    let ntcp = transport::ntcp::Engine::new();
     let listener = ntcp
-        .listen(rsk.rid.clone(), rsk.signing_private_key.clone(), &ntcp_addr)
+        .listen(rsk.rid.clone(), rsk.signing_private_key.clone())
         .map_err(|e| error!("NTCP listener error: {}", e));
 
     info!("NTCP2: Listening on {}", ntcp2_addr);
-    let ntcp2 = transport::ntcp2::Engine::new();
     let listener2 = ntcp2
-        .listen(&ntcp2_addr)
+        .listen()
         .map_err(|e| error!("NTCP2 listener error: {}", e));
 
     tokio::run(listener.join(listener2).map(|_| ()));
@@ -157,7 +156,7 @@ fn cli_client(args: &ArgMatches) -> i32 {
     info!("Connecting to {}", peer_ri.router_id.hash());
     match args.value_of("transport") {
         Some("NTCP") => {
-            let ntcp = transport::ntcp::Engine::new();
+            let ntcp = transport::ntcp::Engine::new("127.0.0.1:0".parse().unwrap());
             let conn = ntcp
                 .connect(rsk.rid, rsk.signing_private_key, peer_ri)
                 .and_then(move |t| {
@@ -173,7 +172,7 @@ fn cli_client(args: &ArgMatches) -> i32 {
             tokio::run(conn);
         }
         Some("NTCP2") => {
-            let ntcp2 = transport::ntcp2::Engine::new();
+            let ntcp2 = transport::ntcp2::Engine::new("127.0.0.1:0".parse().unwrap());
             let conn = ntcp2
                 .connect(peer_ri)
                 .and_then(move |t| {

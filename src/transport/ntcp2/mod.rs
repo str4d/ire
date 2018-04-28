@@ -14,7 +14,7 @@ use tokio_codec::{Decoder, Encoder, Framed};
 use tokio_io::{self, IoFuture};
 use tokio_timer::Deadline;
 
-use data::{I2PString, RouterInfo};
+use data::{I2PString, RouterAddress, RouterInfo};
 use i2np::Message;
 
 mod frame;
@@ -184,16 +184,22 @@ impl Encoder for Codec {
 // Connection management engine
 //
 
-pub struct Engine;
+pub struct Engine {
+    addr: SocketAddr,
+}
 
 impl Engine {
-    pub fn new() -> Self {
-        Engine
+    pub fn new(addr: SocketAddr) -> Self {
+        Engine { addr }
     }
 
-    pub fn listen(&self, addr: &SocketAddr) -> IoFuture<()> {
+    pub fn address(&self) -> RouterAddress {
+        RouterAddress::new(&NTCP2_STYLE, self.addr)
+    }
+
+    pub fn listen(&self) -> IoFuture<()> {
         // Bind to the address
-        let listener = TcpListener::bind(addr).unwrap();
+        let listener = TcpListener::bind(&self.addr).unwrap();
 
         // For each incoming connection:
         Box::new(listener.incoming().for_each(move |conn| {
