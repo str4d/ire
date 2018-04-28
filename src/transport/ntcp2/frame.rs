@@ -284,13 +284,14 @@ named!(pub session_confirmed<(Frame)>, call!(frame));
 pub fn gen_session_confirmed<'a>(
     input: (&'a mut [u8], usize),
     ri_a: &RouterInfo,
+    padlen: u16,
 ) -> Result<(&'a mut [u8], usize), GenError> {
     do_gen!(
         input,
-        gen_frame(&vec![Block::RouterInfo(
-            ri_a.clone(),
-            RouterInfoFlags { flood: false },
-        )])
+        gen_frame(&vec![
+            Block::RouterInfo(ri_a.clone(), RouterInfoFlags { flood: false }),
+            Block::Padding(padlen),
+        ])
     )
 }
 

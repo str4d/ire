@@ -2,6 +2,7 @@ use bytes::BytesMut;
 use cookie_factory::GenError;
 use futures::{Future, Stream};
 use nom::Err;
+use rand::{self, Rng};
 use snow::{self, Builder};
 use std::fmt;
 use std::io;
@@ -261,9 +262,15 @@ impl Engine {
                     ts_b.add_assign(Duration::from_millis(500));
                     let ts_b = ts_b.as_secs() as u32;
 
+                    let mut rng = rand::thread_rng();
+                    // TODO: Sample padding sizes from an appropriate distribution
+                    let sc_padlen = rng.gen_range(0, 16);
+
                     // SessionCreated
                     let mut sc_buf = [0u8; SESSION_CREATED_PT_LEN];
-                    match frame::gen_session_created((&mut sc_buf, 0), 0, ts_b).map(|tup| tup.1) {
+                    match frame::gen_session_created((&mut sc_buf, 0), sc_padlen, ts_b)
+                        .map(|tup| tup.1)
+                    {
                         Ok(sz) if sz == sc_buf.len() => (),
                         Ok(_) => panic!("Size mismatch"),
                         Err(e) => match e {
@@ -278,8 +285,9 @@ impl Engine {
 
                     // -> e, ee
                     debug!("S -> e, ee");
-                    let mut buf = vec![0u8; SESSION_CREATED_CT_LEN];
+                    let mut buf = vec![0u8; SESSION_CREATED_CT_LEN + sc_padlen as usize];
                     noise.write_message(&sc_buf, &mut buf).unwrap();
+                    rng.fill(&mut buf[SESSION_CREATED_CT_LEN..]);
                     Ok(tokio_io::io::read_exact(conn, vec![0u8; padlen])
                         .and_then(move |(conn, _)| tokio_io::io::write_all(conn, buf))
                         .and_then(move |(conn, _)| {
@@ -357,8 +365,15 @@ impl Engine {
             None => return io_err!(InvalidData, format!("No static key in address")),
         };
 
+        let sc_padlen = {
+            let mut rng = rand::thread_rng();
+            // TODO: Sample padding sizes from an appropriate distribution
+            rng.gen_range(0, 16)
+        };
+
         let mut sc_buf = vec![0u8; NTCP2_MTU - 16];
-        let sc_len = match frame::gen_session_confirmed((&mut sc_buf, 0), &own_ri).map(|tup| tup.1)
+        let sc_len = match frame::gen_session_confirmed((&mut sc_buf, 0), &own_ri, sc_padlen)
+            .map(|tup| tup.1)
         {
             Ok(sz) => sz,
             Err(e) => match e {
@@ -400,10 +415,19 @@ impl Engine {
                     ts_a.add_assign(Duration::from_millis(500));
                     let ts_a = ts_a.as_secs() as u32;
 
+                    let mut rng = rand::thread_rng();
+                    // TODO: Sample padding sizes from an appropriate distribution
+                    let padlen = rng.gen_range(0, 16);
+
                     // SessionRequest
                     let mut sr_buf = [0u8; SESSION_REQUEST_PT_LEN];
-                    match frame::gen_session_request((&mut sr_buf, 0), 2, 0, sc_len as u16, ts_a)
-                        .map(|tup| tup.1)
+                    match frame::gen_session_request(
+                        (&mut sr_buf, 0),
+                        2,
+                        padlen,
+                        sc_len as u16,
+                        ts_a,
+                    ).map(|tup| tup.1)
                     {
                         Ok(sz) if sz == sr_buf.len() => (),
                         Ok(_) => panic!("Size mismatch"),
@@ -419,8 +443,9 @@ impl Engine {
 
                     // -> e, es
                     debug!("C -> e, es");
-                    let mut buf = vec![0u8; SESSION_REQUEST_CT_LEN];
+                    let mut buf = vec![0u8; SESSION_REQUEST_CT_LEN + padlen as usize];
                     noise.write_message(&sr_buf, &mut buf).unwrap();
+                    rng.fill(&mut buf[SESSION_REQUEST_CT_LEN..]);
                     Ok(tokio_io::io::write_all(socket, buf)
                         .and_then(|(conn, _)| {
                             tokio_io::io::read_exact(conn, vec![0u8; SESSION_CREATED_CT_LEN])
