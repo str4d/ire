@@ -53,33 +53,22 @@ fn inner_main() -> i32 {
         .subcommand(
             SubCommand::with_name("cli")
                 .subcommand(
-                    SubCommand::with_name("gen")
-                        .arg(
-                            Arg::with_name("routerKeys")
-                                .help("Path to write the router.keys.dat to")
-                                .required(true),
-                        )
-                        .arg(
-                            Arg::with_name("routerInfo")
-                                .help("Path to write the router.info to")
-                                .required(true),
-                        )
-                        .arg(
-                            Arg::with_name("ntcp")
-                                .help("Address:Port to bind NTCP to")
-                                .required(true),
-                        )
-                        .arg(
-                            Arg::with_name("ntcp2")
-                                .help("Address:Port to bind NTCP2 to")
-                                .required(true),
-                        ),
+                    SubCommand::with_name("gen").arg(
+                        Arg::with_name("routerKeys")
+                            .help("Path to write the router.keys.dat to")
+                            .required(true),
+                    ),
                 )
                 .subcommand(
                     SubCommand::with_name("server")
                         .arg(
                             Arg::with_name("routerKeys")
                                 .help("Path to the server's router.keys.dat")
+                                .required(true),
+                        )
+                        .arg(
+                            Arg::with_name("routerInfo")
+                                .help("Path to write the router.info to")
                                 .required(true),
                         )
                         .arg(
@@ -127,16 +116,7 @@ fn inner_main() -> i32 {
 }
 
 fn cli_gen(args: &ArgMatches) -> i32 {
-    let ntcp_addr = args.value_of("ntcp").unwrap().parse().unwrap();
-    let ntcp2_addr = args.value_of("ntcp2").unwrap().parse().unwrap();
-    let ra = data::RouterAddress::new(&transport::ntcp::NTCP_STYLE, ntcp_addr);
-    let ra2 = data::RouterAddress::new(&transport::ntcp2::NTCP2_STYLE, ntcp2_addr);
-
     let pkf = data::RouterSecretKeys::new();
-    let mut ri = data::RouterInfo::new(pkf.rid.clone());
-    ri.set_addresses(vec![ra, ra2]);
-    ri.sign(&pkf.signing_private_key);
-    ri.to_file(args.value_of("routerInfo").unwrap()).unwrap();
     pkf.to_file(args.value_of("routerKeys").unwrap()).unwrap();
     0
 }
@@ -145,6 +125,13 @@ fn cli_server(args: &ArgMatches) -> i32 {
     let rsk = data::RouterSecretKeys::from_file(args.value_of("routerKeys").unwrap()).unwrap();
     let ntcp_addr = args.value_of("ntcp").unwrap().parse().unwrap();
     let ntcp2_addr = args.value_of("ntcp2").unwrap().parse().unwrap();
+    let ra = data::RouterAddress::new(&transport::ntcp::NTCP_STYLE, ntcp_addr);
+    let ra2 = data::RouterAddress::new(&transport::ntcp2::NTCP2_STYLE, ntcp2_addr);
+
+    let mut ri = data::RouterInfo::new(rsk.rid.clone());
+    ri.set_addresses(vec![ra, ra2]);
+    ri.sign(&rsk.signing_private_key);
+    ri.to_file(args.value_of("routerInfo").unwrap()).unwrap();
 
     // Accept all incoming sockets
     info!("NTCP:  Listening on {}", ntcp_addr);
