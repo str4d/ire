@@ -17,7 +17,7 @@ use tokio_io::{self, IoFuture};
 use tokio_timer::Deadline;
 
 use constants::I2P_BASE64;
-use data::{I2PString, RouterAddress, RouterInfo};
+use data::{I2PString, RouterAddress, RouterIdentity, RouterInfo};
 use i2np::Message;
 
 mod frame;
@@ -26,7 +26,9 @@ lazy_static! {
     pub static ref NTCP2_STYLE: I2PString = I2PString::new("NTCP2");
     pub static ref NTCP2_OPT_V: I2PString = I2PString::new("v");
     pub static ref NTCP2_OPT_S: I2PString = I2PString::new("s");
-    pub static ref NTCP2_NOISE_PROTOCOL_NAME: &'static str = "Noise_XK_25519_ChaChaPoly_SHA256";
+    pub static ref NTCP2_OPT_I: I2PString = I2PString::new("i");
+    pub static ref NTCP2_NOISE_PROTOCOL_NAME: &'static str =
+        "Noise_XKaesobfse_25519_ChaChaPoly_SHA256";
 }
 
 // Max NTCP2 message size is ~64kB
@@ -198,16 +200,23 @@ pub struct Engine {
     addr: SocketAddr,
     static_private_key: Vec<u8>,
     static_public_key: Vec<u8>,
+    aesobfse_iv: [u8; 16],
 }
 
 impl Engine {
     pub fn new(addr: SocketAddr) -> Self {
         let builder: Builder = Builder::new(NTCP2_NOISE_PROTOCOL_NAME.parse().unwrap());
         let dh = builder.generate_keypair().unwrap();
+
+        let mut aesobfse_iv = [0; 16];
+        let mut rng = rand::thread_rng();
+        rng.fill(&mut aesobfse_iv[..]);
+
         Engine {
             addr,
             static_private_key: dh.private,
             static_public_key: dh.public,
+            aesobfse_iv,
         }
     }
 
@@ -218,13 +227,19 @@ impl Engine {
             NTCP2_OPT_S.clone(),
             I2PString(I2P_BASE64.encode(&self.static_public_key)),
         );
+        ra.set_option(
+            NTCP2_OPT_I.clone(),
+            I2PString(I2P_BASE64.encode(&self.aesobfse_iv)),
+        );
         ra
     }
 
-    pub fn listen(&self) -> IoFuture<()> {
+    pub fn listen(&self, own_rid: RouterIdentity) -> IoFuture<()> {
         // Bind to the address
         let listener = TcpListener::bind(&self.addr).unwrap();
         let static_key = self.static_private_key.clone();
+        let aesobfse_key = own_rid.hash().0;
+        let aesobfse_iv = self.aesobfse_iv.clone();
 
         // For each incoming connection:
         Box::new(listener.incoming().for_each(move |conn| {
@@ -234,6 +249,7 @@ impl Engine {
             let builder: Builder = Builder::new(NTCP2_NOISE_PROTOCOL_NAME.parse().unwrap());
             let mut noise = builder
                 .local_private_key(&static_key)
+                .aesobfse(&aesobfse_key, &aesobfse_iv)
                 .build_responder()
                 .unwrap();
 
@@ -365,6 +381,16 @@ impl Engine {
             None => return io_err!(InvalidData, format!("No static key in address")),
         };
 
+        let aesobfse_key = peer_ri.router_id.hash().0;
+        let mut aesobfse_iv = [0; 16];
+        match ra.option(&NTCP2_OPT_I) {
+            Some(val) => match I2P_BASE64.decode(val.0.as_bytes()) {
+                Ok(iv) => aesobfse_iv.copy_from_slice(&iv),
+                Err(e) => return io_err!(InvalidData, format!("Invalid IV in address: {}", e)),
+            },
+            None => return io_err!(InvalidData, format!("No IV in address")),
+        }
+
         let sc_padlen = {
             let mut rng = rand::thread_rng();
             // TODO: Sample padding sizes from an appropriate distribution
@@ -407,6 +433,7 @@ impl Engine {
                     let mut noise = builder
                         .local_private_key(&static_key)
                         .remote_public_key(&remote_key)
+                        .aesobfse(&aesobfse_key, &aesobfse_iv)
                         .build_initiator()
                         .unwrap();
 
