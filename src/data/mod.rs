@@ -65,7 +65,7 @@ impl I2PDate {
 }
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct I2PString(String);
+pub struct I2PString(pub String);
 
 impl I2PString {
     pub fn new(string: &str) -> Self {
@@ -321,6 +321,10 @@ impl RouterAddress {
             transport_style: transport_style.clone(),
             options: Mapping(options),
         }
+    }
+
+    pub fn set_option(&mut self, key: I2PString, value: I2PString) {
+        self.options.0.insert(key, value);
     }
 
     pub fn addr(&self) -> Option<SocketAddr> {

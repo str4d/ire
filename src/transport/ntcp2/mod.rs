@@ -14,6 +14,7 @@ use tokio_codec::{Decoder, Encoder, Framed};
 use tokio_io::{self, IoFuture};
 use tokio_timer::Deadline;
 
+use constants::I2P_BASE64;
 use data::{I2PString, RouterAddress, RouterInfo};
 use i2np::Message;
 
@@ -21,6 +22,8 @@ mod frame;
 
 lazy_static! {
     pub static ref NTCP2_STYLE: I2PString = I2PString::new("NTCP2");
+    pub static ref NTCP2_OPT_V: I2PString = I2PString::new("v");
+    pub static ref NTCP2_OPT_S: I2PString = I2PString::new("s");
     pub static ref NTCP2_NOISE_PROTOCOL_NAME: &'static str = "Noise_XX_25519_ChaChaPoly_SHA256";
 }
 
@@ -186,20 +189,35 @@ impl Encoder for Codec {
 
 pub struct Engine {
     addr: SocketAddr,
+    static_private_key: Vec<u8>,
+    static_public_key: Vec<u8>,
 }
 
 impl Engine {
     pub fn new(addr: SocketAddr) -> Self {
-        Engine { addr }
+        let builder: Builder = Builder::new(NTCP2_NOISE_PROTOCOL_NAME.parse().unwrap());
+        let dh = builder.generate_keypair().unwrap();
+        Engine {
+            addr,
+            static_private_key: dh.private,
+            static_public_key: dh.public,
+        }
     }
 
     pub fn address(&self) -> RouterAddress {
-        RouterAddress::new(&NTCP2_STYLE, self.addr)
+        let mut ra = RouterAddress::new(&NTCP2_STYLE, self.addr);
+        ra.set_option(NTCP2_OPT_V.clone(), I2PString::new("2"));
+        ra.set_option(
+            NTCP2_OPT_S.clone(),
+            I2PString(I2P_BASE64.encode(&self.static_public_key)),
+        );
+        ra
     }
 
     pub fn listen(&self) -> IoFuture<()> {
         // Bind to the address
         let listener = TcpListener::bind(&self.addr).unwrap();
+        let static_key = self.static_private_key.clone();
 
         // For each incoming connection:
         Box::new(listener.incoming().for_each(move |conn| {
@@ -207,9 +225,8 @@ impl Engine {
 
             // Initialize our responder NoiseSession using a builder.
             let builder: Builder = Builder::new(NTCP2_NOISE_PROTOCOL_NAME.parse().unwrap());
-            let static_key = builder.generate_keypair().unwrap();
             let mut noise = builder
-                .local_private_key(&static_key.private)
+                .local_private_key(&static_key)
                 .build_responder()
                 .unwrap();
 
@@ -262,17 +279,17 @@ impl Engine {
     pub fn connect(&self, peer_ri: RouterInfo) -> IoFuture<Framed<TcpStream, Codec>> {
         // TODO return error if there are no valid NTCP2 addresses (for some reason)
         let addr = peer_ri.address(&NTCP2_STYLE).unwrap().addr().unwrap();
+        let static_key = self.static_private_key.clone();
 
         // Connect to the peer
         // Return a transport ready for sending and receiving Frames
         // The layer above will convert I2NP packets to Frames
         // (or should the Engine handle timesync packets itself?)
-        let transport = Box::new(TcpStream::connect(&addr).and_then(|socket| {
+        let transport = Box::new(TcpStream::connect(&addr).and_then(move |socket| {
             // Initialize our initiator NoiseSession using a builder.
             let builder: Builder = Builder::new(NTCP2_NOISE_PROTOCOL_NAME.parse().unwrap());
-            let static_key = builder.generate_keypair().unwrap();
             let mut noise = builder
-                .local_private_key(&static_key.private)
+                .local_private_key(&static_key)
                 .build_initiator()
                 .unwrap();
 
