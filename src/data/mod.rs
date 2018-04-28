@@ -323,6 +323,10 @@ impl RouterAddress {
         }
     }
 
+    pub fn option(&self, key: &I2PString) -> Option<&I2PString> {
+        self.options.0.get(key)
+    }
+
     pub fn set_option(&mut self, key: I2PString, value: I2PString) {
         self.options.0.insert(key, value);
     }
@@ -499,6 +503,19 @@ mod tests {
             }
             _ => panic!("RouterIdentity parsing failed"),
         }
+    }
+
+    #[test]
+    fn router_address_options() {
+        let style = I2PString::new("test");
+        let mut ra = RouterAddress::new(&style, "127.0.0.1:0".parse().unwrap());
+
+        let key = I2PString::new("key");
+        let value = I2PString::new("value");
+        assert!(ra.option(&key).is_none());
+
+        ra.set_option(key.clone(), value.clone());
+        assert_eq!(ra.option(&key).unwrap(), &value);
     }
 
     #[test]

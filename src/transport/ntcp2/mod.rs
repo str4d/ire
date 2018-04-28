@@ -24,7 +24,7 @@ lazy_static! {
     pub static ref NTCP2_STYLE: I2PString = I2PString::new("NTCP2");
     pub static ref NTCP2_OPT_V: I2PString = I2PString::new("v");
     pub static ref NTCP2_OPT_S: I2PString = I2PString::new("s");
-    pub static ref NTCP2_NOISE_PROTOCOL_NAME: &'static str = "Noise_XX_25519_ChaChaPoly_SHA256";
+    pub static ref NTCP2_NOISE_PROTOCOL_NAME: &'static str = "Noise_XK_25519_ChaChaPoly_SHA256";
 }
 
 // Max NTCP2 message size is ~64kB
@@ -230,16 +230,16 @@ impl Engine {
                 .build_responder()
                 .unwrap();
 
-            let process_conn = tokio_io::io::read_exact(conn, [0u8; 32])
+            let process_conn = tokio_io::io::read_exact(conn, vec![0u8; 48])
                 .and_then(|(conn, msg)| {
-                    // <- e
-                    debug!("S <- e");
+                    // <- e, es
+                    debug!("S <- e, es");
                     let mut buf = [0u8; 0];
                     noise.read_message(&msg, &mut buf).unwrap();
 
-                    // -> e, ee, s, es
-                    debug!("S -> e, ee, s, es");
-                    let mut buf = vec![0u8; 96];
+                    // -> e, ee
+                    debug!("S -> e, ee");
+                    let mut buf = vec![0u8; 48];
                     noise.write_message(&[], &mut buf).unwrap();
                     tokio_io::io::write_all(conn, buf)
                         .and_then(|(conn, _)| tokio_io::io::read_exact(conn, vec![0u8; 64]))
@@ -278,8 +278,18 @@ impl Engine {
 
     pub fn connect(&self, peer_ri: RouterInfo) -> IoFuture<Framed<TcpStream, Codec>> {
         // TODO return error if there are no valid NTCP2 addresses (for some reason)
-        let addr = peer_ri.address(&NTCP2_STYLE).unwrap().addr().unwrap();
+        let ra = peer_ri.address(&NTCP2_STYLE).unwrap();
+        let addr = ra.addr().unwrap();
         let static_key = self.static_private_key.clone();
+        let remote_key = match ra.option(&NTCP2_OPT_S) {
+            Some(val) => match I2P_BASE64.decode(val.0.as_bytes()) {
+                Ok(key) => key,
+                Err(e) => {
+                    return io_err!(InvalidData, format!("Invalid static key in address: {}", e))
+                }
+            },
+            None => return io_err!(InvalidData, format!("No static key in address")),
+        };
 
         // Connect to the peer
         // Return a transport ready for sending and receiving Frames
@@ -290,19 +300,19 @@ impl Engine {
             let builder: Builder = Builder::new(NTCP2_NOISE_PROTOCOL_NAME.parse().unwrap());
             let mut noise = builder
                 .local_private_key(&static_key)
+                .remote_public_key(&remote_key)
                 .build_initiator()
                 .unwrap();
 
-            // -> e
-            debug!("C -> e");
+            // -> e, es
+            debug!("C -> e, es");
             let mut buf = vec![0u8; 48];
-            let len = noise.write_message(&[], &mut buf).unwrap();
-            buf.truncate(len);
+            noise.write_message(&[], &mut buf).unwrap();
             tokio_io::io::write_all(socket, buf)
-                .and_then(|(conn, _)| tokio_io::io::read_exact(conn, vec![0u8; 96]))
+                .and_then(|(conn, _)| tokio_io::io::read_exact(conn, vec![0u8; 48]))
                 .and_then(move |(conn, msg)| {
-                    // <- e, ee, s, es
-                    debug!("C <- e, ee, s, es");
+                    // <- e, ee
+                    debug!("C <- e, ee");
                     let mut buf = [0u8; 0];
                     noise.read_message(&msg, &mut buf).unwrap();
 
