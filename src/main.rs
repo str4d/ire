@@ -1,6 +1,7 @@
 extern crate aesti;
 #[macro_use]
 extern crate arrayref;
+extern crate byteorder;
 extern crate bytes;
 extern crate clap;
 extern crate cookie_factory;
@@ -20,6 +21,7 @@ extern crate nom;
 extern crate num;
 extern crate rand;
 extern crate sha2;
+extern crate siphasher;
 extern crate snow;
 extern crate tokio;
 extern crate tokio_codec;

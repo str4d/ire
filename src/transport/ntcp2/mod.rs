@@ -1,10 +1,13 @@
+use byteorder::{LittleEndian, ReadBytesExt};
 use bytes::BytesMut;
 use cookie_factory::GenError;
 use futures::{Future, Stream};
 use nom::Err;
 use rand::{self, Rng};
+use siphasher::sip::SipHasher;
 use snow::{self, Builder};
 use std::fmt;
+use std::hash::Hasher;
 use std::io;
 use std::iter::repeat;
 use std::net::SocketAddr;
@@ -92,6 +95,10 @@ type Frame = Vec<Block>;
 pub struct Codec {
     noise: snow::Session,
     noise_buf: [u8; NTCP2_MTU],
+    enc_len_masker: SipHasher,
+    enc_len_iv: u64,
+    dec_len_masker: SipHasher,
+    dec_len_iv: u64,
     next_len: Option<usize>,
 }
 
@@ -101,18 +108,21 @@ impl Decoder for Codec {
 
     fn decode(&mut self, buf: &mut BytesMut) -> io::Result<Option<Frame>> {
         if let None = self.next_len {
-            if buf.len() < 18 {
+            if buf.len() < 2 {
                 return Ok(None);
             }
 
             // Read the length
-            let mut msg_len_buf = [0u8; 2];
-            match self.noise.read_message(&buf[..18], &mut msg_len_buf) {
-                Ok(_len) => (),
-                Err(e) => return io_err!(Other, format!("Decryption error: {:?}", e)),
-            }
-            buf.split_to(18);
-            self.next_len = Some(((msg_len_buf[0] as usize) << 8) + (msg_len_buf[1] as usize));
+            let mut msg_len = ((buf[0] as usize) << 8) + (buf[1] as usize);
+            msg_len ^= (self.dec_len_iv & 0xffff) as usize;
+
+            // Update masker state
+            let mut masker = self.dec_len_masker.clone();
+            masker.write_u64(self.dec_len_iv);
+            self.dec_len_iv = masker.finish();
+
+            buf.split_to(2);
+            self.next_len = Some(msg_len);
         }
 
         match self.next_len {
@@ -154,27 +164,28 @@ impl Encoder for Codec {
     fn encode(&mut self, frame: Frame, buf: &mut BytesMut) -> io::Result<()> {
         match frame::gen_frame((&mut self.noise_buf, 0), &frame).map(|tup| tup.1) {
             Ok(sz) => {
-                let msg_len = sz + 16;
-                let msg_len_buf = [(msg_len >> 8) as u8, (msg_len & 0xff) as u8];
+                let mut msg_len = sz + 16;
 
                 let start = buf.len();
-                buf.extend(repeat(0).take(18 + msg_len));
+                buf.extend(repeat(0).take(2 + msg_len));
 
-                match self.noise.write_message(&msg_len_buf, &mut buf[start..]) {
-                    Ok(len) if len == 18 => match self
-                        .noise
-                        .write_message(&self.noise_buf[..sz], &mut buf[start + len..])
-                    {
-                        Ok(len) if len == msg_len => Ok(()),
-                        Ok(len) => io_err!(
-                            InvalidData,
-                            format!("encrypted frame is unexpected size: {}", len)
-                        ),
-                        Err(e) => io_err!(Other, format!("encryption error: {:?}", e)),
-                    },
+                let masked_len = msg_len ^ (self.enc_len_iv & 0xffff) as usize;
+
+                // Update masker state
+                let mut masker = self.enc_len_masker.clone();
+                masker.write_u64(self.enc_len_iv);
+                self.enc_len_iv = masker.finish();
+
+                buf[start] = (masked_len >> 8) as u8;
+                buf[start + 1] = (masked_len & 0xff) as u8;
+                match self
+                    .noise
+                    .write_message(&self.noise_buf[..sz], &mut buf[start + 2..])
+                {
+                    Ok(len) if len == msg_len => Ok(()),
                     Ok(len) => io_err!(
                         InvalidData,
-                        format!("encrypted length is unexpected size: {}", len)
+                        format!("encrypted frame is unexpected size: {}", len)
                     ),
                     Err(e) => io_err!(Other, format!("encryption error: {:?}", e)),
                 }
@@ -250,6 +261,7 @@ impl Engine {
             let mut noise = builder
                 .local_private_key(&static_key)
                 .aesobfse(&aesobfse_key, &aesobfse_iv)
+                .enable_ask()
                 .build_responder()
                 .unwrap();
 
@@ -336,6 +348,24 @@ impl Engine {
                     let rtt = rtt_timer.elapsed().expect("Time went backwards?");
                     debug!("Peer RTT: {:?}", rtt);
 
+                    // Prepare length obfuscation keys and IVs
+                    let (ek0, ek1, eiv, dk0, dk1, div) = {
+                        let label = String::from("siphash");
+                        noise.initialize_ask(vec![label.clone()]).unwrap();
+                        let (ask0, ask1) = noise.finalize_ask(&label).unwrap();
+                        let mut erdr = io::Cursor::new(&ask1); // Bob to Alice
+                        let mut drdr = io::Cursor::new(&ask0); // Alice to Bob
+
+                        (
+                            erdr.read_u64::<LittleEndian>().unwrap(),
+                            erdr.read_u64::<LittleEndian>().unwrap(),
+                            erdr.read_u64::<LittleEndian>().unwrap(),
+                            drdr.read_u64::<LittleEndian>().unwrap(),
+                            drdr.read_u64::<LittleEndian>().unwrap(),
+                            drdr.read_u64::<LittleEndian>().unwrap(),
+                        )
+                    };
+
                     // Transition the state machine into transport mode now that the handshake is complete.
                     let noise = noise.into_transport_mode().unwrap();
                     info!("Connection established!");
@@ -343,6 +373,10 @@ impl Engine {
                     let codec = Codec {
                         noise,
                         noise_buf: [0u8; NTCP2_MTU],
+                        enc_len_masker: SipHasher::new_with_keys(ek0, ek1),
+                        enc_len_iv: eiv,
+                        dec_len_masker: SipHasher::new_with_keys(dk0, dk1),
+                        dec_len_iv: div,
                         next_len: None,
                     };
 
@@ -434,6 +468,7 @@ impl Engine {
                         .local_private_key(&static_key)
                         .remote_public_key(&remote_key)
                         .aesobfse(&aesobfse_key, &aesobfse_iv)
+                        .enable_ask()
                         .build_initiator()
                         .unwrap();
 
@@ -510,13 +545,35 @@ impl Engine {
                         .map(|(conn, _)| (conn, noise)))
                 })
                 .and_then(|f| f)
-                .and_then(|(conn, noise)| {
+                .and_then(|(conn, mut noise)| {
+                    // Prepare length obfuscation keys and IVs
+                    let (ek0, ek1, eiv, dk0, dk1, div) = {
+                        let label = String::from("siphash");
+                        noise.initialize_ask(vec![label.clone()]).unwrap();
+                        let (ask0, ask1) = noise.finalize_ask(&label).unwrap();
+                        let mut erdr = io::Cursor::new(&ask0); // Alice to Bob
+                        let mut drdr = io::Cursor::new(&ask1); // Bob to Alice
+
+                        (
+                            erdr.read_u64::<LittleEndian>().unwrap(),
+                            erdr.read_u64::<LittleEndian>().unwrap(),
+                            erdr.read_u64::<LittleEndian>().unwrap(),
+                            drdr.read_u64::<LittleEndian>().unwrap(),
+                            drdr.read_u64::<LittleEndian>().unwrap(),
+                            drdr.read_u64::<LittleEndian>().unwrap(),
+                        )
+                    };
+
                     // Transition the state machine into transport mode now that the handshake is complete.
                     let noise = noise.into_transport_mode().unwrap();
 
                     let codec = Codec {
                         noise,
                         noise_buf: [0u8; NTCP2_MTU],
+                        enc_len_masker: SipHasher::new_with_keys(ek0, ek1),
+                        enc_len_iv: eiv,
+                        dec_len_masker: SipHasher::new_with_keys(dk0, dk1),
+                        dec_len_iv: div,
                         next_len: None,
                     };
 
