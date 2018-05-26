@@ -144,11 +144,7 @@ fn cli_client(args: &ArgMatches) -> i32 {
             info!("Connection established!");
             t.send(transport::ntcp::Frame::TimeSync(42))
         })
-        .and_then(|t| {
-            t.send(transport::ntcp::Frame::Standard(
-                i2np::Message::dummy_data(),
-            ))
-        })
+        .and_then(|t| t.send(transport::ntcp::Frame::Standard(i2np::Message::dummy_data())))
         .and_then(|_| {
             info!("Dummy data sent!");
             Ok(())

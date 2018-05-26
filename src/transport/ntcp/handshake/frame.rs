@@ -1,11 +1,11 @@
 use cookie_factory::*;
 use nom::{IResult, be_u16, be_u32};
 
-use crypto::frame::{gen_signature, signature};
-use data::{Hash, RouterIdentity};
-use data::frame::{gen_hash, gen_router_identity, hash, router_identity};
-use super::{HandshakeFrame, SessionConfirmA, SessionConfirmB, SessionCreated, SessionRequest};
 use super::super::frame::{gen_padding, padding, padding_len};
+use super::{HandshakeFrame, SessionConfirmA, SessionConfirmB, SessionCreated, SessionRequest};
+use crypto::frame::{gen_signature, signature};
+use data::frame::{gen_hash, gen_router_identity, hash, router_identity};
+use data::{Hash, RouterIdentity};
 
 //
 // Handshake

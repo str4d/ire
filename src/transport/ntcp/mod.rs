@@ -1,5 +1,5 @@
-use cookie_factory::GenError;
 use bytes::BytesMut;
+use cookie_factory::GenError;
 use futures::{Future, Stream};
 use nom::{Err, Offset};
 use std::io;

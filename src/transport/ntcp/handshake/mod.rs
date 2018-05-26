@@ -10,9 +10,9 @@ use tokio::io::{AsyncRead, AsyncWrite};
 use tokio_io::IoFuture;
 use tokio_io::codec::{Decoder, Encoder, Framed};
 
+use super::{Codec, NTCP_MTU};
 use crypto::{Aes256, Signature, SigningPrivateKey, AES_BLOCK_SIZE};
 use data::{Hash, RouterIdentity};
-use super::{Codec, NTCP_MTU};
 use transport::DHSessionKeyBuilder;
 
 mod frame;

@@ -2,11 +2,11 @@ use cookie_factory::*;
 use itertools::Itertools;
 use nom::{Err, ErrorKind, be_u16, be_u32, be_u64, be_u8};
 
+use super::*;
 use constants;
 use crypto::frame::{enc_type, gen_enc_type, gen_private_key, gen_public_key, gen_sig_type,
                     gen_signature, gen_signing_key, gen_signing_private_key, private_key,
                     public_key, sig_type, signature, signing_key, signing_private_key};
-use super::*;
 
 //
 // Simple data types

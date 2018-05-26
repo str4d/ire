@@ -1,9 +1,9 @@
 use cookie_factory::*;
 use nom::{IResult, be_u16, be_u32};
 
+use super::Frame;
 use i2np::Message;
 use i2np::frame::{gen_message, message};
-use super::Frame;
 
 //
 // Utils
@@ -51,8 +51,7 @@ fn adler(input: &[u8]) -> [u8; 4] {
 named!(
     get_adler<[u8; 4]>,
     peek!(do_parse!(
-        data:
-            switch!(peek!(be_u16),
+        data: switch!(peek!(be_u16),
             0 => take!(12) |
             size => take!((size+2) as usize + padding_len((size+6) as usize))
         ) >> (adler(data))
