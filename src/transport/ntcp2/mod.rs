@@ -31,7 +31,7 @@ lazy_static! {
     pub static ref NTCP2_OPT_S: I2PString = I2PString::new("s");
     pub static ref NTCP2_OPT_I: I2PString = I2PString::new("i");
     pub static ref NTCP2_NOISE_PROTOCOL_NAME: &'static str =
-        "Noise_XKaesobfse_25519_ChaChaPoly_SHA256";
+        "Noise_XKaesobfse+hs2+hs3_25519_ChaChaPoly_SHA256";
 }
 
 // Max NTCP2 message size is ~64kB
@@ -285,6 +285,13 @@ impl Engine {
                         }
                     };
 
+                    Ok(tokio_io::io::read_exact(conn, vec![0u8; padlen])
+                        .map(move |(c, m)| (c, noise, sclen, m)))
+                })
+                .and_then(|f| f)
+                .and_then(|(conn, mut noise, sclen, padding)| {
+                    noise.set_h_data(2, &padding).unwrap();
+
                     let now = SystemTime::now();
                     let mut ts_b = now.duration_since(UNIX_EPOCH).expect("Time went backwards");
                     ts_b.add_assign(Duration::from_millis(500));
@@ -316,8 +323,9 @@ impl Engine {
                     let mut buf = vec![0u8; SESSION_CREATED_CT_LEN + sc_padlen as usize];
                     noise.write_message(&sc_buf, &mut buf).unwrap();
                     rng.fill(&mut buf[SESSION_CREATED_CT_LEN..]);
-                    Ok(tokio_io::io::read_exact(conn, vec![0u8; padlen])
-                        .and_then(move |(conn, _)| tokio_io::io::write_all(conn, buf))
+                    noise.set_h_data(3, &buf[SESSION_CREATED_CT_LEN..]).unwrap();
+
+                    Ok(tokio_io::io::write_all(conn, buf)
                         .and_then(move |(conn, _)| {
                             tokio_io::io::read_exact(conn, vec![0u8; sclen + 48])
                         })
@@ -508,6 +516,8 @@ impl Engine {
                     let mut buf = vec![0u8; SESSION_REQUEST_CT_LEN + padlen as usize];
                     noise.write_message(&sr_buf, &mut buf).unwrap();
                     rng.fill(&mut buf[SESSION_REQUEST_CT_LEN..]);
+                    noise.set_h_data(2, &buf[SESSION_REQUEST_CT_LEN..]).unwrap();
+
                     Ok(tokio_io::io::write_all(socket, buf)
                         .and_then(|(conn, _)| {
                             tokio_io::io::read_exact(conn, vec![0u8; SESSION_CREATED_CT_LEN])
@@ -515,7 +525,7 @@ impl Engine {
                         .map(move |(c, m)| (c, noise, now, m)))
                 })
                 .and_then(|f| f)
-                .and_then(move |(conn, mut noise, rtt_timer, msg)| {
+                .and_then(|(conn, mut noise, rtt_timer, msg)| {
                     // <- e, ee
                     debug!("C <- e, ee");
                     let mut buf = [0u8; SESSION_CREATED_PT_LEN];
@@ -533,6 +543,13 @@ impl Engine {
                     let rtt = rtt_timer.elapsed().expect("Time went backwards?");
                     debug!("Peer RTT: {:?}", rtt);
 
+                    Ok(tokio_io::io::read_exact(conn, vec![0u8; padlen])
+                        .map(move |(c, m)| (c, noise, m)))
+                })
+                .and_then(|f| f)
+                .and_then(move |(conn, mut noise, padding)| {
+                    noise.set_h_data(3, &padding).unwrap();
+
                     // SessionConfirmed
 
                     // -> s, se
@@ -540,9 +557,7 @@ impl Engine {
                     let mut buf = vec![0u8; NTCP2_MTU];
                     let len = noise.write_message(&sc_buf, &mut buf).unwrap();
                     buf.truncate(len);
-                    Ok(tokio_io::io::read_exact(conn, vec![0u8; padlen])
-                        .and_then(|(conn, _)| tokio_io::io::write_all(conn, buf))
-                        .map(|(conn, _)| (conn, noise)))
+                    Ok(tokio_io::io::write_all(conn, buf).map(|(conn, _)| (conn, noise)))
                 })
                 .and_then(|f| f)
                 .and_then(|(conn, mut noise)| {
