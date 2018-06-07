@@ -1,5 +1,5 @@
 use cookie_factory::*;
-use nom::{IResult, be_u16, be_u32};
+use nom::{be_u16, be_u32, IResult};
 
 use super::super::frame::{gen_padding, padding, padding_len};
 use super::{HandshakeFrame, SessionConfirmA, SessionConfirmB, SessionCreated, SessionRequest};

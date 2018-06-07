@@ -8,8 +8,8 @@ use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 use tokio;
 use tokio::net::{TcpListener, TcpStream};
-use tokio_io::IoFuture;
 use tokio_io::codec::{Decoder, Encoder, Framed};
+use tokio_io::IoFuture;
 use tokio_timer::Deadline;
 
 use crypto::{Aes256, SigningPrivateKey};

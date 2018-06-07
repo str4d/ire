@@ -1,16 +1,16 @@
 use cookie_factory::*;
-use flate2::Compression;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
-use nom::{Context, Err, ErrorKind, be_u16, be_u32, be_u8};
+use flate2::Compression;
+use nom::{be_u16, be_u32, be_u8, Context, Err, ErrorKind};
 use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
 
 use super::*;
 use crypto::frame::{gen_session_key, session_key};
-use data::frame::{certificate, gen_certificate, gen_hash, gen_lease_set, gen_router_info,
-                  gen_session_tag, gen_tunnel_id, hash, lease_set, router_info, session_tag,
-                  tunnel_id, gen_i2p_date, i2p_date};
+use data::frame::{certificate, gen_certificate, gen_hash, gen_i2p_date, gen_lease_set,
+                  gen_router_info, gen_session_tag, gen_tunnel_id, hash, i2p_date, lease_set,
+                  router_info, session_tag, tunnel_id};
 
 //
 // Utils

@@ -7,8 +7,8 @@ use std::iter::repeat;
 use std::ops::AddAssign;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncRead, AsyncWrite};
-use tokio_io::IoFuture;
 use tokio_io::codec::{Decoder, Encoder, Framed};
+use tokio_io::IoFuture;
 
 use super::{Codec, NTCP_MTU};
 use crypto::{Aes256, Signature, SigningPrivateKey, AES_BLOCK_SIZE};
@@ -989,9 +989,7 @@ where
         let mut t = HandshakeTransport {
             upstream: stream.framed(codec),
             state: Some(IBHandshakeState::SessionRequest(IBHandshake::new(
-                own_ri,
-                own_key,
-                dh_y,
+                own_ri, own_key, dh_y,
             ))),
         };
 
@@ -1036,11 +1034,7 @@ where
         let mut t = HandshakeTransport {
             upstream: stream.framed(codec),
             state: Some(OBHandshakeState::SessionRequest(OBHandshake::new(
-                own_ri,
-                own_key,
-                ri_remote,
-                dh_x,
-                hxxorhb,
+                own_ri, own_key, ri_remote, dh_x, hxxorhb,
             ))),
         };
 

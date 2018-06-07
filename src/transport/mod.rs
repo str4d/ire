@@ -3,8 +3,8 @@ use rand;
 use std::iter::repeat;
 
 use constants::CryptoConstants;
-use crypto::SessionKey;
 use crypto::math::rectify;
+use crypto::SessionKey;
 
 pub mod ntcp;
 
