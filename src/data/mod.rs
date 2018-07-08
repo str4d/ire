@@ -172,7 +172,7 @@ impl RouterIdentity {
                 let mut rng = rand::thread_rng();
                 let mut padding = Vec::new();
                 padding.resize(sz, 0);
-                rng.fill_bytes(&mut padding);
+                rng.fill(&mut padding[..]);
                 Some(padding)
             }
         };

@@ -176,7 +176,7 @@ impl PrivateKey {
     pub fn new() -> Self {
         let mut rng = rand::thread_rng();
         let mut keydata = [0u8; 256];
-        rng.fill_bytes(&mut keydata);
+        rng.fill(&mut keydata);
         PrivateKey(keydata)
     }
 
@@ -296,7 +296,7 @@ impl SigningPrivateKey {
             &SigType::EcdsaSha512P521 => panic!("Not implemented"),
             &SigType::Ed25519 => loop {
                 let mut keydata = [0u8; ED_SECRET_KEY_LENGTH];
-                rng.fill_bytes(&mut keydata);
+                rng.fill(&mut keydata);
                 match SigningPrivateKey::from_bytes(sig_type, &keydata) {
                     Ok(spk) => return spk,
                     Err(_) => continue,
