@@ -8,9 +8,10 @@ use std::io::{Read, Write};
 
 use super::*;
 use crypto::frame::{gen_session_key, session_key};
-use data::frame::{certificate, gen_certificate, gen_hash, gen_i2p_date, gen_lease_set,
-                  gen_router_info, gen_session_tag, gen_tunnel_id, hash, i2p_date, lease_set,
-                  router_info, session_tag, tunnel_id};
+use data::frame::{
+    certificate, gen_certificate, gen_hash, gen_i2p_date, gen_lease_set, gen_router_info,
+    gen_session_tag, gen_tunnel_id, hash, i2p_date, lease_set, router_info, session_tag, tunnel_id,
+};
 
 //
 // Utils
@@ -197,7 +198,9 @@ fn gen_database_store<'a>(
 ) -> Result<(&'a mut [u8], usize), GenError> {
     do_gen!(
         input,
-        gen_hash(&ds.key) >> gen_be_u8!(ds.ds_type) >> gen_reply_path(&ds.reply)
+        gen_hash(&ds.key)
+            >> gen_be_u8!(ds.ds_type)
+            >> gen_reply_path(&ds.reply)
             >> gen_database_store_data(&ds.data)
     )
 }
@@ -293,7 +296,9 @@ fn gen_database_lookup<'a>(
 named!(
     database_search_reply<MessagePayload>,
     do_parse!(
-        key: hash >> peers: length_count!(be_u8, hash) >> from: hash
+        key: hash
+            >> peers: length_count!(be_u8, hash)
+            >> from: hash
             >> (MessagePayload::DatabaseSearchReply(DatabaseSearchReply { key, peers, from }))
     )
 );
@@ -304,7 +309,9 @@ fn gen_database_search_reply<'a>(
 ) -> Result<(&'a mut [u8], usize), GenError> {
     do_gen!(
         input,
-        gen_hash(&dsr.key) >> gen_be_u8!(dsr.peers.len() as u8) >> gen_many!(&dsr.peers, gen_hash)
+        gen_hash(&dsr.key)
+            >> gen_be_u8!(dsr.peers.len() as u8)
+            >> gen_many!(&dsr.peers, gen_hash)
             >> gen_hash(&dsr.from)
     )
 }
@@ -314,7 +321,8 @@ fn gen_database_search_reply<'a>(
 named!(
     delivery_status<MessagePayload>,
     do_parse!(
-        msg_id: be_u32 >> time_stamp: i2p_date
+        msg_id: be_u32
+            >> time_stamp: i2p_date
             >> (MessagePayload::DeliveryStatus(DeliveryStatus { msg_id, time_stamp }))
     )
 );
@@ -419,8 +427,10 @@ fn gen_garlic_clove<'a>(
     do_gen!(
         input,
         gen_garlic_clove_delivery_instructions(&clove.delivery_instructions)
-            >> gen_message(&clove.msg) >> gen_be_u32!(clove.clove_id)
-            >> gen_i2p_date(&clove.expiration) >> gen_certificate(&clove.cert)
+            >> gen_message(&clove.msg)
+            >> gen_be_u32!(clove.clove_id)
+            >> gen_i2p_date(&clove.expiration)
+            >> gen_certificate(&clove.cert)
     )
 }
 
@@ -447,8 +457,10 @@ fn gen_garlic<'a>(
 ) -> Result<(&'a mut [u8], usize), GenError> {
     do_gen!(
         input,
-        gen_be_u8!(g.cloves.len() as u8) >> gen_many!(&g.cloves, gen_garlic_clove)
-            >> gen_certificate(&g.cert) >> gen_be_u32!(g.msg_id)
+        gen_be_u8!(g.cloves.len() as u8)
+            >> gen_many!(&g.cloves, gen_garlic_clove)
+            >> gen_certificate(&g.cert)
+            >> gen_be_u32!(g.msg_id)
             >> gen_i2p_date(&g.expiration)
     )
 }
@@ -458,7 +470,8 @@ fn gen_garlic<'a>(
 named!(
     tunnel_data<MessagePayload>,
     do_parse!(
-        tid: tunnel_id >> data: take!(1024)
+        tid: tunnel_id
+            >> data: take!(1024)
             >> (MessagePayload::TunnelData(TunnelData::from(tid, array_ref![data, 0, 1024])))
     )
 );
@@ -521,8 +534,13 @@ fn gen_tunnel_build<'a>(
 ) -> Result<(&'a mut [u8], usize), GenError> {
     do_gen!(
         input,
-        gen_slice!(tb[0]) >> gen_slice!(tb[1]) >> gen_slice!(tb[2]) >> gen_slice!(tb[3])
-            >> gen_slice!(tb[4]) >> gen_slice!(tb[5]) >> gen_slice!(tb[6])
+        gen_slice!(tb[0])
+            >> gen_slice!(tb[1])
+            >> gen_slice!(tb[2])
+            >> gen_slice!(tb[3])
+            >> gen_slice!(tb[4])
+            >> gen_slice!(tb[5])
+            >> gen_slice!(tb[6])
             >> gen_slice!(tb[7])
     )
 }
@@ -544,8 +562,13 @@ fn gen_tunnel_build_reply<'a>(
 ) -> Result<(&'a mut [u8], usize), GenError> {
     do_gen!(
         input,
-        gen_slice!(tb[0]) >> gen_slice!(tb[1]) >> gen_slice!(tb[2]) >> gen_slice!(tb[3])
-            >> gen_slice!(tb[4]) >> gen_slice!(tb[5]) >> gen_slice!(tb[6])
+        gen_slice!(tb[0])
+            >> gen_slice!(tb[1])
+            >> gen_slice!(tb[2])
+            >> gen_slice!(tb[3])
+            >> gen_slice!(tb[4])
+            >> gen_slice!(tb[5])
+            >> gen_slice!(tb[6])
             >> gen_slice!(tb[7])
     )
 }
@@ -640,7 +663,11 @@ fn gen_checksum<'a>(
 named!(
     header<(u8, u32, I2PDate, u16, u8)>,
     do_parse!(
-        msg_type: be_u8 >> msg_id: be_u32 >> expiration: i2p_date >> size: be_u16 >> cs: be_u8
+        msg_type: be_u8
+            >> msg_id: be_u32
+            >> expiration: i2p_date
+            >> size: be_u16
+            >> cs: be_u8
             >> ((msg_type, msg_id, expiration, size, cs))
     )
 );

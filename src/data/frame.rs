@@ -4,9 +4,11 @@ use nom::{be_u16, be_u32, be_u64, be_u8, Err, ErrorKind};
 
 use super::*;
 use constants;
-use crypto::frame::{enc_type, gen_enc_type, gen_private_key, gen_public_key, gen_sig_type,
-                    gen_signature, gen_signing_key, gen_signing_private_key, private_key,
-                    public_key, sig_type, signature, signing_key, signing_private_key};
+use crypto::frame::{
+    enc_type, gen_enc_type, gen_private_key, gen_public_key, gen_sig_type, gen_signature,
+    gen_signing_key, gen_signing_private_key, private_key, public_key, sig_type, signature,
+    signing_key, signing_private_key,
+};
 
 //
 // Simple data types
@@ -57,7 +59,9 @@ pub fn gen_mapping_pair<'a>(
 ) -> Result<(&'a mut [u8], usize), GenError> {
     do_gen!(
         input,
-        gen_i2p_string(pair.0) >> gen_slice!("=".as_bytes()) >> gen_i2p_string(pair.1)
+        gen_i2p_string(pair.0)
+            >> gen_slice!("=".as_bytes())
+            >> gen_i2p_string(pair.1)
             >> gen_slice!(";".as_bytes())
     )
 }
@@ -176,7 +180,9 @@ fn gen_key_certificate<'a>(
 ) -> Result<(&'a mut [u8], usize), GenError> {
     do_gen!(
         input,
-        gen_sig_type(&kc.sig_type) >> gen_enc_type(&kc.enc_type) >> gen_slice!(&kc.sig_data)
+        gen_sig_type(&kc.sig_type)
+            >> gen_enc_type(&kc.enc_type)
+            >> gen_slice!(&kc.sig_data)
             >> gen_slice!(&kc.enc_data)
     )
 }
@@ -299,7 +305,8 @@ pub fn gen_router_secret_keys<'a>(
 ) -> Result<(&'a mut [u8], usize), GenError> {
     do_gen!(
         input,
-        gen_router_identity(&rsk.rid) >> gen_private_key(&rsk.private_key)
+        gen_router_identity(&rsk.rid)
+            >> gen_private_key(&rsk.private_key)
             >> gen_signing_private_key(&rsk.signing_private_key)
     )
 }

@@ -2,8 +2,10 @@ use cookie_factory::*;
 use nom::{be_u16, Err, ErrorKind, IResult};
 
 use constants;
-use crypto::{EncType, PrivateKey, PublicKey, SessionKey, SigType, Signature, SigningPrivateKey,
-             SigningPublicKey};
+use crypto::{
+    EncType, PrivateKey, PublicKey, SessionKey, SigType, Signature, SigningPrivateKey,
+    SigningPublicKey,
+};
 
 named!(pub sig_type<SigType>,
     switch!(be_u16,

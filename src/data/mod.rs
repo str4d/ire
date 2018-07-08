@@ -12,8 +12,9 @@ use std::net::SocketAddr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use constants;
-use crypto::{EncType, PrivateKey, PublicKey, SigType, Signature, SigningPrivateKey,
-             SigningPublicKey};
+use crypto::{
+    EncType, PrivateKey, PublicKey, SigType, Signature, SigningPrivateKey, SigningPublicKey,
+};
 
 pub mod frame;
 
