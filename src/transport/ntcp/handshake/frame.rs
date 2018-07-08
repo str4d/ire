@@ -106,7 +106,10 @@ pub fn gen_session_confirm_sig_msg<'a>(
 ) -> Result<(&'a mut [u8], usize), GenError> {
     do_gen!(
         input,
-        gen_slice!(dh_x) >> gen_slice!(dh_y) >> gen_hash(&ri.hash()) >> gen_be_u32!(ts_a)
+        gen_slice!(dh_x)
+            >> gen_slice!(dh_y)
+            >> gen_hash(&ri.hash())
+            >> gen_be_u32!(ts_a)
             >> gen_be_u32!(ts_b)
     )
 }

@@ -271,8 +271,7 @@ mod tests {
                 panic!("Returned {:?} bytes", sz);
             }
             Err(GenError::BufferTooSmall(sz)) => {
-                // TODO: Figure out why this is 17, not 16
-                assert_eq!(sz, 17);
+                assert_eq!(sz, 16);
             }
             Err(e) => {
                 panic!("Unexpected error in gen_timestamp_frame: {:?}", e);
