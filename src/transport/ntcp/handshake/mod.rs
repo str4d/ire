@@ -6,9 +6,8 @@ use std::io;
 use std::iter::repeat;
 use std::ops::AddAssign;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tokio::io::{AsyncRead, AsyncWrite};
-use tokio_io::codec::{Decoder, Encoder, Framed};
-use tokio_io::IoFuture;
+use tokio_codec::{Decoder, Encoder, Framed, FramedParts};
+use tokio_io::{IoFuture, AsyncRead, AsyncWrite};
 
 use super::{Codec, NTCP_MTU};
 use crypto::{Aes256, Signature, SigningPrivateKey, AES_BLOCK_SIZE};
@@ -987,7 +986,7 @@ where
         // TODO: Find a way to refer to the codec from here, to deduplicate state
         let codec = InboundHandshakeCodec::new(dh_key_builder, iv_enc);
         let mut t = HandshakeTransport {
-            upstream: stream.framed(codec),
+            upstream: codec.framed(stream),
             state: Some(IBHandshakeState::SessionRequest(IBHandshake::new(
                 own_ri, own_key, dh_y,
             ))),
@@ -1032,7 +1031,7 @@ where
         // TODO: Find a way to refer to the codec from here, to deduplicate state
         let codec = OutboundHandshakeCodec::new(dh_key_builder, iv_enc, ri_remote.clone());
         let mut t = HandshakeTransport {
-            upstream: stream.framed(codec),
+            upstream: codec.framed(stream),
             state: Some(OBHandshakeState::SessionRequest(OBHandshake::new(
                 own_ri, own_key, ri_remote, dh_x, hxxorhb,
             ))),
@@ -1170,8 +1169,11 @@ where
     Codec: From<C>,
 {
     fn transmute_transport(transport: HandshakeTransport<T, C, S>) -> Framed<T, Codec> {
-        let (parts, established) = transport.upstream.into_parts_and_codec();
-        Framed::from_parts(parts, Codec::from(established))
+        let parts = transport.upstream.into_parts();
+        let mut new_parts = FramedParts::new(parts.io, Codec::from(parts.codec));
+        new_parts.read_buf = parts.read_buf;
+        new_parts.write_buf = parts.write_buf;
+        Framed::from_parts(new_parts)
     }
 }
 
