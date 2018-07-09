@@ -7,7 +7,7 @@ use std::iter::repeat;
 use std::ops::AddAssign;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio_codec::{Decoder, Encoder, Framed, FramedParts};
-use tokio_io::{IoFuture, AsyncRead, AsyncWrite};
+use tokio_io::{AsyncRead, AsyncWrite, IoFuture};
 
 use super::{Codec, NTCP_MTU};
 use crypto::{Aes256, Signature, SigningPrivateKey, AES_BLOCK_SIZE};
