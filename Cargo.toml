@@ -29,6 +29,7 @@ num = { version = "0.2", features = ["rand"] }
 rand = "0.5"
 sha2 = "0.7"
 tokio = "0.1"
+tokio-codec = "0.1"
 tokio-io = "0.1"
 tokio-timer = "0.2"
 

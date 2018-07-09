@@ -21,6 +21,7 @@ extern crate num;
 extern crate rand;
 extern crate sha2;
 extern crate tokio;
+extern crate tokio_codec;
 extern crate tokio_io;
 extern crate tokio_timer;
 
