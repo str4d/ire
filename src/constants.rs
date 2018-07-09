@@ -1,4 +1,15 @@
+use data_encoding::{Encoding, Specification};
 use num::{BigUint, Num};
+
+lazy_static! {
+    pub static ref I2P_BASE64: Encoding = {
+        let mut spec = Specification::new();
+        spec.symbols.push_str(
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-~");
+        spec.padding = Some('=');
+        spec.encoding().unwrap()
+    };
+}
 
 // Sig types
 pub const DSA_SHA1: u16 = 0;

@@ -1,5 +1,4 @@
 use cookie_factory::GenError;
-use data_encoding::BASE32;
 use nom::{Err, IResult};
 use rand::{self, Rng};
 use sha2::{Digest, Sha256};
@@ -48,7 +47,7 @@ impl Hash {
 
 impl fmt::Display for Hash {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", BASE32.encode(&self.0))
+        write!(f, "{}", constants::I2P_BASE64.encode(&self.0))
     }
 }
 
