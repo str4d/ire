@@ -19,6 +19,7 @@ use tokio_codec::{Decoder, Encoder, Framed};
 use tokio_io::{self, IoFuture};
 use tokio_timer::Deadline;
 
+use super::ntcp::NTCP_STYLE;
 use constants::I2P_BASE64;
 use data::{I2PString, RouterAddress, RouterIdentity, RouterInfo};
 use i2np::Message;
@@ -409,8 +410,14 @@ impl Engine {
         own_ri: RouterInfo,
         peer_ri: RouterInfo,
     ) -> io::Result<IoFuture<Framed<TcpStream, Codec>>> {
-        // TODO return error if there are no valid NTCP2 addresses (for some reason)
-        let ra = peer_ri.address(&NTCP2_STYLE).unwrap();
+        let ra = match peer_ri.address(&NTCP2_STYLE) {
+            Some(ra) => ra,
+            None => match peer_ri.address(&NTCP_STYLE) {
+                Some(ra) => ra,
+                None => return io_err!(InvalidData, format!("No valid NTCP2 addresses")),
+            },
+        };
+
         let addr = ra.addr().unwrap();
         let static_key = self.static_private_key.clone();
         let remote_key = match ra.option(&NTCP2_OPT_S) {
