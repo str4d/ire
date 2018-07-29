@@ -369,6 +369,7 @@ impl RouterInfo {
         let addrs: Vec<&RouterAddress> = self.addresses
             .iter()
             .filter(|a| a.transport_style == *style)
+            .filter(|a| a.addr().unwrap().is_ipv4())
             .collect();
         if addrs.len() > 0 {
             Some(addrs[0].clone())
