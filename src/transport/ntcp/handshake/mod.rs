@@ -699,7 +699,7 @@ impl HandshakeStateTrait for IBHandshakeState {
                 state.shared.ts_a = sca.ts_a;
                 // Generate message to be verified
                 let msg = gen_session_confirm_sig_msg(&state.shared, true);
-                if !state
+                if let Err(e) = state
                     .shared
                     .ri_remote
                     .as_ref()
@@ -918,7 +918,7 @@ impl HandshakeStateTrait for OBHandshakeState {
                 debug!("Received SessionConfirmB");
                 // Generate message to be verified
                 let msg = gen_session_confirm_sig_msg(&state.shared, true);
-                if !state
+                if let Err(e) = state
                     .shared
                     .ri_remote
                     .as_ref()
