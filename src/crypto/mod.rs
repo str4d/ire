@@ -1,9 +1,9 @@
 use aesti::Aes;
-use ed25519_dalek::DecodingError as EdDecodingError;
 use ed25519_dalek::Keypair as EdKeypair;
 use ed25519_dalek::PublicKey as EdPublicKey;
 use ed25519_dalek::SecretKey as EdSecretKey;
 use ed25519_dalek::Signature as EdSignature;
+use ed25519_dalek::SignatureError as EdSignatureError;
 use ed25519_dalek::SECRET_KEY_LENGTH as ED_SECRET_KEY_LENGTH;
 use nom::Err;
 use num::BigUint;
@@ -18,13 +18,15 @@ pub mod math;
 
 pub const AES_BLOCK_SIZE: usize = 16;
 
-pub enum DecodingError {
-    Ed25519(EdDecodingError),
+pub enum SignatureError {
+    NoSignature,
+    TypeMismatch,
+    Ed25519(EdSignatureError),
 }
 
-impl From<EdDecodingError> for DecodingError {
-    fn from(e: EdDecodingError) -> Self {
-        DecodingError::Ed25519(e)
+impl From<EdSignatureError> for SignatureError {
+    fn from(e: EdSignatureError) -> Self {
+        SignatureError::Ed25519(e)
     }
 }
 
@@ -221,7 +223,7 @@ impl SigningPublicKey {
 }
 
 impl SigningPublicKey {
-    pub fn from_bytes(sig_type: &SigType, data: &[u8]) -> Result<Self, DecodingError> {
+    pub fn from_bytes(sig_type: &SigType, data: &[u8]) -> Result<Self, SignatureError> {
         match sig_type {
             &SigType::DsaSha1 => panic!("Not implemented"),
             &SigType::EcdsaSha256P256 => panic!("Not implemented"),
@@ -251,7 +253,7 @@ impl SigningPublicKey {
         }
     }
 
-    pub fn verify(&self, message: &[u8], signature: &Signature) -> bool {
+    pub fn verify(&self, message: &[u8], signature: &Signature) -> Result<(), SignatureError> {
         match (self, signature) {
             (&SigningPublicKey::DsaSha1, &Signature::DsaSha1) => panic!("Not implemented"),
             (&SigningPublicKey::EcdsaSha256P256, &Signature::EcdsaSha256P256) => {
@@ -264,11 +266,11 @@ impl SigningPublicKey {
                 panic!("Not implemented")
             }
             (&SigningPublicKey::Ed25519(ref pk), &Signature::Ed25519(ref s)) => {
-                pk.verify::<Sha512>(message, s)
+                pk.verify::<Sha512>(message, s).map_err(|e| e.into())
             }
             _ => {
                 println!("Signature type doesn't match key type");
-                false
+                Err(SignatureError::TypeMismatch)
             }
         }
     }
@@ -305,7 +307,7 @@ impl SigningPrivateKey {
         }
     }
 
-    pub fn from_bytes(sig_type: &SigType, data: &[u8]) -> Result<Self, DecodingError> {
+    pub fn from_bytes(sig_type: &SigType, data: &[u8]) -> Result<Self, SignatureError> {
         match sig_type {
             &SigType::DsaSha1 => panic!("Not implemented"),
             &SigType::EcdsaSha256P256 => panic!("Not implemented"),
@@ -366,7 +368,7 @@ pub enum Signature {
 }
 
 impl Signature {
-    pub fn from_bytes(sig_type: &SigType, data: &[u8]) -> Result<Self, DecodingError> {
+    pub fn from_bytes(sig_type: &SigType, data: &[u8]) -> Result<Self, SignatureError> {
         match sig_type {
             &SigType::DsaSha1 => panic!("Not implemented"),
             &SigType::EcdsaSha256P256 => panic!("Not implemented"),

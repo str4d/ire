@@ -12,7 +12,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use constants;
 use crypto::{
-    EncType, PrivateKey, PublicKey, SigType, Signature, SigningPrivateKey, SigningPublicKey,
+    EncType, PrivateKey, PublicKey, SigType, Signature, SignatureError, SigningPrivateKey,
+    SigningPublicKey,
 };
 
 pub mod frame;
@@ -368,6 +369,7 @@ impl RouterInfo {
         let addrs: Vec<&RouterAddress> = self.addresses
             .iter()
             .filter(|a| a.transport_style == *style)
+            .filter(|a| a.addr().unwrap().is_ipv4())
             .collect();
         if addrs.len() > 0 {
             Some(addrs[0].clone())
@@ -444,13 +446,13 @@ impl RouterInfo {
         self.signature = Some(spk.sign(&sig_msg));
     }
 
-    pub fn verify(&self) -> bool {
+    pub fn verify(&self) -> Result<(), SignatureError> {
         match &self.signature.as_ref() {
             &Some(s) => {
                 let sig_msg = self.signature_bytes();
                 self.router_id.signing_key.verify(&sig_msg, s)
             }
-            &None => false,
+            &None => Err(SignatureError::NoSignature),
         }
     }
 }
@@ -500,7 +502,7 @@ mod tests {
         assert!(ri.signature.is_none());
         ri.sign(&rsk.signing_private_key);
         assert!(ri.signature.is_some());
-        assert!(ri.verify());
+        assert!(ri.verify().is_ok());
     }
 
     #[test]
@@ -508,7 +510,7 @@ mod tests {
         let data = include_bytes!("../../assets/router.info");
         match frame::router_info(data) {
             Ok((_, ri)) => {
-                assert!(ri.verify());
+                assert!(ri.verify().is_ok());
             }
             _ => panic!("RouterInfo parsing failed"),
         }
