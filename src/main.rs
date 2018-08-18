@@ -140,7 +140,8 @@ fn cli_client(args: &ArgMatches) -> i32 {
 
     info!("Connecting to {}", peer_ri.router_id.hash());
     let ntcp = transport::ntcp::Engine::new();
-    let conn = ntcp.connect(rsk.rid, rsk.signing_private_key, peer_ri)
+    let conn = ntcp
+        .connect(rsk.rid, rsk.signing_private_key, peer_ri)
         .and_then(move |t| {
             info!("Connection established!");
             t.send(transport::ntcp::Frame::TimeSync(42))

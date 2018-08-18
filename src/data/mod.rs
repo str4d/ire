@@ -366,7 +366,8 @@ impl RouterInfo {
     }
 
     pub fn address(&self, style: &I2PString) -> Option<RouterAddress> {
-        let addrs: Vec<&RouterAddress> = self.addresses
+        let addrs: Vec<&RouterAddress> = self
+            .addresses
             .iter()
             .filter(|a| a.transport_style == *style)
             .filter(|a| a.addr().unwrap().is_ipv4())

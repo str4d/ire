@@ -101,7 +101,8 @@ impl Decoder for InboundHandshakeCodec {
             let res = match self.state {
                 HandshakeState::SessionRequest => frame::session_request(buf),
                 HandshakeState::SessionConfirmA => {
-                    match self.aes
+                    match self
+                        .aes
                         .as_mut()
                         .unwrap()
                         .decrypt_blocks(&mut buf[self.decrypted..])
@@ -161,7 +162,8 @@ impl Encoder for InboundHandshakeCodec {
         let res = match (self.state, frame) {
             (HandshakeState::SessionCreated, HandshakeFrame::SessionCreated(ref sc)) => {
                 // Set up cryptor
-                let session_key = self.dh_key_builder
+                let session_key = self
+                    .dh_key_builder
                     .build_session_key(array_ref![self.dh_x, 0, 256]);
                 self.aes = Some(Aes256::new(&session_key, &self.iv_enc, &self.iv_dec));
                 // Serialise inner part of SessionCreated
@@ -299,7 +301,8 @@ impl Decoder for OutboundHandshakeCodec {
                         }
                         Ok((i, mut sce)) => {
                             // Set up cryptor
-                            let session_key = self.dh_key_builder
+                            let session_key = self
+                                .dh_key_builder
                                 .build_session_key(array_ref![sce.0, 0, 256]);
                             self.aes = Some(Aes256::new(
                                 &session_key,
@@ -348,7 +351,8 @@ impl Decoder for OutboundHandshakeCodec {
                     }
                 }
                 HandshakeState::SessionConfirmB => {
-                    match self.aes
+                    match self
+                        .aes
                         .as_mut()
                         .unwrap()
                         .decrypt_blocks(&mut buf[self.decrypted..])
