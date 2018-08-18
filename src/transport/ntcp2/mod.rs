@@ -7,8 +7,9 @@ use rand::{self, Rng};
 use siphasher::sip::SipHasher;
 use snow::{self, Builder};
 use std::fmt;
+use std::fs::File;
 use std::hash::Hasher;
-use std::io;
+use std::io::{self, Read, Write};
 use std::iter::repeat;
 use std::net::SocketAddr;
 use std::ops::AddAssign;
@@ -230,6 +231,36 @@ impl Engine {
             static_public_key: dh.public,
             aesobfse_iv,
         }
+    }
+
+    pub fn from_file(addr: SocketAddr, path: &str) -> io::Result<Self> {
+        let mut keys = File::open(path)?;
+        let mut data: Vec<u8> = Vec::new();
+        keys.read_to_end(&mut data)?;
+
+        let mut static_private_key = Vec::with_capacity(32);
+        let mut static_public_key = Vec::with_capacity(32);
+        let mut aesobfse_iv = [0; 16];
+
+        static_private_key.extend_from_slice(&data[..32]);
+        static_public_key.extend_from_slice(&data[32..64]);
+        aesobfse_iv.copy_from_slice(&data[64..]);
+
+        Ok(Engine {
+            addr,
+            static_private_key,
+            static_public_key,
+            aesobfse_iv,
+        })
+    }
+
+    pub fn to_file(&self, path: &str) -> io::Result<()> {
+        let mut data = Vec::with_capacity(96);
+        data.write(&self.static_private_key)?;
+        data.write(&self.static_public_key)?;
+        data.write(&self.aesobfse_iv)?;
+        let mut keys = File::create(path)?;
+        keys.write(&data).map(|_| ())
     }
 
     pub fn address(&self) -> RouterAddress {

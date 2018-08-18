@@ -82,6 +82,11 @@ fn inner_main() -> i32 {
                             Arg::with_name("ntcp2")
                                 .help("Address:Port to bind NTCP2 to")
                                 .required(true),
+                        )
+                        .arg(
+                            Arg::with_name("ntcp2Keys")
+                                .help("Path to the server's NTCP2 keys")
+                                .required(true),
                         ),
                 )
                 .subcommand(
@@ -127,9 +132,17 @@ fn cli_server(args: &ArgMatches) -> i32 {
     let rsk = data::RouterSecretKeys::from_file(args.value_of("routerKeys").unwrap()).unwrap();
     let ntcp_addr = args.value_of("ntcp").unwrap().parse().unwrap();
     let ntcp2_addr = args.value_of("ntcp2").unwrap().parse().unwrap();
+    let ntcp2_keyfile = args.value_of("ntcp2Keys").unwrap();
 
     let ntcp = transport::ntcp::Engine::new(ntcp_addr);
-    let ntcp2 = transport::ntcp2::Engine::new(ntcp2_addr);
+    let ntcp2 = match transport::ntcp2::Engine::from_file(ntcp2_addr, ntcp2_keyfile) {
+        Ok(ret) => ret,
+        Err(_) => {
+            let ret = transport::ntcp2::Engine::new(ntcp2_addr);
+            ret.to_file(ntcp2_keyfile).unwrap();
+            ret
+        }
+    };
 
     let mut ri = data::RouterInfo::new(rsk.rid.clone());
     ri.set_addresses(vec![ntcp.address(), ntcp2.address()]);
