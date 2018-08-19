@@ -30,6 +30,9 @@ and implemented.
   - [ ] NTCP
     - [x] Handshake
     - [ ] Connection tracking
+  - [ ] NTCP2
+    - [x] Handshake
+    - [ ] Connection tracking
   - [ ] SSU
 
 ## Usage
