@@ -378,12 +378,16 @@ impl RouterInfo {
         self.signature = None;
     }
 
-    pub fn address(&self, style: &I2PString) -> Option<RouterAddress> {
+    pub fn address<F>(&self, style: &I2PString, filter: F) -> Option<RouterAddress>
+    where
+        F: Fn(&RouterAddress) -> bool,
+    {
         let addrs: Vec<&RouterAddress> = self
             .addresses
             .iter()
             .filter(|a| a.transport_style == *style)
             .filter(|a| a.addr().unwrap().is_ipv4())
+            .filter(|a| filter(a))
             .collect();
         if addrs.len() > 0 {
             Some(addrs[0].clone())
@@ -537,6 +541,30 @@ mod tests {
 
         ra.set_option(key.clone(), value.clone());
         assert_eq!(ra.option(&key).unwrap(), &value);
+    }
+
+    #[test]
+    fn router_info_address() {
+        let rsk = RouterSecretKeys::new();
+        let mut ri = RouterInfo::new(rsk.rid);
+        let style = I2PString::new("test");
+        assert!(ri.address(&style, |ra| true).is_none());
+
+        ri.set_addresses(vec![
+            RouterAddress::new(&I2PString::new("other"), "127.0.0.1:12345".parse().unwrap()),
+            RouterAddress::new(&style, "127.0.0.1:23456".parse().unwrap()),
+            RouterAddress::new(&style, "127.0.0.1:34567".parse().unwrap()),
+        ]);
+
+        let ra = ri.address(&style, |ra| true).unwrap();
+        assert_eq!(ra.transport_style, style);
+        assert_eq!(ra.addr().unwrap(), "127.0.0.1:23456".parse().unwrap());
+
+        let ra = ri
+            .address(&style, |ra| ra.addr().unwrap().port() == 34567)
+            .unwrap();
+        assert_eq!(ra.transport_style, style);
+        assert_eq!(ra.addr().unwrap(), "127.0.0.1:34567".parse().unwrap());
     }
 
     #[test]

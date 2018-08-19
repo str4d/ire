@@ -442,20 +442,23 @@ impl Engine {
         own_ri: RouterInfo,
         peer_ri: RouterInfo,
     ) -> io::Result<IoFuture<Framed<TcpStream, Codec>>> {
-        let ra = match peer_ri.address(&NTCP2_STYLE) {
+        let filter = |ra: &RouterAddress| {
+            match ra.option(&NTCP2_OPT_V) {
+                Some(v) => if !v.to_csv().contains(&NTCP2_VERSION) {
+                    return false;
+                },
+                None => return false,
+            };
+            ra.option(&NTCP2_OPT_S).is_some() && ra.option(&NTCP2_OPT_I).is_some()
+        };
+
+        let ra = match peer_ri.address(&NTCP2_STYLE, filter) {
             Some(ra) => ra,
-            None => match peer_ri.address(&NTCP_STYLE) {
+            None => match peer_ri.address(&NTCP_STYLE, filter) {
                 Some(ra) => ra,
                 None => return io_err!(InvalidData, format!("No valid NTCP2 addresses")),
             },
         };
-
-        match ra.option(&NTCP2_OPT_V) {
-            Some(v) => if !v.to_csv().contains(&NTCP2_VERSION) {
-                return io_err!(InvalidData, format!("Address does not support NTCP2"));
-            },
-            None => return io_err!(InvalidData, format!("No version in address")),
-        }
 
         let addr = ra.addr().unwrap();
         let static_key = self.static_private_key.clone();

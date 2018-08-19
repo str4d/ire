@@ -172,7 +172,11 @@ impl Engine {
         peer_ri: RouterInfo,
     ) -> IoFuture<Framed<TcpStream, Codec>> {
         // TODO return error if there are no valid NTCP addresses (for some reason)
-        let addr = peer_ri.address(&NTCP_STYLE).unwrap().addr().unwrap();
+        let addr = peer_ri
+            .address(&NTCP_STYLE, |_| true)
+            .unwrap()
+            .addr()
+            .unwrap();
 
         // Connect to the peer
         // Return a transport ready for sending and receiving Frames
