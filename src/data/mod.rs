@@ -71,6 +71,10 @@ impl I2PString {
     pub fn new(string: &str) -> Self {
         I2PString(String::from(string))
     }
+
+    pub fn to_csv(&self) -> Vec<Self> {
+        self.0.split(',').map(|s| Self::new(s)).collect()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -487,6 +491,23 @@ mod tests {
         assert_eq!(h, h2);
         h.xor(&h2);
         assert_eq!(h, h0);
+    }
+
+    #[test]
+    fn i2pstring_to_csv() {
+        let s1 = I2PString(String::from("a-b,c/d,1,2"));
+        assert_eq!(
+            s1.to_csv(),
+            vec![
+                I2PString(String::from("a-b")),
+                I2PString(String::from("c/d")),
+                I2PString(String::from("1")),
+                I2PString(String::from("2")),
+            ]
+        );
+
+        let s2 = I2PString(String::from("asdf"));
+        assert_eq!(s2.to_csv(), vec![s2]);
     }
 
     #[test]

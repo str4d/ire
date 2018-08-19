@@ -29,6 +29,7 @@ mod frame;
 
 lazy_static! {
     pub static ref NTCP2_STYLE: I2PString = I2PString::new("NTCP2");
+    pub static ref NTCP2_VERSION: I2PString = I2PString::new("2");
     pub static ref NTCP2_OPT_V: I2PString = I2PString::new("v");
     pub static ref NTCP2_OPT_S: I2PString = I2PString::new("s");
     pub static ref NTCP2_OPT_I: I2PString = I2PString::new("i");
@@ -265,7 +266,7 @@ impl Engine {
 
     pub fn address(&self) -> RouterAddress {
         let mut ra = RouterAddress::new(&NTCP2_STYLE, self.addr);
-        ra.set_option(NTCP2_OPT_V.clone(), I2PString::new("2"));
+        ra.set_option(NTCP2_OPT_V.clone(), NTCP2_VERSION.clone());
         ra.set_option(
             NTCP2_OPT_S.clone(),
             I2PString(I2P_BASE64.encode(&self.static_public_key)),
@@ -448,6 +449,13 @@ impl Engine {
                 None => return io_err!(InvalidData, format!("No valid NTCP2 addresses")),
             },
         };
+
+        match ra.option(&NTCP2_OPT_V) {
+            Some(v) => if !v.to_csv().contains(&NTCP2_VERSION) {
+                return io_err!(InvalidData, format!("Address does not support NTCP2"));
+            },
+            None => return io_err!(InvalidData, format!("No version in address")),
+        }
 
         let addr = ra.addr().unwrap();
         let static_key = self.static_private_key.clone();
