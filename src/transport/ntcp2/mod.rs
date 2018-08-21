@@ -525,12 +525,35 @@ where
     }
 }
 
-impl Engine {
-    pub fn connect(
-        &self,
+enum OBHandshakeState<T> {
+    Connecting(IoFuture<T>),
+    SessionRequest((WriteAll<T, Vec<u8>>, SystemTime)),
+    SessionCreated((ReadExact<T, Vec<u8>>, SystemTime)),
+    SessionCreatedPadding(ReadExact<T, Vec<u8>>),
+    SessionConfirmed(WriteAll<T, Vec<u8>>),
+}
+
+struct OBHandshake<T> {
+    noise: Option<snow::Session>,
+    sc_buf: Vec<u8>,
+    sc_len: usize,
+    state: OBHandshakeState<T>,
+}
+
+impl<T> OBHandshake<T>
+where
+    T: AsyncRead + AsyncWrite,
+    T: Send + 'static,
+{
+    fn new<F>(
+        conn: F,
+        static_key: &[u8],
         own_ri: RouterInfo,
         peer_ri: RouterInfo,
-    ) -> io::Result<IoFuture<Framed<TcpStream, Codec>>> {
+    ) -> Result<OBHandshake<T>, String>
+    where
+        F: FnOnce(&SocketAddr) -> IoFuture<T>,
+    {
         let filter = |ra: &RouterAddress| {
             match ra.option(&NTCP2_OPT_V) {
                 Some(v) => if !v.to_csv().contains(&NTCP2_VERSION) {
@@ -545,20 +568,17 @@ impl Engine {
             Some(ra) => ra,
             None => match peer_ri.address(&NTCP_STYLE, filter) {
                 Some(ra) => ra,
-                None => return io_err!(InvalidData, format!("No valid NTCP2 addresses")),
+                None => return Err(format!("No valid NTCP2 addresses")),
             },
         };
 
         let addr = ra.addr().unwrap();
-        let static_key = self.static_private_key.clone();
         let remote_key = match ra.option(&NTCP2_OPT_S) {
             Some(val) => match I2P_BASE64.decode(val.0.as_bytes()) {
                 Ok(key) => key,
-                Err(e) => {
-                    return io_err!(InvalidData, format!("Invalid static key in address: {}", e))
-                }
+                Err(e) => return Err(format!("Invalid static key in address: {}", e)),
             },
-            None => return io_err!(InvalidData, format!("No static key in address")),
+            None => return Err(format!("No static key in address")),
         };
 
         let aesobfse_key = peer_ri.router_id.hash().0;
@@ -566,9 +586,9 @@ impl Engine {
         match ra.option(&NTCP2_OPT_I) {
             Some(val) => match I2P_BASE64.decode(val.0.as_bytes()) {
                 Ok(iv) => aesobfse_iv.copy_from_slice(&iv),
-                Err(e) => return io_err!(InvalidData, format!("Invalid IV in address: {}", e)),
+                Err(e) => return Err(format!("Invalid IV in address: {}", e)),
             },
-            None => return io_err!(InvalidData, format!("No IV in address")),
+            None => return Err(format!("No IV in address")),
         }
 
         let sc_padlen = {
@@ -584,39 +604,60 @@ impl Engine {
             Ok(sz) => sz,
             Err(e) => match e {
                 GenError::BufferTooSmall(sz) => {
-                    return io_err!(
-                        InvalidData,
-                        format!(
-                            "SessionConfirmed message ({}) larger than MTU ({})",
-                            sz,
-                            NTCP2_MTU - 16
-                        )
-                    )
+                    return Err(format!(
+                        "SessionConfirmed message ({}) larger than MTU ({})",
+                        sz,
+                        NTCP2_MTU - 16
+                    ))
                 }
                 GenError::InvalidOffset
                 | GenError::CustomError(_)
-                | GenError::NotYetImplemented => return io_err!(InvalidData, "could not generate"),
+                | GenError::NotYetImplemented => return Err(format!("could not generate")),
             },
         };
         sc_buf.truncate(sc_len);
         let sc_len = sc_len + 16;
 
-        // Connect to the peer
-        // Return a transport ready for sending and receiving Frames
-        // The layer above will convert I2NP packets to Frames
-        // (or should the Engine handle timesync packets itself?)
-        let transport = Box::new(
-            TcpStream::connect(&addr)
-                .and_then(move |socket| {
-                    // Initialize our initiator NoiseSession using a builder.
-                    let builder: Builder = Builder::new(NTCP2_NOISE_PROTOCOL_NAME.parse().unwrap());
-                    let mut noise = builder
-                        .local_private_key(&static_key)
-                        .remote_public_key(&remote_key)
-                        .aesobfse(&aesobfse_key, &aesobfse_iv)
-                        .enable_ask()
-                        .build_initiator()
-                        .unwrap();
+        // Initialize our initiator NoiseSession using a builder.
+        let builder: Builder = Builder::new(NTCP2_NOISE_PROTOCOL_NAME.parse().unwrap());
+        let noise = builder
+            .local_private_key(&static_key)
+            .remote_public_key(&remote_key)
+            .aesobfse(&aesobfse_key, &aesobfse_iv)
+            .enable_ask()
+            .build_initiator()
+            .unwrap();
+
+        let state = OBHandshakeState::Connecting(conn(&addr));
+        Ok(OBHandshake {
+            noise: Some(noise),
+            sc_buf,
+            sc_len,
+            state,
+        })
+    }
+}
+
+impl<T> Future for OBHandshake<T>
+where
+    T: AsyncRead + AsyncWrite,
+    T: Send + 'static,
+{
+    type Item = Framed<T, Codec>;
+    type Error = io::Error;
+
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        loop {
+            let mut noise = self.noise.take().unwrap();
+            let next_state = match self.state {
+                OBHandshakeState::Connecting(ref mut f) => {
+                    let conn = match f.poll()? {
+                        Async::Ready(t) => t,
+                        Async::NotReady => {
+                            self.noise = Some(noise);
+                            return Ok(Async::NotReady);
+                        }
+                    };
 
                     let now = SystemTime::now();
                     let mut ts_a = now.duration_since(UNIX_EPOCH).expect("Time went backwards");
@@ -633,7 +674,7 @@ impl Engine {
                         (&mut sr_buf, 0),
                         2,
                         padlen,
-                        sc_len as u16,
+                        self.sc_len as u16,
                         ts_a,
                     ).map(|tup| tup.1)
                     {
@@ -656,14 +697,32 @@ impl Engine {
                     rng.fill(&mut buf[SESSION_REQUEST_CT_LEN..]);
                     noise.set_h_data(2, &buf[SESSION_REQUEST_CT_LEN..]).unwrap();
 
-                    Ok(tokio_io::io::write_all(socket, buf)
-                        .and_then(|(conn, _)| {
-                            tokio_io::io::read_exact(conn, vec![0u8; SESSION_CREATED_CT_LEN])
-                        })
-                        .map(move |(c, m)| (c, noise, now, m)))
-                })
-                .and_then(|f| f)
-                .and_then(|(conn, mut noise, rtt_timer, msg)| {
+                    OBHandshakeState::SessionRequest((tokio_io::io::write_all(conn, buf), now))
+                }
+
+                OBHandshakeState::SessionRequest((ref mut f, rtt_timer)) => {
+                    let (conn, _) = match f.poll()? {
+                        Async::Ready(t) => t,
+                        Async::NotReady => {
+                            self.noise = Some(noise);
+                            return Ok(Async::NotReady);
+                        }
+                    };
+
+                    OBHandshakeState::SessionCreated((
+                        tokio_io::io::read_exact(conn, vec![0u8; SESSION_CREATED_CT_LEN]),
+                        rtt_timer,
+                    ))
+                }
+                OBHandshakeState::SessionCreated((ref mut f, rtt_timer)) => {
+                    let (conn, msg) = match f.poll()? {
+                        Async::Ready(t) => t,
+                        Async::NotReady => {
+                            self.noise = Some(noise);
+                            return Ok(Async::NotReady);
+                        }
+                    };
+
                     // <- e, ee
                     debug!("C <- e, ee");
                     let mut buf = [0u8; SESSION_CREATED_PT_LEN];
@@ -681,11 +740,20 @@ impl Engine {
                     let rtt = rtt_timer.elapsed().expect("Time went backwards?");
                     debug!("Peer RTT: {:?}", rtt);
 
-                    Ok(tokio_io::io::read_exact(conn, vec![0u8; padlen])
-                        .map(move |(c, m)| (c, noise, m)))
-                })
-                .and_then(|f| f)
-                .and_then(move |(conn, mut noise, padding)| {
+                    OBHandshakeState::SessionCreatedPadding(tokio_io::io::read_exact(
+                        conn,
+                        vec![0u8; padlen],
+                    ))
+                }
+                OBHandshakeState::SessionCreatedPadding(ref mut f) => {
+                    let (conn, padding) = match f.poll()? {
+                        Async::Ready(t) => t,
+                        Async::NotReady => {
+                            self.noise = Some(noise);
+                            return Ok(Async::NotReady);
+                        }
+                    };
+
                     noise.set_h_data(3, &padding).unwrap();
 
                     // SessionConfirmed
@@ -693,12 +761,20 @@ impl Engine {
                     // -> s, se
                     debug!("C -> s, se");
                     let mut buf = vec![0u8; NTCP2_MTU];
-                    let len = noise.write_message(&sc_buf, &mut buf).unwrap();
+                    let len = noise.write_message(&self.sc_buf, &mut buf).unwrap();
                     buf.truncate(len);
-                    Ok(tokio_io::io::write_all(conn, buf).map(|(conn, _)| (conn, noise)))
-                })
-                .and_then(|f| f)
-                .and_then(|(conn, mut noise)| {
+
+                    OBHandshakeState::SessionConfirmed(tokio_io::io::write_all(conn, buf))
+                }
+                OBHandshakeState::SessionConfirmed(ref mut f) => {
+                    let (conn, _) = match f.poll()? {
+                        Async::Ready(t) => t,
+                        Async::NotReady => {
+                            self.noise = Some(noise);
+                            return Ok(Async::NotReady);
+                        }
+                    };
+
                     // Prepare length obfuscation keys and IVs
                     let (ek0, ek1, eiv, dk0, dk1, div) = {
                         let label = String::from("siphash");
@@ -730,9 +806,34 @@ impl Engine {
                         next_len: None,
                     };
 
-                    Ok(codec.framed(conn))
-                }),
-        );
+                    return Ok(Async::Ready(codec.framed(conn)));
+                }
+            };
+            self.noise = Some(noise);
+            self.state = next_state;
+        }
+    }
+}
+
+impl Engine {
+    pub fn connect(
+        &self,
+        own_ri: RouterInfo,
+        peer_ri: RouterInfo,
+    ) -> io::Result<IoFuture<Framed<TcpStream, Codec>>> {
+        // Connect to the peer
+        // Return a transport ready for sending and receiving Frames
+        // The layer above will convert I2NP packets to Frames
+        // (or should the Engine handle timesync packets itself?)
+        let transport = match OBHandshake::new(
+            |sa| Box::new(TcpStream::connect(sa)),
+            &self.static_private_key,
+            own_ri,
+            peer_ri,
+        ) {
+            Ok(t) => t,
+            Err(e) => return io_err!(InvalidData, e),
+        };
 
         // Add a timeout
         let timed = Deadline::new(transport, Instant::now() + Duration::new(10, 0))
