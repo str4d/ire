@@ -1,7 +1,7 @@
 use byteorder::{LittleEndian, ReadBytesExt};
 use bytes::BytesMut;
 use cookie_factory::GenError;
-use futures::{Future, Stream};
+use futures::{Async, Future, Poll, Stream};
 use nom::Err;
 use rand::{self, Rng};
 use siphasher::sip::SipHasher;
@@ -17,7 +17,11 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_codec::{Decoder, Encoder, Framed};
-use tokio_io::{self, IoFuture};
+use tokio_io::{
+    self,
+    io::{ReadExact, WriteAll},
+    AsyncRead, AsyncWrite, IoFuture,
+};
 use tokio_timer::Deadline;
 
 use super::ntcp::NTCP_STYLE;
@@ -288,18 +292,82 @@ impl Engine {
         // For each incoming connection:
         Box::new(listener.incoming().for_each(move |conn| {
             info!("Incoming connection!");
+            let process_conn = IBHandshake::new(conn, &static_key, &aesobfse_key, &aesobfse_iv)
+                .and_then(|f| {
+                    f.for_each(|frame| {
+                        for block in frame {
+                            debug!("Received block: {:?}", block);
+                        }
 
-            // Initialize our responder NoiseSession using a builder.
-            let builder: Builder = Builder::new(NTCP2_NOISE_PROTOCOL_NAME.parse().unwrap());
-            let mut noise = builder
-                .local_private_key(&static_key)
-                .aesobfse(&aesobfse_key, &aesobfse_iv)
-                .enable_ask()
-                .build_responder()
-                .unwrap();
+                        Ok(())
+                    })
+                });
+            tokio::spawn(process_conn.map_err(|e| error!("Error while listening: {:?}", e)));
+            Ok(())
+        }))
+    }
+}
 
-            let process_conn = tokio_io::io::read_exact(conn, vec![0u8; SESSION_REQUEST_CT_LEN])
-                .and_then(|(conn, msg)| {
+enum IBHandshakeState<T> {
+    SessionRequest(ReadExact<T, Vec<u8>>),
+    SessionRequestPadding(ReadExact<T, Vec<u8>>),
+    SessionCreated((WriteAll<T, Vec<u8>>, SystemTime)),
+    SessionConfirmed((ReadExact<T, Vec<u8>>, SystemTime)),
+}
+
+struct IBHandshake<T> {
+    noise: Option<snow::Session>,
+    sclen: usize,
+    state: IBHandshakeState<T>,
+}
+
+impl<T> IBHandshake<T>
+where
+    T: AsyncRead + AsyncWrite,
+    T: Send + 'static,
+{
+    fn new(conn: T, static_key: &[u8], aesobfse_key: &[u8], aesobfse_iv: &[u8; 16]) -> Self {
+        // Initialize our responder NoiseSession using a builder.
+        let builder: Builder = Builder::new(NTCP2_NOISE_PROTOCOL_NAME.parse().unwrap());
+        let noise = builder
+            .local_private_key(&static_key)
+            .aesobfse(&aesobfse_key, &aesobfse_iv)
+            .enable_ask()
+            .build_responder()
+            .unwrap();
+        let state = IBHandshakeState::SessionRequest(tokio_io::io::read_exact(
+            conn,
+            vec![0u8; SESSION_REQUEST_CT_LEN],
+        ));
+        IBHandshake {
+            noise: Some(noise),
+            sclen: 0,
+            state,
+        }
+    }
+}
+
+impl<T> Future for IBHandshake<T>
+where
+    T: AsyncRead + AsyncWrite,
+    T: Send + 'static,
+{
+    type Item = Framed<T, Codec>;
+    type Error = io::Error;
+
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        loop {
+            let mut noise = self.noise.take().unwrap();
+            let next_state = match self.state {
+                IBHandshakeState::SessionRequest(ref mut f) => {
+                    let (conn, msg) = match f.poll()? {
+                        Async::Ready(t) => t,
+                        Async::NotReady => {
+                            self.noise = Some(noise);
+                            return Ok(Async::NotReady);
+                        }
+                    };
+
                     // <- e, es
                     debug!("S <- e, es");
                     let mut buf = [0u8; SESSION_REQUEST_PT_LEN];
@@ -317,12 +385,22 @@ impl Engine {
                             (padlen as usize, sclen as usize, ts_a)
                         }
                     };
+                    self.sclen = sclen;
 
-                    Ok(tokio_io::io::read_exact(conn, vec![0u8; padlen])
-                        .map(move |(c, m)| (c, noise, sclen, m)))
-                })
-                .and_then(|f| f)
-                .and_then(|(conn, mut noise, sclen, padding)| {
+                    IBHandshakeState::SessionRequestPadding(tokio_io::io::read_exact(
+                        conn,
+                        vec![0u8; padlen],
+                    ))
+                }
+                IBHandshakeState::SessionRequestPadding(ref mut f) => {
+                    let (conn, padding) = match f.poll()? {
+                        Async::Ready(t) => t,
+                        Async::NotReady => {
+                            self.noise = Some(noise);
+                            return Ok(Async::NotReady);
+                        }
+                    };
+
                     noise.set_h_data(2, &padding).unwrap();
 
                     let now = SystemTime::now();
@@ -358,14 +436,31 @@ impl Engine {
                     rng.fill(&mut buf[SESSION_CREATED_CT_LEN..]);
                     noise.set_h_data(3, &buf[SESSION_CREATED_CT_LEN..]).unwrap();
 
-                    Ok(tokio_io::io::write_all(conn, buf)
-                        .and_then(move |(conn, _)| {
-                            tokio_io::io::read_exact(conn, vec![0u8; sclen + 48])
-                        })
-                        .map(move |(c, m)| (c, noise, now, m)))
-                })
-                .and_then(|f| f)
-                .and_then(|(conn, mut noise, rtt_timer, msg)| {
+                    IBHandshakeState::SessionCreated((tokio_io::io::write_all(conn, buf), now))
+                }
+                IBHandshakeState::SessionCreated((ref mut f, rtt_timer)) => {
+                    let (conn, _) = match f.poll()? {
+                        Async::Ready(t) => t,
+                        Async::NotReady => {
+                            self.noise = Some(noise);
+                            return Ok(Async::NotReady);
+                        }
+                    };
+
+                    IBHandshakeState::SessionConfirmed((
+                        tokio_io::io::read_exact(conn, vec![0u8; self.sclen + 48]),
+                        rtt_timer,
+                    ))
+                }
+                IBHandshakeState::SessionConfirmed((ref mut f, rtt_timer)) => {
+                    let (conn, msg) = match f.poll()? {
+                        Async::Ready(t) => t,
+                        Async::NotReady => {
+                            self.noise = Some(noise);
+                            return Ok(Async::NotReady);
+                        }
+                    };
+
                     // <- s, se
                     debug!("S <- s, se");
                     let mut buf = vec![0u8; msg.len()];
@@ -421,22 +516,16 @@ impl Engine {
                         next_len: None,
                     };
 
-                    Ok(codec.framed(conn).for_each(|frame| {
-                        for block in frame {
-                            debug!("Received block: {:?}", block);
-                        }
-
-                        Ok(())
-                    }))
-                })
-                .and_then(|f| f);
-
-            tokio::spawn(process_conn.map_err(|e| error!("Error while listening: {:?}", e)));
-
-            Ok(())
-        }))
+                    return Ok(Async::Ready(codec.framed(conn)));
+                }
+            };
+            self.noise = Some(noise);
+            self.state = next_state;
+        }
     }
+}
 
+impl Engine {
     pub fn connect(
         &self,
         own_ri: RouterInfo,
