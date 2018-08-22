@@ -503,3 +503,209 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{IBHandshake, IBHandshakeState, OBHandshake, OBHandshakeState};
+    use transport::ntcp2::Engine;
+
+    use futures::{done, Async, Future};
+    use std::io::{self, Read, Write};
+    use std::sync::{Arc, Mutex};
+    use tokio_io::{AsyncRead, AsyncWrite};
+
+    use data::{RouterInfo, RouterSecretKeys};
+
+    struct NetworkCable {
+        alice_to_bob: Vec<u8>,
+        bob_to_alice: Vec<u8>,
+    }
+
+    impl NetworkCable {
+        fn new() -> Arc<Mutex<Self>> {
+            Arc::new(Mutex::new(NetworkCable {
+                alice_to_bob: Vec::new(),
+                bob_to_alice: Vec::new(),
+            }))
+        }
+    }
+
+    struct AliceNet {
+        cable: Arc<Mutex<NetworkCable>>,
+    }
+
+    impl Read for AliceNet {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            let mut cable = self.cable.lock().unwrap();
+            let n_in = cable.bob_to_alice.len();
+            let n_out = buf.len();
+            if n_in == 0 {
+                Err(io::Error::new(io::ErrorKind::WouldBlock, ""))
+            } else if n_out < n_in {
+                buf.copy_from_slice(&cable.bob_to_alice[..n_out]);
+                cable.bob_to_alice = cable.bob_to_alice.split_off(n_out);
+                Ok(n_out)
+            } else {
+                (&mut buf[..n_in]).copy_from_slice(&cable.bob_to_alice);
+                cable.bob_to_alice.clear();
+                Ok(n_in)
+            }
+        }
+    }
+
+    impl Write for AliceNet {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            let mut cable = self.cable.lock().unwrap();
+            cable.alice_to_bob.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl AsyncRead for AliceNet {}
+    impl AsyncWrite for AliceNet {
+        fn shutdown(&mut self) -> io::Result<Async<()>> {
+            Ok(().into())
+        }
+    }
+
+    struct BobNet {
+        cable: Arc<Mutex<NetworkCable>>,
+    }
+
+    impl Read for BobNet {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            let mut cable = self.cable.lock().unwrap();
+            let n_in = cable.alice_to_bob.len();
+            let n_out = buf.len();
+            if n_in == 0 {
+                Err(io::Error::new(io::ErrorKind::WouldBlock, ""))
+            } else if n_out < n_in {
+                buf.copy_from_slice(&cable.alice_to_bob[..n_out]);
+                cable.alice_to_bob = cable.alice_to_bob.split_off(n_out);
+                Ok(n_out)
+            } else {
+                (&mut buf[..n_in]).copy_from_slice(&cable.alice_to_bob);
+                cable.alice_to_bob.clear();
+                Ok(n_in)
+            }
+        }
+    }
+
+    impl Write for BobNet {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            let mut cable = self.cable.lock().unwrap();
+            cable.bob_to_alice.extend_from_slice(buf);
+            Ok(buf.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl AsyncRead for BobNet {}
+    impl AsyncWrite for BobNet {
+        fn shutdown(&mut self) -> io::Result<Async<()>> {
+            Ok(().into())
+        }
+    }
+
+    macro_rules! test_poll {
+        ($node:expr) => {
+            match $node.poll() {
+                Ok(Async::NotReady) => (),
+                Ok(Async::Ready(_)) => panic!("Unexpectedly ready early!"),
+                Err(e) => panic!("Unexpected error: {}", e),
+            }
+        };
+    }
+
+    macro_rules! test_state {
+        ($alice:expr, $alice_state:ident, $bob:expr, $bob_state:ident) => {
+            match (&$alice.state, &$bob.state) {
+                (OBHandshakeState::$alice_state(_), IBHandshakeState::$bob_state(_)) => (),
+                _ => panic!(),
+            }
+        };
+    }
+
+    #[test]
+    fn ntcp2_handshake() {
+        // Generate key material
+        let alice_ri = {
+            let sk = RouterSecretKeys::new();
+            let mut ri = RouterInfo::new(sk.rid.clone());
+            ri.sign(&sk.signing_private_key);
+            ri
+        };
+        let (
+            bob_ri,
+            bob_static_public_key,
+            bob_static_private_key,
+            bob_aesobfse_key,
+            bob_aesobfse_iv,
+        ) = {
+            let sk = RouterSecretKeys::new();
+            let engine = Engine::new("127.0.0.1:0".parse().unwrap());
+            let mut ri = RouterInfo::new(sk.rid.clone());
+            ri.set_addresses(vec![engine.address()]);
+            ri.sign(&sk.signing_private_key);
+            (
+                ri,
+                engine.static_public_key,
+                engine.static_private_key,
+                sk.rid.hash().0,
+                engine.aesobfse_iv,
+            )
+        };
+
+        // Set up the network
+        let cable = NetworkCable::new();
+        let alice_net = AliceNet {
+            cable: cable.clone(),
+        };
+        let bob_net = BobNet { cable };
+
+        // Set up the handshake
+        let mut alice = OBHandshake::new(
+            |_| Box::new(done(Ok(alice_net))),
+            &bob_static_public_key,
+            alice_ri,
+            bob_ri,
+        ).unwrap();
+        let mut bob = IBHandshake::new(
+            bob_net,
+            &bob_static_private_key,
+            &bob_aesobfse_key,
+            &bob_aesobfse_iv,
+        );
+        test_state!(alice, Connecting, bob, SessionRequest);
+
+        // Connect Alice to Bob
+        // Alice -> SessionRequest
+        test_poll!(alice);
+        test_state!(alice, SessionCreated, bob, SessionRequest);
+
+        // Bob <- SessionRequest
+        // Bob -> SessionCreated
+        test_poll!(bob);
+        test_state!(alice, SessionCreated, bob, SessionConfirmed);
+
+        // Alice <- SessionCreated
+        // Alice -> SessionConfirmed
+        let alice_conn = alice.poll();
+
+        // Bob <- SessionConfirmed
+        let bob_conn = bob.poll();
+
+        // Both halves should now be ready
+        match (alice_conn, bob_conn) {
+            (Ok(Async::Ready(_)), Ok(Async::Ready(_))) => (),
+            _ => panic!(),
+        }
+    }
+}
