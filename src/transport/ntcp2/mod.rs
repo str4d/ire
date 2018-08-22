@@ -108,14 +108,14 @@ impl Decoder for Codec {
                 return Ok(None);
             }
 
-            // Read the length
-            let mut msg_len = ((buf[0] as usize) << 8) + (buf[1] as usize);
-            msg_len ^= (self.dec_len_iv & 0xffff) as usize;
-
             // Update masker state
             let mut masker = self.dec_len_masker.clone();
             masker.write_u64(self.dec_len_iv);
             self.dec_len_iv = masker.finish();
+
+            // Read the length
+            let mut msg_len = ((buf[0] as usize) << 8) + (buf[1] as usize);
+            msg_len ^= (self.dec_len_iv & 0xffff) as usize;
 
             buf.split_to(2);
             self.next_len = Some(msg_len);
@@ -165,12 +165,13 @@ impl Encoder for Codec {
                 let start = buf.len();
                 buf.extend(repeat(0).take(2 + msg_len));
 
-                let masked_len = msg_len ^ (self.enc_len_iv & 0xffff) as usize;
-
                 // Update masker state
                 let mut masker = self.enc_len_masker.clone();
                 masker.write_u64(self.enc_len_iv);
                 self.enc_len_iv = masker.finish();
+
+                // Mask the length
+                let masked_len = msg_len ^ (self.enc_len_iv & 0xffff) as usize;
 
                 buf[start] = (masked_len >> 8) as u8;
                 buf[start + 1] = (masked_len & 0xff) as u8;
