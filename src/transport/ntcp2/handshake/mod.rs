@@ -29,6 +29,18 @@ const SESSION_REQUEST_CT_LEN: usize = 32 + SESSION_REQUEST_PT_LEN + 16;
 const SESSION_CREATED_PT_LEN: usize = 16;
 const SESSION_CREATED_CT_LEN: usize = 32 + SESSION_CREATED_PT_LEN + 16;
 
+macro_rules! try_poll {
+    ($f:expr, $parent:expr, $noise:expr) => {
+        match $f.poll()? {
+            Async::Ready(t) => t,
+            Async::NotReady => {
+                $parent.noise = Some($noise);
+                return Ok(Async::NotReady);
+            }
+        }
+    };
+}
+
 macro_rules! io_err {
     ($err_kind:ident, $err_msg:expr) => {
         Err(io::Error::new(io::ErrorKind::$err_kind, $err_msg))
@@ -91,13 +103,7 @@ where
             let mut noise = self.noise.take().unwrap();
             let next_state = match self.state {
                 IBHandshakeState::SessionRequest(ref mut f) => {
-                    let (conn, msg) = match f.poll()? {
-                        Async::Ready(t) => t,
-                        Async::NotReady => {
-                            self.noise = Some(noise);
-                            return Ok(Async::NotReady);
-                        }
-                    };
+                    let (conn, msg) = try_poll!(f, self, noise);
 
                     // <- e, es
                     debug!("S <- e, es");
@@ -124,13 +130,7 @@ where
                     ))
                 }
                 IBHandshakeState::SessionRequestPadding(ref mut f) => {
-                    let (conn, padding) = match f.poll()? {
-                        Async::Ready(t) => t,
-                        Async::NotReady => {
-                            self.noise = Some(noise);
-                            return Ok(Async::NotReady);
-                        }
-                    };
+                    let (conn, padding) = try_poll!(f, self, noise);
 
                     noise.set_h_data(2, &padding).unwrap();
 
@@ -170,13 +170,7 @@ where
                     IBHandshakeState::SessionCreated((tokio_io::io::write_all(conn, buf), now))
                 }
                 IBHandshakeState::SessionCreated((ref mut f, rtt_timer)) => {
-                    let (conn, _) = match f.poll()? {
-                        Async::Ready(t) => t,
-                        Async::NotReady => {
-                            self.noise = Some(noise);
-                            return Ok(Async::NotReady);
-                        }
-                    };
+                    let (conn, _) = try_poll!(f, self, noise);
 
                     IBHandshakeState::SessionConfirmed((
                         tokio_io::io::read_exact(conn, vec![0u8; self.sclen + 48]),
@@ -184,13 +178,7 @@ where
                     ))
                 }
                 IBHandshakeState::SessionConfirmed((ref mut f, rtt_timer)) => {
-                    let (conn, msg) = match f.poll()? {
-                        Async::Ready(t) => t,
-                        Async::NotReady => {
-                            self.noise = Some(noise);
-                            return Ok(Async::NotReady);
-                        }
-                    };
+                    let (conn, msg) = try_poll!(f, self, noise);
 
                     // <- s, se
                     debug!("S <- s, se");
@@ -382,13 +370,7 @@ where
             let mut noise = self.noise.take().unwrap();
             let next_state = match self.state {
                 OBHandshakeState::Connecting(ref mut f) => {
-                    let conn = match f.poll()? {
-                        Async::Ready(t) => t,
-                        Async::NotReady => {
-                            self.noise = Some(noise);
-                            return Ok(Async::NotReady);
-                        }
-                    };
+                    let conn = try_poll!(f, self, noise);
 
                     let now = SystemTime::now();
                     let mut ts_a = now.duration_since(UNIX_EPOCH).expect("Time went backwards");
@@ -432,13 +414,7 @@ where
                 }
 
                 OBHandshakeState::SessionRequest((ref mut f, rtt_timer)) => {
-                    let (conn, _) = match f.poll()? {
-                        Async::Ready(t) => t,
-                        Async::NotReady => {
-                            self.noise = Some(noise);
-                            return Ok(Async::NotReady);
-                        }
-                    };
+                    let (conn, _) = try_poll!(f, self, noise);
 
                     OBHandshakeState::SessionCreated((
                         tokio_io::io::read_exact(conn, vec![0u8; SESSION_CREATED_CT_LEN]),
@@ -446,13 +422,7 @@ where
                     ))
                 }
                 OBHandshakeState::SessionCreated((ref mut f, rtt_timer)) => {
-                    let (conn, msg) = match f.poll()? {
-                        Async::Ready(t) => t,
-                        Async::NotReady => {
-                            self.noise = Some(noise);
-                            return Ok(Async::NotReady);
-                        }
-                    };
+                    let (conn, msg) = try_poll!(f, self, noise);
 
                     // <- e, ee
                     debug!("C <- e, ee");
@@ -477,13 +447,7 @@ where
                     ))
                 }
                 OBHandshakeState::SessionCreatedPadding(ref mut f) => {
-                    let (conn, padding) = match f.poll()? {
-                        Async::Ready(t) => t,
-                        Async::NotReady => {
-                            self.noise = Some(noise);
-                            return Ok(Async::NotReady);
-                        }
-                    };
+                    let (conn, padding) = try_poll!(f, self, noise);
 
                     noise.set_h_data(3, &padding).unwrap();
 
@@ -498,13 +462,7 @@ where
                     OBHandshakeState::SessionConfirmed(tokio_io::io::write_all(conn, buf))
                 }
                 OBHandshakeState::SessionConfirmed(ref mut f) => {
-                    let (conn, _) = match f.poll()? {
-                        Async::Ready(t) => t,
-                        Async::NotReady => {
-                            self.noise = Some(noise);
-                            return Ok(Async::NotReady);
-                        }
-                    };
+                    let (conn, _) = try_poll!(f, self, noise);
 
                     // Prepare length obfuscation keys and IVs
                     let (ek0, ek1, eiv, dk0, dk1, div) = {
