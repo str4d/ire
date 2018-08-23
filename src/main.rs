@@ -11,6 +11,7 @@ extern crate env_logger;
 extern crate flate2;
 #[macro_use]
 extern crate futures;
+extern crate i2p_snow;
 extern crate itertools;
 #[macro_use]
 extern crate lazy_static;
@@ -22,7 +23,6 @@ extern crate num;
 extern crate rand;
 extern crate sha2;
 extern crate siphasher;
-extern crate snow;
 extern crate tokio;
 extern crate tokio_codec;
 extern crate tokio_io;

@@ -1,10 +1,10 @@
 use bytes::BytesMut;
 use cookie_factory::GenError;
 use futures::{Future, Stream};
+use i2p_snow::{self, Builder};
 use nom::Err;
 use rand::{self, Rng};
 use siphasher::sip::SipHasher;
-use snow::{self, Builder};
 use std::fmt;
 use std::fs::File;
 use std::hash::Hasher;
@@ -89,7 +89,7 @@ impl fmt::Debug for Block {
 type Frame = Vec<Block>;
 
 pub struct Codec {
-    noise: snow::Session,
+    noise: i2p_snow::Session,
     noise_buf: [u8; NTCP2_MTU],
     enc_len_masker: SipHasher,
     enc_len_iv: u64,

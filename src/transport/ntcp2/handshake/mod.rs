@@ -1,10 +1,10 @@
 use byteorder::{LittleEndian, ReadBytesExt};
 use cookie_factory::GenError;
 use futures::{Async, Future, Poll};
+use i2p_snow::{Builder, Session};
 use nom::Err;
 use rand::{self, Rng};
 use siphasher::sip::SipHasher;
-use snow::{self, Builder};
 use std::io;
 use std::net::SocketAddr;
 use std::ops::AddAssign;
@@ -59,7 +59,7 @@ enum IBHandshakeState<T> {
 }
 
 pub struct IBHandshake<T> {
-    noise: Option<snow::Session>,
+    noise: Option<Session>,
     sclen: usize,
     state: IBHandshakeState<T>,
 }
@@ -253,7 +253,7 @@ enum OBHandshakeState<T> {
 }
 
 pub struct OBHandshake<T> {
-    noise: Option<snow::Session>,
+    noise: Option<Session>,
     sc_buf: Vec<u8>,
     sc_len: usize,
     state: OBHandshakeState<T>,
