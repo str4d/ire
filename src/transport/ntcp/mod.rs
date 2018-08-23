@@ -13,7 +13,7 @@ use tokio_io::IoFuture;
 use tokio_timer::Deadline;
 
 use crypto::{Aes256, SigningPrivateKey};
-use data::{I2PString, RouterIdentity, RouterInfo};
+use data::{I2PString, RouterAddress, RouterIdentity, RouterInfo};
 use i2np::Message;
 
 mod frame;
@@ -121,21 +121,22 @@ impl Encoder for Codec {
 // Connection management engine
 //
 
-pub struct Engine;
+pub struct Engine {
+    addr: SocketAddr,
+}
 
 impl Engine {
-    pub fn new() -> Self {
-        Engine
+    pub fn new(addr: SocketAddr) -> Self {
+        Engine { addr }
     }
 
-    pub fn listen(
-        &self,
-        own_ri: RouterIdentity,
-        own_key: SigningPrivateKey,
-        addr: &SocketAddr,
-    ) -> IoFuture<()> {
+    pub fn address(&self) -> RouterAddress {
+        RouterAddress::new(&NTCP_STYLE, self.addr)
+    }
+
+    pub fn listen(&self, own_ri: RouterIdentity, own_key: SigningPrivateKey) -> IoFuture<()> {
         // Bind to the address
-        let listener = TcpListener::bind(addr).unwrap();
+        let listener = TcpListener::bind(&self.addr).unwrap();
 
         // For each incoming connection:
         Box::new(listener.incoming().for_each(move |conn| {
@@ -171,7 +172,11 @@ impl Engine {
         peer_ri: RouterInfo,
     ) -> IoFuture<Framed<TcpStream, Codec>> {
         // TODO return error if there are no valid NTCP addresses (for some reason)
-        let addr = peer_ri.address(&NTCP_STYLE).unwrap().addr().unwrap();
+        let addr = peer_ri
+            .address(&NTCP_STYLE, |_| true)
+            .unwrap()
+            .addr()
+            .unwrap();
 
         // Connect to the peer
         // Return a transport ready for sending and receiving Frames

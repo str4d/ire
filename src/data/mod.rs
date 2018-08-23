@@ -65,15 +65,19 @@ impl I2PDate {
 }
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct I2PString(String);
+pub struct I2PString(pub String);
 
 impl I2PString {
     pub fn new(string: &str) -> Self {
         I2PString(String::from(string))
     }
+
+    pub fn to_csv(&self) -> Vec<Self> {
+        self.0.split(',').map(|s| Self::new(s)).collect()
+    }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Mapping(pub HashMap<I2PString, I2PString>);
 
 pub struct SessionTag(pub [u8; 32]);
@@ -86,9 +90,10 @@ impl SessionTag {
     }
 }
 
+#[derive(Debug)]
 pub struct TunnelId(pub u32);
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct KeyCertificate {
     pub sig_type: SigType,
     enc_type: EncType,
@@ -96,7 +101,7 @@ pub struct KeyCertificate {
     enc_data: Vec<u8>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Certificate {
     Null,
     HashCash(Vec<u8>),
@@ -127,7 +132,7 @@ impl Certificate {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct RouterIdentity {
     public_key: PublicKey,
     padding: Option<Vec<u8>>,
@@ -295,7 +300,7 @@ pub struct LeaseSet {
     sig: Signature,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct RouterAddress {
     cost: u8,
     expiration: I2PDate,
@@ -322,6 +327,14 @@ impl RouterAddress {
         }
     }
 
+    pub fn option(&self, key: &I2PString) -> Option<&I2PString> {
+        self.options.0.get(key)
+    }
+
+    pub fn set_option(&mut self, key: I2PString, value: I2PString) {
+        self.options.0.insert(key, value);
+    }
+
     pub fn addr(&self) -> Option<SocketAddr> {
         let host = self.options.0.get(&I2PString(String::from("host")));
         let port = self.options.0.get(&I2PString(String::from("port")));
@@ -335,7 +348,7 @@ impl RouterAddress {
     }
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct RouterInfo {
     pub router_id: RouterIdentity,
     published: I2PDate,
@@ -365,12 +378,16 @@ impl RouterInfo {
         self.signature = None;
     }
 
-    pub fn address(&self, style: &I2PString) -> Option<RouterAddress> {
+    pub fn address<F>(&self, style: &I2PString, filter: F) -> Option<RouterAddress>
+    where
+        F: Fn(&RouterAddress) -> bool,
+    {
         let addrs: Vec<&RouterAddress> = self
             .addresses
             .iter()
             .filter(|a| a.transport_style == *style)
             .filter(|a| a.addr().unwrap().is_ipv4())
+            .filter(|a| filter(a))
             .collect();
         if addrs.len() > 0 {
             Some(addrs[0].clone())
@@ -481,6 +498,23 @@ mod tests {
     }
 
     #[test]
+    fn i2pstring_to_csv() {
+        let s1 = I2PString(String::from("a-b,c/d,1,2"));
+        assert_eq!(
+            s1.to_csv(),
+            vec![
+                I2PString(String::from("a-b")),
+                I2PString(String::from("c/d")),
+                I2PString(String::from("1")),
+                I2PString(String::from("2")),
+            ]
+        );
+
+        let s2 = I2PString(String::from("asdf"));
+        assert_eq!(s2.to_csv(), vec![s2]);
+    }
+
+    #[test]
     fn router_identity_hash() {
         let data = include_bytes!("../../assets/router.info");
         let ri_hash = Hash([
@@ -494,6 +528,43 @@ mod tests {
             }
             _ => panic!("RouterIdentity parsing failed"),
         }
+    }
+
+    #[test]
+    fn router_address_options() {
+        let style = I2PString::new("test");
+        let mut ra = RouterAddress::new(&style, "127.0.0.1:0".parse().unwrap());
+
+        let key = I2PString::new("key");
+        let value = I2PString::new("value");
+        assert!(ra.option(&key).is_none());
+
+        ra.set_option(key.clone(), value.clone());
+        assert_eq!(ra.option(&key).unwrap(), &value);
+    }
+
+    #[test]
+    fn router_info_address() {
+        let rsk = RouterSecretKeys::new();
+        let mut ri = RouterInfo::new(rsk.rid);
+        let style = I2PString::new("test");
+        assert!(ri.address(&style, |ra| true).is_none());
+
+        ri.set_addresses(vec![
+            RouterAddress::new(&I2PString::new("other"), "127.0.0.1:12345".parse().unwrap()),
+            RouterAddress::new(&style, "127.0.0.1:23456".parse().unwrap()),
+            RouterAddress::new(&style, "127.0.0.1:34567".parse().unwrap()),
+        ]);
+
+        let ra = ri.address(&style, |ra| true).unwrap();
+        assert_eq!(ra.transport_style, style);
+        assert_eq!(ra.addr().unwrap(), "127.0.0.1:23456".parse().unwrap());
+
+        let ra = ri
+            .address(&style, |ra| ra.addr().unwrap().port() == 34567)
+            .unwrap();
+        assert_eq!(ra.transport_style, style);
+        assert_eq!(ra.addr().unwrap(), "127.0.0.1:34567".parse().unwrap());
     }
 
     #[test]

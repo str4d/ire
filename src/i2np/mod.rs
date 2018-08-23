@@ -1,4 +1,5 @@
 use nom::IResult;
+use std::fmt;
 use std::time::SystemTime;
 
 use crypto::SessionKey;
@@ -41,7 +42,7 @@ enum DatabaseStoreData {
     RI(RouterInfo),
     LS(LeaseSet),
 }
-struct DatabaseStore {
+pub(crate) struct DatabaseStore {
     key: Hash,
     ds_type: u8,
     reply: Option<ReplyPath>,
@@ -53,7 +54,7 @@ struct DatabaseLookupFlags {
     encryption: bool,
     lookup_type: u8,
 }
-struct DatabaseLookup {
+pub(crate) struct DatabaseLookup {
     key: Hash,
     from: Hash,
     flags: DatabaseLookupFlags,
@@ -63,13 +64,13 @@ struct DatabaseLookup {
     tags: Option<Vec<SessionTag>>,
 }
 
-struct DatabaseSearchReply {
+pub(crate) struct DatabaseSearchReply {
     key: Hash,
     peers: Vec<Hash>,
     from: Hash,
 }
 
-struct DeliveryStatus {
+pub(crate) struct DeliveryStatus {
     msg_id: u32,
     time_stamp: I2PDate,
 }
@@ -90,14 +91,14 @@ pub struct GarlicClove {
     expiration: I2PDate,
     cert: Certificate,
 }
-struct Garlic {
+pub(crate) struct Garlic {
     cloves: Vec<GarlicClove>,
     cert: Certificate,
     msg_id: u32,
     expiration: I2PDate,
 }
 
-struct TunnelData {
+pub(crate) struct TunnelData {
     tid: TunnelId,
     data: [u8; 1024],
 }
@@ -110,12 +111,12 @@ impl TunnelData {
     }
 }
 
-struct TunnelGateway {
+pub(crate) struct TunnelGateway {
     tid: TunnelId,
     data: Vec<u8>,
 }
 
-enum MessagePayload {
+pub(crate) enum MessagePayload {
     DatabaseStore(DatabaseStore),
     DatabaseLookup(DatabaseLookup),
     DatabaseSearchReply(DatabaseSearchReply),
@@ -130,10 +131,51 @@ enum MessagePayload {
     VariableTunnelBuildReply(Vec<[u8; 528]>),
 }
 
+impl fmt::Debug for MessagePayload {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            &MessagePayload::DatabaseStore(ref ds) => {
+                format!("DatabaseStore (key: {:?})", ds.key).fmt(formatter)
+            }
+            &MessagePayload::DatabaseLookup(ref dl) => {
+                format!("DatabaseLookup (key: {:?})", dl.key).fmt(formatter)
+            }
+            &MessagePayload::DatabaseSearchReply(ref dsr) => {
+                format!("DatabaseSearchReply (key: {:?})", dsr.key).fmt(formatter)
+            }
+            &MessagePayload::DeliveryStatus(ref ds) => format!(
+                "DeliveryStatus (mid: {:?}, ts: {:?})",
+                ds.msg_id, ds.time_stamp
+            ).fmt(formatter),
+            &MessagePayload::Garlic(_) => "Garlic".fmt(formatter),
+            &MessagePayload::TunnelData(ref td) => {
+                format!("TunnelData (tid: {:?})", td.tid).fmt(formatter)
+            }
+            &MessagePayload::TunnelGateway(ref tg) => {
+                format!("TunnelGateway (tid: {:?})", tg.tid).fmt(formatter)
+            }
+            &MessagePayload::Data(_) => "Data".fmt(formatter),
+            &MessagePayload::TunnelBuild(_) => "TunnelBuild".fmt(formatter),
+            &MessagePayload::TunnelBuildReply(_) => "TunnelBuildReply".fmt(formatter),
+            &MessagePayload::VariableTunnelBuild(_) => "VariableTunnelBuild".fmt(formatter),
+            &MessagePayload::VariableTunnelBuildReply(_) => {
+                "VariableTunnelBuildReply".fmt(formatter)
+            }
+        }
+    }
+}
+
+#[derive(Debug)]
 pub struct Message {
-    id: u32,
-    expiration: I2PDate,
-    payload: MessagePayload,
+    pub(crate) id: u32,
+    pub(crate) expiration: I2PDate,
+    pub(crate) payload: MessagePayload,
+}
+
+impl PartialEq for Message {
+    fn eq(&self, other: &Self) -> bool {
+        self.id == other.id && self.expiration == other.expiration
+    }
 }
 
 impl Message {

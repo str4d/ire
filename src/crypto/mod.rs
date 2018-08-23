@@ -108,7 +108,7 @@ impl SigType {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum EncType {
     ElGamal2048,
 }
@@ -172,6 +172,15 @@ impl fmt::Debug for PublicKey {
     }
 }
 
+impl PartialEq for PublicKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.0
+            .iter()
+            .zip(other.0.iter())
+            .fold(true, |acc, (a, b)| acc && (a == b))
+    }
+}
+
 pub struct PrivateKey(pub [u8; 256]);
 
 impl PrivateKey {
@@ -201,7 +210,7 @@ impl fmt::Debug for PrivateKey {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum SigningPublicKey {
     DsaSha1,
     EcdsaSha256P256,
@@ -358,7 +367,7 @@ impl Clone for SigningPrivateKey {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum Signature {
     DsaSha1,
     EcdsaSha256P256,

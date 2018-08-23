@@ -7,6 +7,7 @@ use crypto::math::rectify;
 use crypto::SessionKey;
 
 pub mod ntcp;
+pub mod ntcp2;
 
 pub struct DHSessionKeyBuilder {
     dh_priv: BigUint,

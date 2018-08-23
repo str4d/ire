@@ -10,7 +10,8 @@ use super::*;
 use crypto::frame::{gen_session_key, session_key};
 use data::frame::{
     certificate, gen_certificate, gen_hash, gen_i2p_date, gen_lease_set, gen_router_info,
-    gen_session_tag, gen_tunnel_id, hash, i2p_date, lease_set, router_info, session_tag, tunnel_id,
+    gen_session_tag, gen_short_expiry, gen_tunnel_id, hash, i2p_date, lease_set, router_info,
+    session_tag, short_expiry, tunnel_id,
 };
 
 //
@@ -672,25 +673,51 @@ named!(
     )
 );
 
+named!(
+    ntcp2_header<(u8, u32, I2PDate)>,
+    do_parse!(
+        msg_type: be_u8
+            >> msg_id: be_u32
+            >> expiration: short_expiry
+            >> ((msg_type, msg_id, expiration))
+    )
+);
+
+fn payload<'a>(input: &'a [u8], msg_type: u8) -> IResult<&'a [u8], MessagePayload> {
+    switch!(input, value!(msg_type),
+        1  => call!(database_store) |
+        2  => call!(database_lookup) |
+        3  => call!(database_search_reply) |
+        10 => call!(delivery_status) |
+        11 => call!(garlic) |
+        18 => call!(tunnel_data) |
+        19 => call!(tunnel_gateway) |
+        20 => call!(data) |
+        21 => call!(tunnel_build) |
+        22 => call!(tunnel_build_reply) |
+        23 => call!(variable_tunnel_build) |
+        24 => call!(variable_tunnel_build_reply)
+    )
+}
+
 named!(pub message<Message>,
     do_parse!(
         hdr:           header >>
         payload_bytes: peek!(take!(hdr.3)) >>
                        call!(validate_checksum, hdr.4, payload_bytes) >>
-        payload: switch!(value!(hdr.0),
-            1  => call!(database_store) |
-            2  => call!(database_lookup) |
-            3  => call!(database_search_reply) |
-            10 => call!(delivery_status) |
-            11 => call!(garlic) |
-            18 => call!(tunnel_data) |
-            19 => call!(tunnel_gateway) |
-            20 => call!(data) |
-            21 => call!(tunnel_build) |
-            22 => call!(tunnel_build_reply) |
-            23 => call!(variable_tunnel_build) |
-            24 => call!(variable_tunnel_build_reply)
-        ) >>
+        payload: call!(payload, hdr.0) >>
+        (Message {
+            id: hdr.1,
+            expiration: hdr.2,
+            payload: payload,
+        })
+    )
+);
+
+named!(pub ntcp2_message<Message>,
+    do_parse!(
+        hdr:     ntcp2_header >>
+        payload: call!(payload, hdr.0) >>
         (Message {
             id: hdr.1,
             expiration: hdr.2,
@@ -758,9 +785,39 @@ pub fn gen_message<'a>(
     )
 }
 
+pub fn gen_ntcp2_message<'a>(
+    input: (&'a mut [u8], usize),
+    msg: &Message,
+) -> Result<(&'a mut [u8], usize), GenError> {
+    do_gen!(
+        input,
+        gen_message_type(msg)
+            >> gen_be_u32!(msg.id)
+            >> gen_short_expiry(&msg.expiration)
+            >> gen_payload(&msg.payload)
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use std::time::UNIX_EPOCH;
+
+    macro_rules! bake_and_eat {
+        ($oven:expr, $monster:expr, $value:expr, $expected:expr) => {
+            let mut res = vec![];
+            res.resize($expected.len(), 0);
+            match $oven((&mut res, 0), &$value) {
+                Ok(_) => assert_eq!(&res, &$expected),
+                Err(_) => panic!(),
+            }
+            match $monster(&res) {
+                Ok((_, m)) => assert_eq!(m, $value),
+                Err(e) => panic!("Unexpected error: {:?}", e),
+            }
+        };
+    }
 
     #[test]
     fn test_validate_checksum() {
@@ -786,5 +843,76 @@ mod tests {
         let (o, n) = res.unwrap();
         assert_eq!(o.as_ref(), &a[..]);
         assert_eq!(n, 1);
+    }
+
+    #[test]
+    fn test_message() {
+        macro_rules! eval {
+            ($value:expr, $expected:expr) => {
+                bake_and_eat!(gen_message, message, $value, $expected)
+            };
+        }
+
+        eval!(
+            Message {
+                id: 0,
+                expiration: I2PDate::from_system_time(UNIX_EPOCH),
+                payload: MessagePayload::Data(vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]),
+            },
+            [
+                20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 14, 44, 0, 0, 0, 10, 0, 1, 2, 3, 4, 5,
+                6, 7, 8, 9,
+            ]
+        );
+
+        eval!(
+            Message {
+                id: 0x12345678,
+                expiration: I2PDate::from_system_time(UNIX_EPOCH),
+                payload: MessagePayload::DeliveryStatus(DeliveryStatus {
+                    msg_id: 0x7b3fbba9,
+                    time_stamp: I2PDate::from_system_time(UNIX_EPOCH)
+                }),
+            },
+            [
+                0x0a, 0x12, 0x34, 0x56, 0x78, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x0c, 0xf9, 0x7b, 0x3f, 0xbb, 0xa9, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+            ]
+        );
+    }
+
+    #[test]
+    fn test_ntcp2_message() {
+        macro_rules! eval {
+            ($value:expr, $expected:expr) => {
+                bake_and_eat!(gen_ntcp2_message, ntcp2_message, $value, $expected)
+            };
+        }
+
+        eval!(
+            Message {
+                id: 0,
+                expiration: I2PDate::from_system_time(UNIX_EPOCH),
+                payload: MessagePayload::Data(vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]),
+            },
+            [
+                20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
+            ]
+        );
+
+        eval!(
+            Message {
+                id: 0x12345678,
+                expiration: I2PDate::from_system_time(UNIX_EPOCH),
+                payload: MessagePayload::DeliveryStatus(DeliveryStatus {
+                    msg_id: 0x7b3fbba9,
+                    time_stamp: I2PDate::from_system_time(UNIX_EPOCH)
+                }),
+            },
+            [
+                0x0a, 0x12, 0x34, 0x56, 0x78, 0x00, 0x00, 0x00, 0x00, 0x7b, 0x3f, 0xbb, 0xa9, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+            ]
+        );
     }
 }
