@@ -62,7 +62,9 @@ impl Decoder for Codec {
         // Encrypt message in-place
         match self.aes.decrypt_blocks(&mut buf[self.decrypted..]) {
             Some(end) => self.decrypted += end,
-            None => return Ok(None),
+            None => if self.decrypted == 0 {
+                return Ok(None);
+            },
         };
 
         // Parse a frame
