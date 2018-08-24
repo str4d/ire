@@ -847,3 +847,82 @@ where
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{IBHandshake, IBHandshakeState, OBHandshake, OBHandshakeState};
+    use transport::tests::{AliceNet, BobNet, NetworkCable};
+
+    use futures::{Async, Future};
+
+    use data::RouterSecretKeys;
+
+    macro_rules! test_poll {
+        ($node:expr) => {
+            match $node.poll() {
+                Ok(Async::NotReady) => (),
+                Ok(Async::Ready(_)) => panic!("Unexpectedly ready early!"),
+                Err(e) => panic!("Unexpected error: {}", e),
+            }
+        };
+    }
+
+    macro_rules! test_state {
+        ($alice:expr, $alice_state:ident, $bob:expr, $bob_state:ident) => {
+            match (&$alice.state, &$bob.state) {
+                (OBHandshakeState::$alice_state(_), IBHandshakeState::$bob_state(_)) => (),
+                _ => panic!(),
+            }
+        };
+    }
+
+    #[test]
+    fn ntcp_handshake() {
+        // Generate key material
+        let (alice_rid, alice_sk) = {
+            let sk = RouterSecretKeys::new();
+            (sk.rid, sk.signing_private_key)
+        };
+        let (bob_rid, bob_sk) = {
+            let sk = RouterSecretKeys::new();
+            (sk.rid, sk.signing_private_key)
+        };
+
+        // Set up the network
+        let cable = NetworkCable::new();
+        let alice_net = AliceNet::new(cable.clone());
+        let bob_net = BobNet::new(cable);
+
+        // Set up the handshake
+        let mut alice = OBHandshake::new(alice_net, alice_rid, alice_sk, bob_rid.clone());
+        let mut bob = IBHandshake::new(bob_net, bob_rid, bob_sk);
+        test_state!(alice, SessionRequest, bob, SessionRequest);
+
+        // Alice -> SessionRequest
+        test_poll!(alice);
+        test_state!(alice, SessionCreated, bob, SessionRequest);
+
+        // Bob <- SessionRequest
+        // Bob -> SessionCreated
+        test_poll!(bob);
+        test_state!(alice, SessionCreated, bob, SessionConfirmA);
+
+        // Alice <- SessionCreated
+        // Alice -> SessionConfirmA
+        test_poll!(alice);
+        test_state!(alice, SessionConfirmB, bob, SessionConfirmA);
+
+        // Bob <- SessionConfirmA
+        // Bob -> SessionConfirmB
+        let bob_conn = bob.poll();
+
+        // Alice <- SessionConfirmB
+        let alice_conn = alice.poll();
+
+        // Both halves should now be ready
+        match (alice_conn, bob_conn) {
+            (Ok(Async::Ready(_)), Ok(Async::Ready(_))) => (),
+            _ => panic!(),
+        }
+    }
+}
