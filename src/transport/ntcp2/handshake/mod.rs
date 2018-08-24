@@ -507,112 +507,14 @@ where
 #[cfg(test)]
 mod tests {
     use super::{IBHandshake, IBHandshakeState, OBHandshake, OBHandshakeState};
-    use transport::ntcp2::Engine;
+    use transport::{
+        ntcp2::Engine,
+        tests::{AliceNet, BobNet, NetworkCable},
+    };
 
     use futures::{done, Async, Future};
-    use std::io::{self, Read, Write};
-    use std::sync::{Arc, Mutex};
-    use tokio_io::{AsyncRead, AsyncWrite};
 
     use data::{RouterInfo, RouterSecretKeys};
-
-    struct NetworkCable {
-        alice_to_bob: Vec<u8>,
-        bob_to_alice: Vec<u8>,
-    }
-
-    impl NetworkCable {
-        fn new() -> Arc<Mutex<Self>> {
-            Arc::new(Mutex::new(NetworkCable {
-                alice_to_bob: Vec::new(),
-                bob_to_alice: Vec::new(),
-            }))
-        }
-    }
-
-    struct AliceNet {
-        cable: Arc<Mutex<NetworkCable>>,
-    }
-
-    impl Read for AliceNet {
-        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-            let mut cable = self.cable.lock().unwrap();
-            let n_in = cable.bob_to_alice.len();
-            let n_out = buf.len();
-            if n_in == 0 {
-                Err(io::Error::new(io::ErrorKind::WouldBlock, ""))
-            } else if n_out < n_in {
-                buf.copy_from_slice(&cable.bob_to_alice[..n_out]);
-                cable.bob_to_alice = cable.bob_to_alice.split_off(n_out);
-                Ok(n_out)
-            } else {
-                (&mut buf[..n_in]).copy_from_slice(&cable.bob_to_alice);
-                cable.bob_to_alice.clear();
-                Ok(n_in)
-            }
-        }
-    }
-
-    impl Write for AliceNet {
-        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-            let mut cable = self.cable.lock().unwrap();
-            cable.alice_to_bob.extend_from_slice(buf);
-            Ok(buf.len())
-        }
-
-        fn flush(&mut self) -> io::Result<()> {
-            Ok(())
-        }
-    }
-
-    impl AsyncRead for AliceNet {}
-    impl AsyncWrite for AliceNet {
-        fn shutdown(&mut self) -> io::Result<Async<()>> {
-            Ok(().into())
-        }
-    }
-
-    struct BobNet {
-        cable: Arc<Mutex<NetworkCable>>,
-    }
-
-    impl Read for BobNet {
-        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-            let mut cable = self.cable.lock().unwrap();
-            let n_in = cable.alice_to_bob.len();
-            let n_out = buf.len();
-            if n_in == 0 {
-                Err(io::Error::new(io::ErrorKind::WouldBlock, ""))
-            } else if n_out < n_in {
-                buf.copy_from_slice(&cable.alice_to_bob[..n_out]);
-                cable.alice_to_bob = cable.alice_to_bob.split_off(n_out);
-                Ok(n_out)
-            } else {
-                (&mut buf[..n_in]).copy_from_slice(&cable.alice_to_bob);
-                cable.alice_to_bob.clear();
-                Ok(n_in)
-            }
-        }
-    }
-
-    impl Write for BobNet {
-        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-            let mut cable = self.cable.lock().unwrap();
-            cable.bob_to_alice.extend_from_slice(buf);
-            Ok(buf.len())
-        }
-
-        fn flush(&mut self) -> io::Result<()> {
-            Ok(())
-        }
-    }
-
-    impl AsyncRead for BobNet {}
-    impl AsyncWrite for BobNet {
-        fn shutdown(&mut self) -> io::Result<Async<()>> {
-            Ok(().into())
-        }
-    }
 
     macro_rules! test_poll {
         ($node:expr) => {
@@ -665,10 +567,8 @@ mod tests {
 
         // Set up the network
         let cable = NetworkCable::new();
-        let alice_net = AliceNet {
-            cable: cable.clone(),
-        };
-        let bob_net = BobNet { cable };
+        let alice_net = AliceNet::new(cable.clone());
+        let bob_net = BobNet::new(cable);
 
         // Set up the handshake
         let mut alice = OBHandshake::new(
