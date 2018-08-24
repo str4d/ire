@@ -1,6 +1,6 @@
 use bytes::BytesMut;
 use cookie_factory::GenError;
-use futures::{Future, Stream};
+use futures::{sync::mpsc, task, Async, Future, Poll, Stream};
 use i2p_snow::{self, Builder};
 use nom::Err;
 use rand::{self, Rng};
@@ -14,10 +14,11 @@ use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 use tokio;
 use tokio::net::{TcpListener, TcpStream};
-use tokio_codec::{Decoder, Encoder, Framed};
+use tokio_codec::{Decoder, Encoder};
 use tokio_io::IoFuture;
 use tokio_timer::Deadline;
 
+use super::session::{EngineRx, EngineTx, Session, SessionRefs, SessionState};
 use constants::I2P_BASE64;
 use data::{I2PString, RouterAddress, RouterIdentity, RouterInfo};
 use i2np::Message;
@@ -209,6 +210,9 @@ pub struct Engine {
     static_private_key: Vec<u8>,
     static_public_key: Vec<u8>,
     aesobfse_iv: [u8; 16],
+    state: SessionState<Frame>,
+    inbound: (EngineTx<Frame>, EngineRx<Frame>),
+    outbound: (EngineTx<Frame>, EngineRx<Frame>),
 }
 
 impl Engine {
@@ -225,6 +229,9 @@ impl Engine {
             static_private_key: dh.private,
             static_public_key: dh.public,
             aesobfse_iv,
+            state: SessionState::new(),
+            inbound: mpsc::unbounded(),
+            outbound: mpsc::unbounded(),
         }
     }
 
@@ -246,6 +253,9 @@ impl Engine {
             static_private_key,
             static_public_key,
             aesobfse_iv,
+            state: SessionState::new(),
+            inbound: mpsc::unbounded(),
+            outbound: mpsc::unbounded(),
         })
     }
 
@@ -256,6 +266,10 @@ impl Engine {
         data.write(&self.aesobfse_iv)?;
         let mut keys = File::create(path)?;
         keys.write(&data).map(|_| ())
+    }
+
+    pub fn handle(&self) -> EngineTx<Frame> {
+        self.outbound.0.clone()
     }
 
     pub fn address(&self) -> RouterAddress {
@@ -279,34 +293,26 @@ impl Engine {
         let aesobfse_key = own_rid.hash().0;
         let aesobfse_iv = self.aesobfse_iv.clone();
 
-        // For each incoming connection:
-        Box::new(listener.incoming().for_each(move |conn| {
-            info!("Incoming connection!");
-            let process_conn =
-                handshake::IBHandshake::new(conn, &static_key, &aesobfse_key, &aesobfse_iv)
-                    .and_then(|f| {
-                        f.for_each(|frame| {
-                            for block in frame {
-                                debug!("Received block: {:?}", block);
-                            }
+        // Give each incoming connection the references it needs
+        let session_refs = SessionRefs::new(self.state.clone(), self.inbound.0.clone());
+        let conns = listener.incoming().zip(session_refs);
 
-                            Ok(())
-                        })
-                    });
+        // For each incoming connection:
+        Box::new(conns.for_each(move |(conn, (state, engine))| {
+            info!("Incoming connection!");
+            // Execute the handshake
+            let conn = handshake::IBHandshake::new(conn, &static_key, &aesobfse_key, &aesobfse_iv);
+
+            // Once connected:
+            let process_conn = conn.and_then(|(ri, conn)| Session::new(ri, conn, state, engine));
+
             tokio::spawn(process_conn.map_err(|e| error!("Error while listening: {:?}", e)));
             Ok(())
         }))
     }
 
-    pub fn connect(
-        &self,
-        own_ri: RouterInfo,
-        peer_ri: RouterInfo,
-    ) -> io::Result<IoFuture<Framed<TcpStream, Codec>>> {
+    pub fn connect(&self, own_ri: RouterInfo, peer_ri: RouterInfo) -> io::Result<IoFuture<()>> {
         // Connect to the peer
-        // Return a transport ready for sending and receiving Frames
-        // The layer above will convert I2NP packets to Frames
-        // (or should the Engine handle timesync packets itself?)
         let transport = match handshake::OBHandshake::new(
             |sa| Box::new(TcpStream::connect(sa)),
             &self.static_private_key,
@@ -321,6 +327,59 @@ impl Engine {
         let timed = Deadline::new(transport, Instant::now() + Duration::new(10, 0))
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e));
 
-        Ok(Box::new(timed))
+        // Once connected:
+        let state = self.state.clone();
+        let engine = self.inbound.0.clone();
+        Ok(Box::new(timed.and_then(|(ri, conn)| {
+            let session = Session::new(ri, conn, state, engine);
+            tokio::spawn(session.map_err(|_| ()));
+            Ok(())
+        })))
+    }
+}
+
+impl Future for Engine {
+    type Item = ();
+    type Error = ();
+
+    fn poll(&mut self) -> Poll<(), ()> {
+        // Write frames
+        const FRAMES_PER_TICK: usize = 10;
+        for i in 0..FRAMES_PER_TICK {
+            match self.outbound.1.poll().unwrap() {
+                Async::Ready(Some((hash, frame))) => {
+                    self.state.get(&hash, |s| match s {
+                        Some(session) => {
+                            session.unbounded_send(frame).unwrap();
+                        }
+                        None => error!("No open session for {}", hash), // TODO: Open session instead of dropping
+                    });
+
+                    // If this is the last iteration, the loop will break even
+                    // though there could still be frames to read. Because we did
+                    // not reach `Async::NotReady`, we have to notify ourselves
+                    // in order to tell the executor to schedule the task again.
+                    if i + 1 == FRAMES_PER_TICK {
+                        task::current().notify();
+                    }
+                }
+                _ => break,
+            }
+        }
+
+        // Read frames
+        while let Async::Ready(f) = self.inbound.1.poll()? {
+            if let Some((hash, frame)) = f {
+                // TODO: Do something
+                debug!("Received frame from {}: {:?}", hash, frame);
+            } else {
+                // EOF was reached. The remote peer has disconnected.
+                return Ok(Async::Ready(()));
+            }
+        }
+
+        // We know we got a `NotReady` from both `self.outbound.1` and `self.inbound.1`,
+        // so the contract is respected.
+        Ok(Async::NotReady)
     }
 }
