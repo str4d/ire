@@ -261,3 +261,58 @@ where
         Ok(Async::NotReady)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use futures::{lazy, Future};
+    use std::io::Read;
+    use std::str::FromStr;
+    use tokio_codec::{Decoder, LinesCodec};
+    use tokio_io::AsyncRead;
+
+    use super::{Session, SessionEngine};
+    use data::RouterSecretKeys;
+    use transport::tests::{AliceNet, BobNet, NetworkCable};
+
+    #[test]
+    fn session_send() {
+        let rid = RouterSecretKeys::new().rid;
+        let hash = rid.hash();
+
+        let cable = NetworkCable::new();
+        let alice_net = AliceNet::new(cable.clone());
+        let alice_framed = LinesCodec::new().framed(alice_net);
+
+        let mut engine = SessionEngine::new();
+        let mut session = Session::new(rid, alice_framed, engine.refs());
+
+        // Run on a task context
+        lazy(move || {
+            let handle = engine.handle();
+            handle
+                .unbounded_send((hash.clone(), String::from_str("foo bar baz").unwrap()))
+                .unwrap();
+
+            // Check it has not yet been received
+            let mut bob_net = BobNet::new(cable);
+            let mut received = String::new();
+            assert!(bob_net.read_to_string(&mut received).is_err());
+            assert!(received.is_empty());
+
+            // Pass it through the engine, still not received
+            engine.poll().unwrap();
+            received.clear();
+            assert!(bob_net.read_to_string(&mut received).is_err());
+            assert!(received.is_empty());
+
+            // Pass it through the session, now it's on the wire
+            session.poll().unwrap();
+            received.clear();
+            assert!(bob_net.read_to_string(&mut received).is_err());
+            assert_eq!(received, String::from_str("foo bar baz\n").unwrap());
+
+            Ok::<(), ()>(())
+        }).wait()
+            .unwrap();
+    }
+}
