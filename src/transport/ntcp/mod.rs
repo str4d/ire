@@ -1,7 +1,6 @@
 use bytes::BytesMut;
 use cookie_factory::GenError;
-use futures::sync::mpsc;
-use futures::{task, Async, Future, Poll, Stream};
+use futures::{Future, Poll, Stream};
 use nom::{Err, Offset};
 use std::io;
 use std::iter::repeat;
@@ -13,7 +12,7 @@ use tokio_codec::{Decoder, Encoder};
 use tokio_io::IoFuture;
 use tokio_timer::Deadline;
 
-use super::session::{EngineRx, EngineTx, Session, SessionRefs, SessionState};
+use super::session::{EngineHandle, Session, SessionEngine};
 use crypto::{Aes256, SigningPrivateKey};
 use data::{I2PString, RouterAddress, RouterIdentity, RouterInfo};
 use i2np::Message;
@@ -127,23 +126,19 @@ impl Encoder for Codec {
 
 pub struct Engine {
     addr: SocketAddr,
-    state: SessionState<Frame>,
-    inbound: (EngineTx<Frame>, EngineRx<Frame>),
-    outbound: (EngineTx<Frame>, EngineRx<Frame>),
+    session_engine: SessionEngine<Frame>,
 }
 
 impl Engine {
     pub fn new(addr: SocketAddr) -> Self {
         Engine {
             addr,
-            state: SessionState::new(),
-            inbound: mpsc::unbounded(),
-            outbound: mpsc::unbounded(),
+            session_engine: SessionEngine::new(),
         }
     }
 
-    pub fn handle(&self) -> EngineTx<Frame> {
-        self.outbound.0.clone()
+    pub fn handle(&self) -> EngineHandle<Frame> {
+        self.session_engine.handle()
     }
 
     pub fn address(&self) -> RouterAddress {
@@ -155,17 +150,17 @@ impl Engine {
         let listener = TcpListener::bind(&self.addr).unwrap();
 
         // Give each incoming connection the references it needs
-        let session_refs = SessionRefs::new(self.state.clone(), self.inbound.0.clone());
+        let session_refs = self.session_engine.refs();
         let conns = listener.incoming().zip(session_refs);
 
         // For each incoming connection:
-        Box::new(conns.for_each(move |(conn, (state, engine))| {
+        Box::new(conns.for_each(move |(conn, session_refs)| {
             info!("Incoming connection!");
             // Execute the handshake
             let conn = handshake::IBHandshake::new(conn, own_ri.clone(), own_key.clone());
 
             // Once connected:
-            let process_conn = conn.and_then(|(ri, conn)| Session::new(ri, conn, state, engine));
+            let process_conn = conn.and_then(|(ri, conn)| Session::new(ri, conn, session_refs));
 
             tokio::spawn(process_conn.map_err(|_| ()));
 
@@ -179,8 +174,6 @@ impl Engine {
         own_key: SigningPrivateKey,
         peer_ri: RouterInfo,
     ) -> IoFuture<()> {
-        let state = self.state.clone();
-        let engine = self.inbound.0.clone();
         // TODO return error if there are no valid NTCP addresses (for some reason)
         let addr = peer_ri
             .address(&NTCP_STYLE, |_| true)
@@ -198,8 +191,9 @@ impl Engine {
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e));
 
         // Once connected:
+        let session_refs = self.session_engine.refs();
         Box::new(timed.and_then(|(ri, conn)| {
-            let session = Session::new(ri, conn, state, engine);
+            let session = Session::new(ri, conn, session_refs);
             tokio::spawn(session.map_err(|_| ()));
             Ok(())
         }))
@@ -211,43 +205,6 @@ impl Future for Engine {
     type Error = ();
 
     fn poll(&mut self) -> Poll<(), ()> {
-        // Write frames
-        const FRAMES_PER_TICK: usize = 10;
-        for i in 0..FRAMES_PER_TICK {
-            match self.outbound.1.poll().unwrap() {
-                Async::Ready(Some((hash, frame))) => {
-                    self.state.get(&hash, |s| match s {
-                        Some(session) => {
-                            session.unbounded_send(frame).unwrap();
-                        }
-                        None => error!("No open session for {}", hash), // TODO: Open session instead of dropping
-                    });
-
-                    // If this is the last iteration, the loop will break even
-                    // though there could still be frames to read. Because we did
-                    // not reach `Async::NotReady`, we have to notify ourselves
-                    // in order to tell the executor to schedule the task again.
-                    if i + 1 == FRAMES_PER_TICK {
-                        task::current().notify();
-                    }
-                }
-                _ => break,
-            }
-        }
-
-        // Read frames
-        while let Async::Ready(f) = self.inbound.1.poll()? {
-            if let Some((hash, frame)) = f {
-                // TODO: Do something
-                debug!("Received frame from {}: {:?}", hash, frame);
-            } else {
-                // EOF was reached. The remote peer has disconnected.
-                return Ok(Async::Ready(()));
-            }
-        }
-
-        // We know we got a `NotReady` from both `self.outbound.1` and `self.inbound.1`,
-        // so the contract is respected.
-        Ok(Async::NotReady)
+        self.session_engine.poll()
     }
 }

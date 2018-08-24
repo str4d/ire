@@ -1,5 +1,6 @@
 use futures::{sync::mpsc, task, Async, Future, Poll, Sink, Stream};
 use std::collections::HashMap;
+use std::fmt::Debug;
 use std::io;
 use std::sync::{Arc, Mutex};
 use tokio_codec::{Decoder, Encoder, Framed};
@@ -12,10 +13,10 @@ use data::{Hash, RouterIdentity};
 //
 
 /// Shorthand for the transmit half of an Engine-bound message channel.
-pub type EngineTx<Frame> = mpsc::UnboundedSender<(Hash, Frame)>;
+type EngineTx<Frame> = mpsc::UnboundedSender<(Hash, Frame)>;
 
 /// Shorthand for the receive half of an Engine-bound message channel.
-pub type EngineRx<Frame> = mpsc::UnboundedReceiver<(Hash, Frame)>;
+type EngineRx<Frame> = mpsc::UnboundedReceiver<(Hash, Frame)>;
 
 /// Shorthand for the transmit half of a Session-bound message channel.
 type SessionTx<Frame> = mpsc::UnboundedSender<Frame>;
@@ -35,7 +36,7 @@ impl<F> Shared<F> {
     }
 }
 
-pub struct SessionState<F>(Arc<Mutex<Shared<F>>>);
+struct SessionState<F>(Arc<Mutex<Shared<F>>>);
 
 impl<F> Clone for SessionState<F> {
     fn clone(&self) -> Self {
@@ -44,7 +45,7 @@ impl<F> Clone for SessionState<F> {
 }
 
 impl<F> SessionState<F> {
-    pub fn get<G>(&self, hash: &Hash, func: G)
+    fn get<G>(&self, hash: &Hash, func: G)
     where
         G: FnOnce(Option<&SessionTx<F>>),
     {
@@ -53,7 +54,7 @@ impl<F> SessionState<F> {
 }
 
 impl<F> SessionState<F> {
-    pub fn new() -> Self {
+    fn new() -> Self {
         SessionState(Arc::new(Mutex::new(Shared::new())))
     }
 }
@@ -67,20 +68,21 @@ pub struct Session<T, C, F> {
 }
 
 impl<T, C, F> Session<T, C, F> {
-    pub fn new(
-        ri: RouterIdentity,
-        upstream: Framed<T, C>,
-        state: SessionState<F>,
-        engine: EngineTx<F>,
-    ) -> Self {
+    pub fn new(ri: RouterIdentity, upstream: Framed<T, C>, session_refs: SessionRefs<F>) -> Self {
         info!("Session established with {}", ri.hash());
         let (tx, rx) = mpsc::unbounded();
-        state.0.lock().unwrap().sessions.insert(ri.hash(), tx);
+        session_refs
+            .state
+            .0
+            .lock()
+            .unwrap()
+            .sessions
+            .insert(ri.hash(), tx);
         Session {
             ri,
             upstream,
-            state,
-            engine,
+            state: session_refs.state,
+            engine: session_refs.engine,
             outbound: rx,
         }
     }
@@ -151,20 +153,96 @@ pub struct SessionRefs<F> {
     engine: EngineTx<F>,
 }
 
-impl<F> SessionRefs<F> {
-    pub fn new(state: SessionState<F>, engine: EngineTx<F>) -> Self {
-        SessionRefs { state, engine }
-    }
-}
-
 impl<F> Stream for SessionRefs<F> {
-    type Item = (SessionState<F>, EngineTx<F>);
+    type Item = (SessionRefs<F>);
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        Ok(Async::Ready(Some((
-            self.state.clone(),
-            self.engine.clone(),
-        ))))
+        Ok(Async::Ready(Some(SessionRefs {
+            state: self.state.clone(),
+            engine: self.engine.clone(),
+        })))
+    }
+}
+
+//
+// Connection management engine
+//
+
+pub type EngineHandle<F> = EngineTx<F>;
+
+pub struct SessionEngine<F> {
+    state: SessionState<F>,
+    inbound: (EngineTx<F>, EngineRx<F>),
+    outbound: (EngineTx<F>, EngineRx<F>),
+}
+
+impl<F> SessionEngine<F> {
+    pub fn new() -> Self {
+        SessionEngine {
+            state: SessionState::new(),
+            inbound: mpsc::unbounded(),
+            outbound: mpsc::unbounded(),
+        }
+    }
+
+    pub fn handle(&self) -> EngineHandle<F> {
+        self.outbound.0.clone()
+    }
+
+    pub fn refs(&self) -> SessionRefs<F> {
+        SessionRefs {
+            state: self.state.clone(),
+            engine: self.inbound.0.clone(),
+        }
+    }
+}
+
+impl<F> Future for SessionEngine<F>
+where
+    F: Debug,
+{
+    type Item = ();
+    type Error = ();
+
+    fn poll(&mut self) -> Poll<(), ()> {
+        // Write frames
+        const FRAMES_PER_TICK: usize = 10;
+        for i in 0..FRAMES_PER_TICK {
+            match self.outbound.1.poll().unwrap() {
+                Async::Ready(Some((hash, frame))) => {
+                    self.state.get(&hash, |s| match s {
+                        Some(session) => {
+                            session.unbounded_send(frame).unwrap();
+                        }
+                        None => error!("No open session for {}", hash), // TODO: Open session instead of dropping
+                    });
+
+                    // If this is the last iteration, the loop will break even
+                    // though there could still be frames to read. Because we did
+                    // not reach `Async::NotReady`, we have to notify ourselves
+                    // in order to tell the executor to schedule the task again.
+                    if i + 1 == FRAMES_PER_TICK {
+                        task::current().notify();
+                    }
+                }
+                _ => break,
+            }
+        }
+
+        // Read frames
+        while let Async::Ready(f) = self.inbound.1.poll()? {
+            if let Some((hash, frame)) = f {
+                // TODO: Do something
+                debug!("Received frame from {}: {:?}", hash, frame);
+            } else {
+                // EOF was reached. The remote peer has disconnected.
+                return Ok(Async::Ready(()));
+            }
+        }
+
+        // We know we got a `NotReady` from both `self.outbound.1` and `self.inbound.1`,
+        // so the contract is respected.
+        Ok(Async::NotReady)
     }
 }
