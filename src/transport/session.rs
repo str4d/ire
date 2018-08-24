@@ -59,7 +59,12 @@ impl<F> SessionState<F> {
     }
 }
 
-pub struct Session<T, C, F> {
+pub struct Session<T, C, F>
+where
+    T: AsyncRead + AsyncWrite,
+    C: Decoder<Item = F, Error = io::Error>,
+    C: Encoder<Item = F, Error = io::Error>,
+{
     ri: RouterIdentity,
     upstream: Framed<T, C>,
     state: SessionState<F>,
@@ -67,7 +72,12 @@ pub struct Session<T, C, F> {
     outbound: SessionRx<F>,
 }
 
-impl<T, C, F> Session<T, C, F> {
+impl<T, C, F> Session<T, C, F>
+where
+    T: AsyncRead + AsyncWrite,
+    C: Decoder<Item = F, Error = io::Error>,
+    C: Encoder<Item = F, Error = io::Error>,
+{
     pub fn new(ri: RouterIdentity, upstream: Framed<T, C>, session_refs: SessionRefs<F>) -> Self {
         info!("Session established with {}", ri.hash());
         let (tx, rx) = mpsc::unbounded();
@@ -136,7 +146,12 @@ where
     }
 }
 
-impl<T, C, F> Drop for Session<T, C, F> {
+impl<T, C, F> Drop for Session<T, C, F>
+where
+    T: AsyncRead + AsyncWrite,
+    C: Decoder<Item = F, Error = io::Error>,
+    C: Encoder<Item = F, Error = io::Error>,
+{
     fn drop(&mut self) {
         info!("Session ended with {}", self.ri.hash());
         self.state
