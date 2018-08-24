@@ -142,11 +142,7 @@ impl Engine {
         Box::new(listener.incoming().for_each(move |conn| {
             info!("Incoming connection!");
             // Execute the handshake
-            let conn = handshake::HandshakeTransport::<
-                TcpStream,
-                handshake::InboundHandshakeCodec,
-                handshake::IBHandshakeState,
-            >::listen(conn, own_ri.clone(), own_key.clone());
+            let conn = handshake::IBHandshake::new(conn, own_ri.clone(), own_key.clone());
 
             // Once connected:
             let process_conn = conn.and_then(|conn| {
@@ -183,11 +179,7 @@ impl Engine {
         // The layer above will convert I2NP packets to Frames
         // (or should the Engine handle timesync packets itself?)
         let transport = Box::new(TcpStream::connect(&addr).and_then(|socket| {
-            handshake::HandshakeTransport::<
-                TcpStream,
-                handshake::OutboundHandshakeCodec,
-                handshake::OBHandshakeState,
-            >::connect(socket, own_ri, own_key, peer_ri.router_id)
+            handshake::OBHandshake::new(socket, own_ri, own_key, peer_ri.router_id)
         }));
 
         // Add a timeout
