@@ -1,13 +1,13 @@
 use bytes::BytesMut;
 use cookie_factory::GenError;
-use futures::{future, Async, Future, Poll, Sink, StartSend, Stream};
+use futures::{sink, stream::StreamFuture, Async, Future, Poll, Sink, Stream};
 use nom::{Err, Offset};
 use std::io;
 use std::iter::repeat;
 use std::ops::AddAssign;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio_codec::{Decoder, Encoder, Framed, FramedParts};
-use tokio_io::{AsyncRead, AsyncWrite, IoFuture};
+use tokio_io::{AsyncRead, AsyncWrite};
 
 use super::{Codec, NTCP_MTU};
 use crypto::{Aes256, Signature, SigningPrivateKey, AES_BLOCK_SIZE};
@@ -15,6 +15,26 @@ use data::{Hash, RouterIdentity};
 use transport::DHSessionKeyBuilder;
 
 mod frame;
+
+macro_rules! try_poll {
+    ($conn:expr, $expected:ident) => {
+        match try_ready!($conn.poll().map_err(|(e, _)| e)) {
+            (Some(HandshakeFrame::$expected(f)), c) => (c, f),
+            (Some(_), _) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Unexpected handshake frame received",
+                ));
+            }
+            (None, _) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Handshake connection terminated early",
+                ));
+            }
+        }
+    };
+}
 
 //
 // Establishment handshake
@@ -513,32 +533,43 @@ struct SharedHandshakeState {
     ts_b: u32,
 }
 
-// Placeholder for internal state when connection is established
-pub struct Established;
-
-pub trait HandshakeStateTrait {
-    fn next_frame(self) -> (Option<HandshakeFrame>, Self);
-    fn handle_frame(self, frame: HandshakeFrame) -> (Result<(), io::Error>, Self);
-    fn is_established(&self) -> bool;
-}
-
 //
 // Inbound handshake protocol
 //
 
-pub struct IBHandshake<S> {
-    shared: SharedHandshakeState,
-    state: S,
+enum IBHandshakeState<T>
+where
+    T: AsyncWrite,
+{
+    SessionRequest(StreamFuture<Framed<T, InboundHandshakeCodec>>),
+    SessionCreated((sink::Send<Framed<T, InboundHandshakeCodec>>, SystemTime)),
+    SessionConfirmA((StreamFuture<Framed<T, InboundHandshakeCodec>>, SystemTime)),
+    SessionConfirmB(sink::Send<Framed<T, InboundHandshakeCodec>>),
 }
 
-// First, the state transformations
+pub struct IBHandshake<T>
+where
+    T: AsyncWrite,
+{
+    shared: SharedHandshakeState,
+    state: IBHandshakeState<T>,
+}
 
-// - Message 1: <-- SessionRequest
+impl<T> IBHandshake<T>
+where
+    T: AsyncRead + AsyncWrite,
+    T: Send + 'static,
+{
+    pub fn new(stream: T, own_ri: RouterIdentity, own_key: SigningPrivateKey) -> Self {
+        // Generate a new DH pair
+        let dh_key_builder = DHSessionKeyBuilder::new();
+        let dh_y = dh_key_builder.get_pub();
+        let mut iv_enc = [0u8; AES_BLOCK_SIZE];
+        iv_enc.copy_from_slice(&dh_y[dh_y.len() - AES_BLOCK_SIZE..]);
 
-pub struct IBSessionRequest;
-
-impl IBHandshake<IBSessionRequest> {
-    fn new(own_ri: RouterIdentity, own_key: SigningPrivateKey, dh_y: Vec<u8>) -> Self {
+        // TODO: Find a way to refer to the codec from here, to deduplicate state
+        let codec = InboundHandshakeCodec::new(dh_key_builder, iv_enc);
+        let state = IBHandshakeState::SessionRequest(codec.framed(stream).into_future());
         IBHandshake {
             shared: SharedHandshakeState {
                 own_ri,
@@ -549,195 +580,111 @@ impl IBHandshake<IBSessionRequest> {
                 ts_a: 0,
                 ts_b: 0,
             },
-            state: IBSessionRequest,
+            state,
         }
     }
 
-    fn next(self, hxy: Hash) -> IBHandshake<OBSessionCreated> {
-        IBHandshake {
-            shared: self.shared,
-            state: OBSessionCreated { hxy },
-        }
+    fn transmute_framed(framed: Framed<T, InboundHandshakeCodec>) -> Framed<T, Codec> {
+        let parts = framed.into_parts();
+        let mut new_parts = FramedParts::new(parts.io, Codec::from(parts.codec));
+        new_parts.read_buf = parts.read_buf;
+        new_parts.write_buf = parts.write_buf;
+        Framed::from_parts(new_parts)
     }
 }
 
-// - Message 2: --> SessionCreated
+impl<T> Future for IBHandshake<T>
+where
+    T: AsyncRead + AsyncWrite,
+    T: Send + 'static,
+{
+    type Item = Framed<T, Codec>;
+    type Error = io::Error;
 
-pub struct OBSessionCreated {
-    hxy: Hash,
-}
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        loop {
+            self.state = match self.state {
+                IBHandshakeState::SessionRequest(ref mut f) => {
+                    let (conn, sr) = try_poll!(f, SessionRequest);
 
-impl IBHandshake<OBSessionCreated> {
-    fn next(self) -> (SessionCreated, IBHandshake<IBSessionConfirmA>) {
-        (
-            SessionCreated {
-                dh_y: self.shared.dh_y.clone(),
-                hash: self.state.hxy,
-                ts_b: self.shared.ts_b,
-            },
-            IBHandshake {
-                shared: self.shared,
-                state: IBSessionConfirmA {
-                    rtt_timer: SystemTime::now(),
-                },
-            },
-        )
-    }
-}
-
-// - Message 3: <-- SessionConfirmA
-
-pub struct IBSessionConfirmA {
-    rtt_timer: SystemTime,
-}
-
-impl IBHandshake<IBSessionConfirmA> {
-    fn next(self, sig: Signature) -> IBHandshake<OBSessionConfirmB> {
-        IBHandshake {
-            shared: self.shared,
-            state: OBSessionConfirmB { sig },
-        }
-    }
-}
-
-// - Message 4: --> SessionConfirmB
-
-pub struct OBSessionConfirmB {
-    sig: Signature,
-}
-
-impl IBHandshake<OBSessionConfirmB> {
-    fn next(self) -> (SessionConfirmB, IBHandshake<Established>) {
-        (
-            SessionConfirmB {
-                sig: self.state.sig,
-            },
-            IBHandshake {
-                shared: self.shared,
-                state: Established,
-            },
-        )
-    }
-}
-
-// Next, the state transitions
-
-pub enum IBHandshakeState {
-    SessionRequest(IBHandshake<IBSessionRequest>),
-    SessionCreated(IBHandshake<OBSessionCreated>),
-    SessionConfirmA(IBHandshake<IBSessionConfirmA>),
-    SessionConfirmB(IBHandshake<OBSessionConfirmB>),
-    Established(IBHandshake<Established>),
-}
-
-impl HandshakeStateTrait for IBHandshakeState {
-    fn next_frame(self) -> (Option<HandshakeFrame>, Self) {
-        match self {
-            IBHandshakeState::SessionCreated(state) => {
-                // Part 2
-                debug!("Sending SessionCreated");
-                let (sc, sca_state) = state.next();
-                (
-                    Some(HandshakeFrame::SessionCreated(sc)),
-                    IBHandshakeState::SessionConfirmA(sca_state),
-                )
-            }
-            IBHandshakeState::SessionConfirmB(state) => {
-                // Part 4
-                debug!("Sending SessionConfirmB");
-                let (scb, e_state) = state.next();
-                (
-                    Some(HandshakeFrame::SessionConfirmB(scb)),
-                    IBHandshakeState::Established(e_state),
-                )
-            }
-            state => (None, state),
-        }
-    }
-
-    fn handle_frame(self, frame: HandshakeFrame) -> (Result<(), io::Error>, Self) {
-        match (self, frame) {
-            (IBHandshakeState::SessionRequest(mut state), HandshakeFrame::SessionRequest(sr)) => {
-                // Part 1
-                debug!("Received SessionRequest");
-                // Check that Alice knows who she is trying to talk with, and
-                // that the X isn't corrupt
-                let mut hxxorhb = Hash::digest(&sr.dh_x[..]);
-                hxxorhb.xor(&state.shared.own_ri.hash());
-                if hxxorhb != sr.hash {
-                    return (
-                        Err(io::Error::new(
+                    // Part 1
+                    debug!("Received SessionRequest");
+                    // Check that Alice knows who she is trying to talk with, and
+                    // that the X isn't corrupt
+                    let mut hxxorhb = Hash::digest(&sr.dh_x[..]);
+                    hxxorhb.xor(&self.shared.own_ri.hash());
+                    if hxxorhb != sr.hash {
+                        return Err(io::Error::new(
                             io::ErrorKind::InvalidData,
                             "Invalid SessionRequest HXxorHB",
-                        )),
-                        IBHandshakeState::SessionRequest(state),
-                    );
+                        ));
+                    }
+                    // TODO check replays
+                    let now = SystemTime::now();
+                    let mut ts_b = now.duration_since(UNIX_EPOCH).expect("Time went backwards");
+                    ts_b.add_assign(Duration::from_millis(500));
+                    // Update local state
+                    self.shared.dh_x = sr.dh_x;
+                    self.shared.ts_b = ts_b.as_secs() as u32;
+
+                    // Part 2
+                    debug!("Sending SessionCreated");
+                    let mut xy = Vec::from(&self.shared.dh_x[..]);
+                    xy.extend_from_slice(&self.shared.dh_y);
+                    let sc = HandshakeFrame::SessionCreated(SessionCreated {
+                        dh_y: self.shared.dh_y.clone(),
+                        hash: Hash::digest(&xy),
+                        ts_b: self.shared.ts_b,
+                    });
+
+                    IBHandshakeState::SessionCreated((conn.send(sc), now))
                 }
-                // TODO check replays
-                let now = SystemTime::now();
-                let mut ts_b = now.duration_since(UNIX_EPOCH).expect("Time went backwards");
-                ts_b.add_assign(Duration::from_millis(500));
-                // Update local state
-                state.shared.dh_x = sr.dh_x;
-                state.shared.ts_b = ts_b.as_secs() as u32;
-                let mut xy = Vec::from(&state.shared.dh_x[..]);
-                xy.extend_from_slice(&state.shared.dh_y);
-                let hxy = Hash::digest(&xy);
-                (Ok(()), IBHandshakeState::SessionCreated(state.next(hxy)))
-            }
-            (
-                IBHandshakeState::SessionConfirmA(mut state),
-                HandshakeFrame::SessionConfirmA(sca),
-            ) => {
-                // Part 3
-                debug!("Received SessionConfirmA");
-                // Get peer skew
-                let rtt = state
-                    .state
-                    .rtt_timer
-                    .elapsed()
-                    .expect("Time went backwards?");
-                debug!("Peer RTT: {:?}", rtt);
-                // Update local state
-                state.shared.ri_remote = Some(sca.ri_a);
-                state.shared.ts_a = sca.ts_a;
-                // Generate message to be verified
-                let msg = gen_session_confirm_sig_msg(&state.shared, true);
-                if let Err(e) = state
-                    .shared
-                    .ri_remote
-                    .as_ref()
-                    .unwrap()
-                    .signing_key
-                    .verify(&msg, &sca.sig)
-                {
-                    return (
-                        Err(io::Error::new(
+                IBHandshakeState::SessionCreated((ref mut f, rtt_timer)) => {
+                    let conn = try_ready!(f.poll());
+                    IBHandshakeState::SessionConfirmA((conn.into_future(), rtt_timer))
+                }
+                IBHandshakeState::SessionConfirmA((ref mut f, rtt_timer)) => {
+                    let (conn, sca) = try_poll!(f, SessionConfirmA);
+
+                    // Part 3
+                    debug!("Received SessionConfirmA");
+                    // Get peer skew
+                    let rtt = rtt_timer.elapsed().expect("Time went backwards?");
+                    debug!("Peer RTT: {:?}", rtt);
+                    // Update local state
+                    self.shared.ri_remote = Some(sca.ri_a);
+                    self.shared.ts_a = sca.ts_a;
+                    // Generate message to be verified
+                    let msg = gen_session_confirm_sig_msg(&self.shared, true);
+                    if let Err(e) = self
+                        .shared
+                        .ri_remote
+                        .as_ref()
+                        .unwrap()
+                        .signing_key
+                        .verify(&msg, &sca.sig)
+                    {
+                        return Err(io::Error::new(
                             io::ErrorKind::ConnectionRefused,
                             "Invalid SessionConfirmA signature",
-                        )),
-                        IBHandshakeState::SessionConfirmA(state),
-                    );
-                }
-                // Generate message to be signed
-                let msg = gen_session_confirm_sig_msg(&state.shared, false);
-                let sig = state.shared.own_key.sign(&msg);
-                (Ok(()), IBHandshakeState::SessionConfirmB(state.next(sig)))
-            }
-            (state, _) => (
-                Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "Unexpected handshake frame",
-                )),
-                state,
-            ),
-        }
-    }
+                        ));
+                    }
 
-    fn is_established(&self) -> bool {
-        match self {
-            &IBHandshakeState::Established(_) => true,
-            _ => false,
+                    // Part 4
+                    debug!("Sending SessionConfirmB");
+                    // Generate message to be signed
+                    let msg = gen_session_confirm_sig_msg(&self.shared, false);
+                    let scb = HandshakeFrame::SessionConfirmB(SessionConfirmB {
+                        sig: self.shared.own_key.sign(&msg),
+                    });
+
+                    IBHandshakeState::SessionConfirmB(conn.send(scb))
+                }
+                IBHandshakeState::SessionConfirmB(ref mut f) => {
+                    let conn = try_ready!(f.poll());
+                    return Ok(Async::Ready(IBHandshake::transmute_framed(conn)));
+                }
+            }
         }
     }
 }
@@ -746,284 +693,35 @@ impl HandshakeStateTrait for IBHandshakeState {
 // Outbound handshake protocol
 //
 
-pub struct OBHandshake<S> {
+enum OBHandshakeState<T>
+where
+    T: AsyncWrite,
+{
+    SessionRequest((sink::Send<Framed<T, OutboundHandshakeCodec>>, SystemTime)),
+    SessionCreated((StreamFuture<Framed<T, OutboundHandshakeCodec>>, SystemTime)),
+    SessionConfirmA(sink::Send<Framed<T, OutboundHandshakeCodec>>),
+    SessionConfirmB(StreamFuture<Framed<T, OutboundHandshakeCodec>>),
+}
+
+pub struct OBHandshake<T>
+where
+    T: AsyncWrite,
+{
     shared: SharedHandshakeState,
-    state: S,
+    state: OBHandshakeState<T>,
 }
 
-// First, the state transformations
-
-// - Message 1: --> SessionRequest
-
-pub struct OBSessionRequest {
-    hxxorhb: Hash,
-}
-
-impl OBHandshake<OBSessionRequest> {
-    fn new(
-        own_ri: RouterIdentity,
-        own_key: SigningPrivateKey,
-        ri_remote: RouterIdentity,
-        dh_x: Vec<u8>,
-        hxxorhb: Hash,
-    ) -> Self {
-        OBHandshake {
-            shared: SharedHandshakeState {
-                own_ri,
-                own_key,
-                ri_remote: Some(ri_remote),
-                dh_x,
-                dh_y: vec![],
-                ts_a: 0,
-                ts_b: 0,
-            },
-            state: OBSessionRequest { hxxorhb },
-        }
-    }
-
-    fn next(self) -> (SessionRequest, OBHandshake<IBSessionCreated>) {
-        (
-            SessionRequest {
-                dh_x: self.shared.dh_x.clone(),
-                hash: self.state.hxxorhb,
-            },
-            OBHandshake {
-                shared: self.shared,
-                state: IBSessionCreated {
-                    rtt_timer: SystemTime::now(),
-                },
-            },
-        )
-    }
-}
-
-// - Message 2: <-- SessionCreated
-
-pub struct IBSessionCreated {
-    rtt_timer: SystemTime,
-}
-
-impl OBHandshake<IBSessionCreated> {
-    fn next(self, sig: Signature) -> OBHandshake<OBSessionConfirmA> {
-        OBHandshake {
-            shared: self.shared,
-            state: OBSessionConfirmA { sig },
-        }
-    }
-}
-
-// - Message 3: --> SessionConfirmA
-
-pub struct OBSessionConfirmA {
-    sig: Signature,
-}
-
-impl OBHandshake<OBSessionConfirmA> {
-    fn next(self) -> (SessionConfirmA, OBHandshake<IBSessionConfirmB>) {
-        (
-            SessionConfirmA {
-                ri_a: self.shared.own_ri.clone(),
-                ts_a: self.shared.ts_a,
-                sig: self.state.sig,
-            },
-            OBHandshake {
-                shared: self.shared,
-                state: IBSessionConfirmB,
-            },
-        )
-    }
-}
-
-// - Message 4: <-- SessionConfirmB
-
-pub struct IBSessionConfirmB;
-
-impl OBHandshake<IBSessionConfirmB> {
-    fn next(self) -> OBHandshake<Established> {
-        OBHandshake {
-            shared: self.shared,
-            state: Established,
-        }
-    }
-}
-
-// Next, the state transitions
-
-pub enum OBHandshakeState {
-    SessionRequest(OBHandshake<OBSessionRequest>),
-    SessionCreated(OBHandshake<IBSessionCreated>),
-    SessionConfirmA(OBHandshake<OBSessionConfirmA>),
-    SessionConfirmB(OBHandshake<IBSessionConfirmB>),
-    Established(OBHandshake<Established>),
-}
-
-impl HandshakeStateTrait for OBHandshakeState {
-    fn next_frame(self) -> (Option<HandshakeFrame>, Self) {
-        match self {
-            OBHandshakeState::SessionRequest(state) => {
-                // Part 1
-                debug!("Sending SessionRequest");
-                let (sr, sc_state) = state.next();
-                (
-                    Some(HandshakeFrame::SessionRequest(sr)),
-                    OBHandshakeState::SessionCreated(sc_state),
-                )
-            }
-            OBHandshakeState::SessionConfirmA(state) => {
-                // Part 3
-                debug!("Sending SessionConfirmA");
-                let (sca, scb_state) = state.next();
-                (
-                    Some(HandshakeFrame::SessionConfirmA(sca)),
-                    OBHandshakeState::SessionConfirmB(scb_state),
-                )
-            }
-            state => (None, state),
-        }
-    }
-
-    fn handle_frame(self, frame: HandshakeFrame) -> (Result<(), io::Error>, Self) {
-        match (self, frame) {
-            (OBHandshakeState::SessionCreated(mut state), HandshakeFrame::SessionCreated(sc)) => {
-                // Part 2
-                debug!("Received SessionCreated");
-                // Get peer skew
-                let rtt = state
-                    .state
-                    .rtt_timer
-                    .elapsed()
-                    .expect("Time went backwards?");
-                debug!("Peer RTT: {:?}", rtt);
-                let now = SystemTime::now();
-                let mut ts_a = now.duration_since(UNIX_EPOCH).expect("Time went backwards");
-                ts_a.add_assign(Duration::from_millis(500));
-                // Update local state
-                state.shared.dh_y = sc.dh_y;
-                state.shared.ts_a = ts_a.as_secs() as u32;
-                state.shared.ts_b = sc.ts_b;
-                // Generate message to be signed
-                let msg = gen_session_confirm_sig_msg(&state.shared, false);
-                // Check part 2 (which happens to be hash of first part of signed message)
-                let hxy = Hash::digest(&msg[..512]);
-                if hxy != sc.hash {
-                    return (
-                        Err(io::Error::new(
-                            io::ErrorKind::InvalidData,
-                            "Invalid SessionCreated hash",
-                        )),
-                        OBHandshakeState::SessionCreated(state),
-                    );
-                }
-                let sig = state.shared.own_key.sign(&msg);
-                (Ok(()), OBHandshakeState::SessionConfirmA(state.next(sig)))
-            }
-            (OBHandshakeState::SessionConfirmB(state), HandshakeFrame::SessionConfirmB(scb)) => {
-                // Part 4
-                debug!("Received SessionConfirmB");
-                // Generate message to be verified
-                let msg = gen_session_confirm_sig_msg(&state.shared, true);
-                if let Err(e) = state
-                    .shared
-                    .ri_remote
-                    .as_ref()
-                    .unwrap()
-                    .signing_key
-                    .verify(&msg, &scb.sig)
-                {
-                    return (
-                        Err(io::Error::new(
-                            io::ErrorKind::ConnectionRefused,
-                            "Invalid SessionConfirmB signature",
-                        )),
-                        OBHandshakeState::SessionConfirmB(state),
-                    );
-                }
-                (Ok(()), OBHandshakeState::Established(state.next()))
-            }
-            (state, _) => (
-                Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    "Unexpected handshake frame",
-                )),
-                state,
-            ),
-        }
-    }
-
-    fn is_established(&self) -> bool {
-        match self {
-            &OBHandshakeState::Established(_) => true,
-            _ => false,
-        }
-    }
-}
-
-//
-// Transport to execute the handshake protocols
-//
-
-pub struct HandshakeTransport<T, C, S> {
-    upstream: Framed<T, C>,
-    state: Option<S>,
-}
-
-impl<T, C, S> HandshakeTransport<T, C, S>
+impl<T> OBHandshake<T>
 where
     T: AsyncRead + AsyncWrite,
     T: Send + 'static,
-    C: Decoder<Item = HandshakeFrame, Error = io::Error>,
-    C: Encoder<Item = HandshakeFrame, Error = io::Error>,
-    S: HandshakeStateTrait,
 {
-    /// Returns a future of a stream of `Framed<T, Codec>`s that are connected
-    pub fn listen(
-        stream: T,
-        own_ri: RouterIdentity,
-        own_key: SigningPrivateKey,
-    ) -> IoFuture<Framed<T, Codec>> {
-        // Generate a new DH pair
-        let dh_key_builder = DHSessionKeyBuilder::new();
-        let dh_y = dh_key_builder.get_pub();
-        let mut iv_enc = [0u8; AES_BLOCK_SIZE];
-        iv_enc.copy_from_slice(&dh_y[dh_y.len() - AES_BLOCK_SIZE..]);
-
-        // TODO: Find a way to refer to the codec from here, to deduplicate state
-        let codec = InboundHandshakeCodec::new(dh_key_builder, iv_enc);
-        let mut t = HandshakeTransport {
-            upstream: codec.framed(stream),
-            state: Some(IBHandshakeState::SessionRequest(IBHandshake::new(
-                own_ri, own_key, dh_y,
-            ))),
-        };
-
-        if let Err(e) = t.send_and_handle_frames() {
-            let err = format!("Failed to handle frames: {:?}", e);
-            return Box::new(future::err(io::Error::new(
-                io::ErrorKind::ConnectionAborted,
-                err,
-            )));
-        }
-
-        let mut connector = TransportConnector { transport: Some(t) };
-
-        if let Err(e) = connector.poll() {
-            let err = format!("Failed to handle frames: {:?}", e);
-            return Box::new(future::err(io::Error::new(
-                io::ErrorKind::ConnectionAborted,
-                err,
-            )));
-        }
-
-        Box::new(connector)
-    }
-
-    /// Returns a future of an `Framed<T, Codec>` that is connected
-    pub fn connect(
+    pub fn new(
         stream: T,
         own_ri: RouterIdentity,
         own_key: SigningPrivateKey,
         ri_remote: RouterIdentity,
-    ) -> IoFuture<Framed<T, Codec>> {
+    ) -> Self {
         // Generate a new DH pair
         let dh_key_builder = DHSessionKeyBuilder::new();
         let dh_x = dh_key_builder.get_pub();
@@ -1034,146 +732,32 @@ where
 
         // TODO: Find a way to refer to the codec from here, to deduplicate state
         let codec = OutboundHandshakeCodec::new(dh_key_builder, iv_enc, ri_remote.clone());
-        let mut t = HandshakeTransport {
-            upstream: codec.framed(stream),
-            state: Some(OBHandshakeState::SessionRequest(OBHandshake::new(
-                own_ri, own_key, ri_remote, dh_x, hxxorhb,
-            ))),
-        };
+        let mut conn = codec.framed(stream);
 
-        if let Err(e) = t.send_and_handle_frames() {
-            let err = format!("Failed to handle frames: {:?}", e);
-            return Box::new(future::err(io::Error::new(
-                io::ErrorKind::ConnectionAborted,
-                err,
-            )));
-        }
+        // Part 1
+        debug!("Sending SessionRequest");
+        let sr = HandshakeFrame::SessionRequest(SessionRequest {
+            dh_x: dh_x.clone(),
+            hash: hxxorhb,
+        });
+        let state = OBHandshakeState::SessionRequest((conn.send(sr), SystemTime::now()));
 
-        let mut connector = TransportConnector { transport: Some(t) };
-
-        if let Err(e) = connector.poll() {
-            let err = format!("Failed to handle frames: {:?}", e);
-            return Box::new(future::err(io::Error::new(
-                io::ErrorKind::ConnectionAborted,
-                err,
-            )));
-        }
-
-        Box::new(connector)
-    }
-
-    fn next_frame(&mut self) -> Option<HandshakeFrame> {
-        let state = self.state.take().unwrap();
-        let (frame, new_state) = state.next_frame();
-        self.state = Some(new_state);
-        frame
-    }
-
-    fn handle_frame(&mut self, frame: HandshakeFrame) -> Result<(), io::Error> {
-        let state = self.state.take().unwrap();
-        let (res, new_state) = state.handle_frame(frame);
-        self.state = Some(new_state);
-        res
-    }
-
-    // Note that this can only return one of
-    // - Error
-    // - Async::NotReady
-    // - Async::Ready(None)
-    // All other results are handled until one of these three is reached.
-    fn send_and_handle_frames(&mut self) -> Poll<Option<()>, io::Error> {
-        self.send_frames()?;
-        self.handle_frames()
-    }
-
-    fn send_frames(&mut self) -> Result<(), io::Error> {
-        //FIXME: find a way to use a future here
-        while let Some(f) = self.next_frame() {
-            if let Err(e) = self.send_frame(f) {
-                return Err(e);
-            }
-        }
-        Ok(())
-    }
-
-    fn send_frame(&mut self, frame: HandshakeFrame) -> Poll<(), io::Error> {
-        self.start_send(frame).and_then(|_| self.poll_complete())
-    }
-
-    fn handle_frames(&mut self) -> Poll<Option<()>, io::Error> {
-        loop {
-            // try_ready will return if we hit an error or NotReady.
-            if try_ready!(self.poll()).is_none() {
-                return Ok(Async::Ready(None));
-            }
+        OBHandshake {
+            shared: SharedHandshakeState {
+                own_ri,
+                own_key,
+                ri_remote: Some(ri_remote),
+                dh_x,
+                dh_y: vec![],
+                ts_a: 0,
+                ts_b: 0,
+            },
+            state,
         }
     }
-}
 
-impl<T, C, S> Stream for HandshakeTransport<T, C, S>
-where
-    T: AsyncRead + AsyncWrite,
-    T: Send + 'static,
-    C: Decoder<Item = HandshakeFrame, Error = io::Error>,
-    C: Encoder<Item = HandshakeFrame, Error = io::Error>,
-    S: HandshakeStateTrait,
-{
-    type Item = ();
-    type Error = io::Error;
-
-    fn poll(&mut self) -> Poll<Option<()>, io::Error> {
-        let value = match self.upstream.poll() {
-            Ok(Async::Ready(t)) => t,
-            Ok(Async::NotReady) => return Ok(Async::NotReady),
-            Err(e) => return Err(From::from(e)),
-        };
-
-        if let Some(frame) = value {
-            if let Err(e) = self.handle_frame(frame) {
-                let err = format!("failed to handle frame: {:?}", e);
-                return Err(io::Error::new(io::ErrorKind::Other, err));
-            }
-            self.send_frames()?;
-            Ok(Async::Ready(Some(())))
-        } else {
-            Ok(Async::Ready(None))
-        }
-    }
-}
-
-impl<T, C, S> Sink for HandshakeTransport<T, C, S>
-where
-    T: AsyncWrite,
-    T: Send,
-    C: Decoder<Item = HandshakeFrame, Error = io::Error>,
-    C: Encoder<Item = HandshakeFrame, Error = io::Error>,
-{
-    type SinkItem = HandshakeFrame;
-    type SinkError = io::Error;
-
-    fn start_send(&mut self, item: HandshakeFrame) -> StartSend<HandshakeFrame, io::Error> {
-        self.upstream.start_send(item)
-    }
-
-    fn poll_complete(&mut self) -> Poll<(), io::Error> {
-        self.upstream.poll_complete()
-    }
-}
-
-/// Implements a future of `HandshakeTransport`
-///
-/// This structure is used to perform the NTCP handshake and provide
-/// a connected transport afterwards
-struct TransportConnector<T, C, S> {
-    transport: Option<HandshakeTransport<T, C, S>>,
-}
-
-impl<T, C, S> TransportConnector<T, C, S>
-where
-    Codec: From<C>,
-{
-    fn transmute_transport(transport: HandshakeTransport<T, C, S>) -> Framed<T, Codec> {
-        let parts = transport.upstream.into_parts();
+    fn transmute_framed(framed: Framed<T, OutboundHandshakeCodec>) -> Framed<T, Codec> {
+        let parts = framed.into_parts();
         let mut new_parts = FramedParts::new(parts.io, Codec::from(parts.codec));
         new_parts.read_buf = parts.read_buf;
         new_parts.write_buf = parts.write_buf;
@@ -1181,57 +765,84 @@ where
     }
 }
 
-impl<T, C, S> Future for TransportConnector<T, C, S>
+impl<T> Future for OBHandshake<T>
 where
     T: AsyncRead + AsyncWrite,
     T: Send + 'static,
-    C: Decoder<Item = HandshakeFrame, Error = io::Error>,
-    C: Encoder<Item = HandshakeFrame, Error = io::Error>,
-    Codec: From<C>,
-    S: HandshakeStateTrait,
 {
     type Item = Framed<T, Codec>;
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-        let mut transport = self.transport.take().unwrap();
-
-        //we might have received a frame before here
-        transport.send_and_handle_frames()?;
-
-        if transport
-            .state
-            .as_ref()
-            .map_or(false, |s| s.is_established())
-        {
-            return Ok(Async::Ready(TransportConnector::transmute_transport(
-                transport,
-            )));
-        }
-
-        match transport.poll()? {
-            Async::Ready(Some(_)) => {
-                if transport
-                    .state
-                    .as_ref()
-                    .map_or(false, |s| s.is_established())
-                {
-                    // Upstream had frames available and we're connected, the transport is ready
-                    Ok(Async::Ready(TransportConnector::transmute_transport(
-                        transport,
-                    )))
-                } else {
-                    // Upstream had frames but we're not yet connected, continue polling
-                    let poll_ret = transport.poll();
-                    self.transport = Some(transport);
-                    poll_ret?;
-                    Ok(Async::NotReady)
+        loop {
+            self.state = match self.state {
+                OBHandshakeState::SessionRequest((ref mut f, rtt_timer)) => {
+                    let conn = try_ready!(f.poll());
+                    OBHandshakeState::SessionCreated((conn.into_future(), rtt_timer))
                 }
-            }
-            _ => {
-                // Upstream had no frames
-                self.transport = Some(transport);
-                Ok(Async::NotReady)
+                OBHandshakeState::SessionCreated((ref mut f, rtt_timer)) => {
+                    let (conn, sc) = try_poll!(f, SessionCreated);
+
+                    // Part 2
+                    debug!("Received SessionCreated");
+                    // Get peer skew
+                    let rtt = rtt_timer.elapsed().expect("Time went backwards?");
+                    debug!("Peer RTT: {:?}", rtt);
+                    let now = SystemTime::now();
+                    let mut ts_a = now.duration_since(UNIX_EPOCH).expect("Time went backwards");
+                    ts_a.add_assign(Duration::from_millis(500));
+                    // Update local state
+                    self.shared.dh_y = sc.dh_y;
+                    self.shared.ts_a = ts_a.as_secs() as u32;
+                    self.shared.ts_b = sc.ts_b;
+
+                    // Generate message to be signed
+                    let msg = gen_session_confirm_sig_msg(&self.shared, false);
+                    // Check part 2 (which happens to be hash of first part of signed message)
+                    let hxy = Hash::digest(&msg[..512]);
+                    if hxy != sc.hash {
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            "Invalid SessionCreated hash",
+                        ));
+                    }
+
+                    // Part 3
+                    debug!("Sending SessionConfirmA");
+                    let sca = HandshakeFrame::SessionConfirmA(SessionConfirmA {
+                        ri_a: self.shared.own_ri.clone(),
+                        ts_a: self.shared.ts_a,
+                        sig: self.shared.own_key.sign(&msg),
+                    });
+                    OBHandshakeState::SessionConfirmA(conn.send(sca))
+                }
+                OBHandshakeState::SessionConfirmA(ref mut f) => {
+                    let conn = try_ready!(f.poll());
+                    OBHandshakeState::SessionConfirmB(conn.into_future())
+                }
+                OBHandshakeState::SessionConfirmB(ref mut f) => {
+                    let (conn, scb) = try_poll!(f, SessionConfirmB);
+
+                    // Part 4
+                    debug!("Received SessionConfirmB");
+                    // Generate message to be verified
+                    let msg = gen_session_confirm_sig_msg(&self.shared, true);
+                    if let Err(e) = self
+                        .shared
+                        .ri_remote
+                        .as_ref()
+                        .unwrap()
+                        .signing_key
+                        .verify(&msg, &scb.sig)
+                    {
+                        return Err(io::Error::new(
+                            io::ErrorKind::ConnectionRefused,
+                            "Invalid SessionConfirmB signature",
+                        ));
+                    }
+
+                    return Ok(Async::Ready(OBHandshake::transmute_framed(conn)));
+                }
             }
         }
     }
