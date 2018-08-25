@@ -17,11 +17,11 @@ use tokio_io::{
 };
 
 use super::{
-    frame, Codec, NTCP2_MTU, NTCP2_NOISE_PROTOCOL_NAME, NTCP2_OPT_I, NTCP2_OPT_S, NTCP2_OPT_V,
-    NTCP2_STYLE, NTCP2_VERSION,
+    frame, Block, Codec, NTCP2_MTU, NTCP2_NOISE_PROTOCOL_NAME, NTCP2_OPT_I, NTCP2_OPT_S,
+    NTCP2_OPT_V, NTCP2_STYLE, NTCP2_VERSION,
 };
 use constants::I2P_BASE64;
-use data::{RouterAddress, RouterInfo};
+use data::{RouterAddress, RouterIdentity, RouterInfo};
 use transport::ntcp::NTCP_STYLE;
 
 const SESSION_REQUEST_PT_LEN: usize = 16;
@@ -95,7 +95,7 @@ where
     T: AsyncRead + AsyncWrite,
     T: Send + 'static,
 {
-    type Item = Framed<T, Codec>;
+    type Item = (RouterIdentity, Framed<T, Codec>);
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
@@ -186,7 +186,7 @@ where
                     let len = noise.read_message(&msg, &mut buf).unwrap();
 
                     // SessionConfirmed
-                    let ri_a = match frame::session_confirmed(&buf[..len]) {
+                    let mut frames = match frame::session_confirmed(&buf[..len]) {
                         Err(Err::Incomplete(n)) => {
                             return io_err!(
                                 Other,
@@ -196,7 +196,22 @@ where
                         Err(Err::Error(e)) | Err(Err::Failure(e)) => {
                             return io_err!(Other, format!("SessionConfirmed parse error: {:?}", e))
                         }
-                        Ok((_, ri_a)) => ri_a,
+                        Ok((_, frames)) => frames,
+                    };
+
+                    if frames.is_empty() {
+                        return io_err!(Other, "No frames in SessionConfirmed");
+                    }
+
+                    let ri_a = match frames.remove(0) {
+                        Block::RouterInfo(ri, _) => ri,
+                        _ => {
+                            // TODO: Finish handshake and then return error in Termination block
+                            return io_err!(
+                                Other,
+                                "First frame in SessionConfirmed is not RouterInfo"
+                            );
+                        }
                     };
 
                     // Get peer skew
@@ -235,7 +250,7 @@ where
                         next_len: None,
                     };
 
-                    return Ok(Async::Ready(codec.framed(conn)));
+                    return Ok(Async::Ready((ri_a.router_id, codec.framed(conn))));
                 }
             };
             self.noise = Some(noise);
@@ -256,6 +271,7 @@ pub struct OBHandshake<T> {
     noise: Option<Session>,
     sc_buf: Vec<u8>,
     sc_len: usize,
+    peer_ri: RouterInfo,
     state: OBHandshakeState<T>,
 }
 
@@ -352,6 +368,7 @@ where
             noise: Some(noise),
             sc_buf,
             sc_len,
+            peer_ri,
             state,
         })
     }
@@ -362,7 +379,7 @@ where
     T: AsyncRead + AsyncWrite,
     T: Send + 'static,
 {
-    type Item = Framed<T, Codec>;
+    type Item = (RouterIdentity, Framed<T, Codec>);
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
@@ -495,7 +512,10 @@ where
                         next_len: None,
                     };
 
-                    return Ok(Async::Ready(codec.framed(conn)));
+                    return Ok(Async::Ready((
+                        self.peer_ri.router_id.clone(),
+                        codec.framed(conn),
+                    )));
                 }
             };
             self.noise = Some(noise);

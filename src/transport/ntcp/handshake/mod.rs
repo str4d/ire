@@ -598,7 +598,7 @@ where
     T: AsyncRead + AsyncWrite,
     T: Send + 'static,
 {
-    type Item = Framed<T, Codec>;
+    type Item = (RouterIdentity, Framed<T, Codec>);
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
@@ -682,7 +682,10 @@ where
                 }
                 IBHandshakeState::SessionConfirmB(ref mut f) => {
                     let conn = try_ready!(f.poll());
-                    return Ok(Async::Ready(IBHandshake::transmute_framed(conn)));
+                    return Ok(Async::Ready((
+                        self.shared.ri_remote.take().unwrap(),
+                        IBHandshake::transmute_framed(conn),
+                    )));
                 }
             }
         }
@@ -770,7 +773,7 @@ where
     T: AsyncRead + AsyncWrite,
     T: Send + 'static,
 {
-    type Item = Framed<T, Codec>;
+    type Item = (RouterIdentity, Framed<T, Codec>);
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
@@ -841,7 +844,10 @@ where
                         ));
                     }
 
-                    return Ok(Async::Ready(OBHandshake::transmute_framed(conn)));
+                    return Ok(Async::Ready((
+                        self.shared.ri_remote.take().unwrap(),
+                        OBHandshake::transmute_framed(conn),
+                    )));
                 }
             }
         }

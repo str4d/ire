@@ -8,6 +8,7 @@ use crypto::SessionKey;
 
 pub mod ntcp;
 pub mod ntcp2;
+mod session;
 
 pub struct DHSessionKeyBuilder {
     dh_priv: BigUint,

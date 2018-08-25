@@ -33,7 +33,8 @@ extern crate tokio_timer;
 extern crate pretty_assertions;
 
 use clap::{App, Arg, ArgMatches, SubCommand};
-use futures::{Future, Sink};
+use futures::Future;
+use std::io;
 
 mod constants;
 mod crypto;
@@ -160,13 +161,14 @@ fn cli_server(args: &ArgMatches) -> i32 {
         .listen(rsk.rid)
         .map_err(|e| error!("NTCP2 listener error: {}", e));
 
-    tokio::run(listener.join(listener2).map(|_| ()));
+    tokio::run(ntcp.join4(ntcp2, listener, listener2).map(|_| ()));
     0
 }
 
 fn cli_client(args: &ArgMatches) -> i32 {
     let rsk = data::RouterSecretKeys::from_file(args.value_of("routerKeys").unwrap()).unwrap();
     let peer_ri = data::RouterInfo::from_file(args.value_of("peerInfo").unwrap()).unwrap();
+    let hash = peer_ri.router_id.hash();
 
     let mut ri = data::RouterInfo::new(rsk.rid.clone());
     ri.sign(&rsk.signing_private_key);
@@ -175,40 +177,61 @@ fn cli_client(args: &ArgMatches) -> i32 {
     match args.value_of("transport") {
         Some("NTCP") => {
             let ntcp = transport::ntcp::Engine::new("127.0.0.1:0".parse().unwrap());
+            let handle = ntcp.handle();
             let conn = ntcp
                 .connect(rsk.rid, rsk.signing_private_key, peer_ri)
-                .and_then(move |t| {
-                    info!("Connection established!");
-                    t.send(transport::ntcp::Frame::TimeSync(42))
+                .and_then(move |_| {
+                    match handle
+                        .unbounded_send((hash.clone(), transport::ntcp::Frame::TimeSync(42)))
+                    {
+                        Ok(()) => Ok((handle, hash)),
+                        Err(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
+                    }
                 })
-                .and_then(|t| t.send(transport::ntcp::Frame::Standard(i2np::Message::dummy_data())))
+                .and_then(|(handle, hash)| {
+                    handle
+                        .unbounded_send((
+                            hash.clone(),
+                            transport::ntcp::Frame::Standard(i2np::Message::dummy_data()),
+                        ))
+                        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+                })
                 .and_then(|_| {
                     info!("Dummy data sent!");
                     Ok(())
                 })
                 .map_err(|e| error!("Connection error: {}", e));
-            tokio::run(conn);
+            tokio::run(ntcp.join(conn).map(|_| ()));
         }
         Some("NTCP2") => {
             let ntcp2 = transport::ntcp2::Engine::new("127.0.0.1:0".parse().unwrap());
+            let handle = ntcp2.handle();
             let conn = ntcp2
                 .connect(ri, peer_ri)
                 .unwrap()
-                .and_then(move |t| {
+                .and_then(move |_| {
                     info!("Connection established!");
-                    t.send(vec![transport::ntcp2::Block::DateTime(42)])
+                    match handle
+                        .unbounded_send((hash.clone(), vec![transport::ntcp2::Block::DateTime(42)]))
+                    {
+                        Ok(()) => Ok((handle, hash)),
+                        Err(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
+                    }
                 })
-                .and_then(|t| {
-                    t.send(vec![transport::ntcp2::Block::Message(
-                        i2np::Message::dummy_data(),
-                    )])
+                .and_then(|(handle, hash)| {
+                    handle
+                        .unbounded_send((
+                            hash.clone(),
+                            vec![transport::ntcp2::Block::Message(i2np::Message::dummy_data())],
+                        ))
+                        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
                 })
                 .and_then(|_| {
                     info!("Dummy data sent!");
                     Ok(())
                 })
                 .map_err(|e| error!("Connection error: {}", e));
-            tokio::run(conn);
+            tokio::run(ntcp2.join(conn).map(|_| ()));
         }
         Some(_) => panic!("Unknown transport specified"),
         None => panic!("No transport specified"),

@@ -1,6 +1,6 @@
 use bytes::BytesMut;
 use cookie_factory::GenError;
-use futures::{Future, Stream};
+use futures::{Future, Poll, Stream};
 use nom::{Err, Offset};
 use std::io;
 use std::iter::repeat;
@@ -8,10 +8,11 @@ use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 use tokio;
 use tokio::net::{TcpListener, TcpStream};
-use tokio_codec::{Decoder, Encoder, Framed};
+use tokio_codec::{Decoder, Encoder};
 use tokio_io::IoFuture;
 use tokio_timer::Deadline;
 
+use super::session::{EngineHandle, Session, SessionEngine};
 use crypto::{Aes256, SigningPrivateKey};
 use data::{I2PString, RouterAddress, RouterIdentity, RouterInfo};
 use i2np::Message;
@@ -59,7 +60,9 @@ impl Decoder for Codec {
         // Encrypt message in-place
         match self.aes.decrypt_blocks(&mut buf[self.decrypted..]) {
             Some(end) => self.decrypted += end,
-            None => return Ok(None),
+            None => if self.decrypted == 0 {
+                return Ok(None);
+            },
         };
 
         // Parse a frame
@@ -123,11 +126,19 @@ impl Encoder for Codec {
 
 pub struct Engine {
     addr: SocketAddr,
+    session_engine: SessionEngine<Frame>,
 }
 
 impl Engine {
     pub fn new(addr: SocketAddr) -> Self {
-        Engine { addr }
+        Engine {
+            addr,
+            session_engine: SessionEngine::new(),
+        }
+    }
+
+    pub fn handle(&self) -> EngineHandle<Frame> {
+        self.session_engine.handle()
     }
 
     pub fn address(&self) -> RouterAddress {
@@ -138,22 +149,18 @@ impl Engine {
         // Bind to the address
         let listener = TcpListener::bind(&self.addr).unwrap();
 
+        // Give each incoming connection the references it needs
+        let session_refs = self.session_engine.refs();
+        let conns = listener.incoming().zip(session_refs);
+
         // For each incoming connection:
-        Box::new(listener.incoming().for_each(move |conn| {
+        Box::new(conns.for_each(move |(conn, session_refs)| {
             info!("Incoming connection!");
             // Execute the handshake
             let conn = handshake::IBHandshake::new(conn, own_ri.clone(), own_key.clone());
 
             // Once connected:
-            let process_conn = conn.and_then(|conn| {
-                info!("Connection established!");
-                // For every message received:
-                conn.for_each(|frame| {
-                    debug!("Received frame: {:?}", frame);
-                    // TODO: Do something
-                    Ok(())
-                })
-            });
+            let process_conn = conn.and_then(|(ri, conn)| Session::new(ri, conn, session_refs));
 
             tokio::spawn(process_conn.map_err(|_| ()));
 
@@ -166,7 +173,7 @@ impl Engine {
         own_ri: RouterIdentity,
         own_key: SigningPrivateKey,
         peer_ri: RouterInfo,
-    ) -> IoFuture<Framed<TcpStream, Codec>> {
+    ) -> IoFuture<()> {
         // TODO return error if there are no valid NTCP addresses (for some reason)
         let addr = peer_ri
             .address(&NTCP_STYLE, |_| true)
@@ -175,17 +182,29 @@ impl Engine {
             .unwrap();
 
         // Connect to the peer
-        // Return a transport ready for sending and receiving Frames
-        // The layer above will convert I2NP packets to Frames
-        // (or should the Engine handle timesync packets itself?)
-        let transport = Box::new(TcpStream::connect(&addr).and_then(|socket| {
+        let conn = TcpStream::connect(&addr).and_then(|socket| {
             handshake::OBHandshake::new(socket, own_ri, own_key, peer_ri.router_id)
-        }));
+        });
 
         // Add a timeout
-        Box::new(
-            Deadline::new(transport, Instant::now() + Duration::new(10, 0))
-                .map_err(|e| io::Error::new(io::ErrorKind::Other, e)),
-        )
+        let timed = Deadline::new(conn, Instant::now() + Duration::new(10, 0))
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e));
+
+        // Once connected:
+        let session_refs = self.session_engine.refs();
+        Box::new(timed.and_then(|(ri, conn)| {
+            let session = Session::new(ri, conn, session_refs);
+            tokio::spawn(session.map_err(|_| ()));
+            Ok(())
+        }))
+    }
+}
+
+impl Future for Engine {
+    type Item = ();
+    type Error = ();
+
+    fn poll(&mut self) -> Poll<(), ()> {
+        self.session_engine.poll()
     }
 }
