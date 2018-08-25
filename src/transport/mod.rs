@@ -1,3 +1,5 @@
+//! Transports used for point-to-point communication between I2P routers.
+
 use num::bigint::{BigUint, RandBigInt};
 use rand;
 use std::iter::repeat;

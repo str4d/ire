@@ -1,3 +1,5 @@
+//! An I2P router implementation in Rust.
+
 #[macro_use]
 extern crate arrayref;
 #[macro_use]

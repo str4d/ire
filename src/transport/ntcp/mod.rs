@@ -1,3 +1,7 @@
+//! A legacy authenticated key agreement protocol over TCP.
+//!
+//! [NTCP specification](https://geti2p.net/en/docs/transport/ntcp)
+
 use bytes::BytesMut;
 use cookie_factory::GenError;
 use futures::{Future, Poll, Stream};

@@ -1,3 +1,32 @@
+//! An authenticated key agreement protocol over TCP, based on the Noise
+//! protocol framework.
+//!
+//! The Noise protocol name is `Noise_XKaesobfse+hs2+hs3_25519_ChaChaPoly_SHA256`.
+//! NTCP2 defines three extensions to `Noise_XK_25519_ChaChaPoly_SHA256`, which
+//! generally follow the guidelines in section 13 of the Noise specification:
+//!
+//! 1. Cleartext ephemeral keys are obfuscated with AES-CBC encryption using a
+//!    pre-shared (by publication in the responder's RouterInfo) key and IV.
+//!    This is indicated by the `aesobfse` modifier.
+//!
+//! 2. Random cleartext padding is appended to messages 1 and 2 (which are both
+//!    fixed-length). The cleartext padding is authenticated by calling MixHash
+//!    at the beginning of the token patterns for messages 2 and 3; this is
+//!    indicated by the `hs2+hs3` modifiers.
+//!
+//!    - Random padding is added to message 3 and data-phase messages inside
+//!      the AEAD ciphertexts, requiring no changes to the handshake protocol.
+//!      The length of message 3 is sent inside message 1.
+//!
+//! 3. A two-byte frame length field is prepended to each data-phase message.
+//!    To avoid transmitting identifiable length fields in stream, the frame
+//!    length is obfuscated by XORing a mask derived from SipHash-2-4, using
+//!    Additional Symmetric Keys derived from the final Noise chaining key. As
+//!    this occurs after the handshake is completed, it has no modifier in the
+//!    protocol name.
+//!
+//! [NTCP2 specification](https://geti2p.net/spec/ntcp2)
+
 use bytes::BytesMut;
 use cookie_factory::GenError;
 use futures::{Future, Poll, Stream};

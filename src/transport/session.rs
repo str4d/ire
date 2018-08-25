@@ -1,3 +1,5 @@
+//! Common structures for managing active sessions over individual transports.
+
 use futures::{sync::mpsc, task, Async, Future, Poll, Sink, Stream};
 use std::collections::HashMap;
 use std::fmt::Debug;

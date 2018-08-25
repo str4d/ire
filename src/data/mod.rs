@@ -1,3 +1,7 @@
+//! Various datatypes common to all I2P protocols.
+//!
+//! [Common structures specification](https://geti2p.net/spec/common-structures)
+
 use cookie_factory::GenError;
 use nom::{Err, IResult};
 use rand::{self, Rng};
@@ -22,6 +26,7 @@ pub mod frame;
 // Simple data types
 //
 
+/// The SHA-256 hash of some data.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Hash(pub [u8; 32]);
 
@@ -64,6 +69,7 @@ impl I2PDate {
     }
 }
 
+/// A UTF-8-encoded string.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct I2PString(pub String);
 
@@ -77,9 +83,11 @@ impl I2PString {
     }
 }
 
+/// A set of key/value mappings or properties.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Mapping(pub HashMap<I2PString, I2PString>);
 
+/// A random number.
 pub struct SessionTag(pub [u8; 32]);
 
 impl SessionTag {
@@ -90,9 +98,19 @@ impl SessionTag {
     }
 }
 
+/// Defines an identifier that is unique to each router in a tunnel. A TunnelId
+/// is generally greater than zero; do not use a value of zero except in
+/// special cases.
 #[derive(Debug)]
 pub struct TunnelId(pub u32);
 
+/// A key certificate provides a mechanism to indicate the type of the PublicKey
+/// and SigningPublicKey in the Destination or RouterIdentity, and to package
+/// any key data in excess of the standard lengths.
+///
+/// By maintaining exactly 384 bytes before the certificate, and putting any
+/// excess key data inside the certificate, we maintain compatibility for any
+/// software that parses Destinations and RouterIdentities.
 #[derive(Clone, Debug, PartialEq)]
 pub struct KeyCertificate {
     pub sig_type: SigType,
@@ -101,6 +119,8 @@ pub struct KeyCertificate {
     enc_data: Vec<u8>,
 }
 
+/// A container for various receipts or proof of works used throughout the I2P
+/// network.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Certificate {
     Null,
@@ -132,6 +152,7 @@ impl Certificate {
     }
 }
 
+/// Defines the way to uniquely identify a particular router.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RouterIdentity {
     public_key: PublicKey,
@@ -219,6 +240,7 @@ impl RouterIdentity {
     }
 }
 
+/// Key material for a RouterIdentity.
 pub struct RouterSecretKeys {
     pub rid: RouterIdentity,
     private_key: PrivateKey,
@@ -279,6 +301,8 @@ impl RouterSecretKeys {
     }
 }
 
+/// A Destination defines a particular endpoint to which messages can be
+/// directed for secure delivery.
 pub struct Destination {
     public_key: PublicKey,
     padding: Option<Vec<u8>>,
@@ -286,12 +310,22 @@ pub struct Destination {
     certificate: Certificate,
 }
 
+/// Defines the authorization for a particular tunnel to receive messages
+/// targeting a Destination.
 pub struct Lease {
     tunnel_gw: Hash,
     tid: TunnelId,
     end_date: I2PDate,
 }
 
+/// Contains all of the currently authorized Leases for a particular Destination,
+/// the PublicKey to which garlic messages can be encrypted, and then the
+/// SigningPublicKey that can be used to revoke this particular version of the
+/// structure.
+///
+/// The LeaseSet is one of the two structures stored in the network database
+/// (the other being RouterInfo), and is keyed under the SHA-256 of the contained
+/// Destination.
 pub struct LeaseSet {
     dest: Destination,
     enc_key: PublicKey,
@@ -300,6 +334,7 @@ pub struct LeaseSet {
     sig: Signature,
 }
 
+/// Defines the means to contact a router through a transport protocol.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RouterAddress {
     cost: u8,
@@ -348,6 +383,12 @@ impl RouterAddress {
     }
 }
 
+/// Defines all of the data that a router wants to publish for the network to
+/// see.
+///
+/// The RouterInfo is one of two structures stored in the network database (the
+/// other being LeaseSet), and is keyed under the SHA-256 of the contained
+/// RouterIdentity.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RouterInfo {
     pub router_id: RouterIdentity,
