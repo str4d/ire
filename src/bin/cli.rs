@@ -1,46 +1,16 @@
-extern crate aesti;
-#[macro_use]
-extern crate arrayref;
-extern crate byteorder;
-extern crate bytes;
-extern crate clap;
-extern crate cookie_factory;
-extern crate data_encoding;
-extern crate ed25519_dalek;
-extern crate env_logger;
-extern crate flate2;
-#[macro_use]
-extern crate futures;
-extern crate i2p_snow;
-extern crate itertools;
-#[macro_use]
-extern crate lazy_static;
 #[macro_use]
 extern crate log;
-#[macro_use]
-extern crate nom;
-extern crate num;
-extern crate rand;
-extern crate sha2;
-extern crate siphasher;
-extern crate tokio;
-extern crate tokio_codec;
-extern crate tokio_io;
-extern crate tokio_timer;
 
-#[cfg(test)]
-#[macro_use]
-extern crate pretty_assertions;
+extern crate clap;
+extern crate env_logger;
+extern crate futures;
+extern crate ire;
+extern crate tokio;
 
 use clap::{App, Arg, ArgMatches, SubCommand};
 use futures::Future;
+use ire::{data, i2np, transport};
 use std::io;
-
-mod constants;
-mod crypto;
-mod data;
-mod i2np;
-mod transport;
 
 fn main() {
     env_logger::init();
