@@ -15,7 +15,7 @@ use std::time::SystemTime;
 use crypto::SessionKey;
 use data::{Certificate, Hash, I2PDate, LeaseSet, RouterInfo, SessionTag, TunnelId};
 
-pub mod frame;
+pub(crate) mod frame;
 
 //
 // Common structures
@@ -60,7 +60,7 @@ enum DatabaseStoreData {
 
 /// An unsolicited database store, or the response to a successful DatabaseLookup
 /// message.
-pub(crate) struct DatabaseStore {
+pub struct DatabaseStore {
     key: Hash,
     ds_type: u8,
     reply: Option<ReplyPath>,
@@ -75,7 +75,7 @@ struct DatabaseLookupFlags {
 
 /// A request to look up an item in the network database. The response is either
 /// a DatabaseStore or a DatabaseSearchReply.
-pub(crate) struct DatabaseLookup {
+pub struct DatabaseLookup {
     key: Hash,
     from: Hash,
     flags: DatabaseLookupFlags,
@@ -87,7 +87,7 @@ pub(crate) struct DatabaseLookup {
 
 /// The response to a failed DatabaseLookup message, containing a list of router
 /// hashes closest to the requested key.
-pub(crate) struct DatabaseSearchReply {
+pub struct DatabaseSearchReply {
     key: Hash,
     peers: Vec<Hash>,
     from: Hash,
@@ -96,7 +96,7 @@ pub(crate) struct DatabaseSearchReply {
 /// A simple message acknowledgment. Generally created by the message originator,
 /// and wrapped in a Garlic message with the message itself, to be returned by
 /// the destination.
-pub(crate) struct DeliveryStatus {
+pub struct DeliveryStatus {
     msg_id: u32,
     time_stamp: I2PDate,
 }
@@ -119,7 +119,7 @@ pub struct GarlicClove {
 }
 
 /// Used to wrap multiple encrypted I2NP messages.
-pub(crate) struct Garlic {
+pub struct Garlic {
     cloves: Vec<GarlicClove>,
     cert: Certificate,
     msg_id: u32,
@@ -129,7 +129,7 @@ pub(crate) struct Garlic {
 /// A message sent from a tunnel's gateway or participant to the next participant
 /// or endpoint. The data is of fixed length, containing I2NP messages that are
 /// fragmented, batched, padded, and encrypted.
-pub(crate) struct TunnelData {
+pub struct TunnelData {
     tid: TunnelId,
     data: [u8; 1024],
 }
@@ -144,12 +144,12 @@ impl TunnelData {
 
 /// Wraps another I2NP message to be sent into a tunnel at the tunnel's inbound
 /// gateway.
-pub(crate) struct TunnelGateway {
+pub struct TunnelGateway {
     tid: TunnelId,
     data: Vec<u8>,
 }
 
-pub(crate) enum MessagePayload {
+pub enum MessagePayload {
     DatabaseStore(DatabaseStore),
     DatabaseLookup(DatabaseLookup),
     DatabaseSearchReply(DatabaseSearchReply),

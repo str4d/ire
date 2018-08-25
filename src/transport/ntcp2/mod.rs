@@ -56,12 +56,12 @@ mod frame;
 mod handshake;
 
 lazy_static! {
-    pub static ref NTCP2_STYLE: I2PString = I2PString::new("NTCP2");
-    pub static ref NTCP2_VERSION: I2PString = I2PString::new("2");
-    pub static ref NTCP2_OPT_V: I2PString = I2PString::new("v");
-    pub static ref NTCP2_OPT_S: I2PString = I2PString::new("s");
-    pub static ref NTCP2_OPT_I: I2PString = I2PString::new("i");
-    pub static ref NTCP2_NOISE_PROTOCOL_NAME: &'static str =
+    static ref NTCP2_STYLE: I2PString = I2PString::new("NTCP2");
+    static ref NTCP2_VERSION: I2PString = I2PString::new("2");
+    static ref NTCP2_OPT_V: I2PString = I2PString::new("v");
+    static ref NTCP2_OPT_S: I2PString = I2PString::new("s");
+    static ref NTCP2_OPT_I: I2PString = I2PString::new("i");
+    static ref NTCP2_NOISE_PROTOCOL_NAME: &'static str =
         "Noise_XKaesobfse+hs2+hs3_25519_ChaChaPoly_SHA256";
 }
 

@@ -20,7 +20,7 @@ use crypto::{
     SigningPublicKey,
 };
 
-pub mod frame;
+pub(crate) mod frame;
 
 //
 // Simple data types

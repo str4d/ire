@@ -34,7 +34,7 @@ extern crate tokio_timer;
 extern crate pretty_assertions;
 
 mod constants;
-mod crypto;
+pub mod crypto;
 pub mod data;
 pub mod i2np;
 pub mod transport;

@@ -25,7 +25,7 @@ mod frame;
 mod handshake;
 
 lazy_static! {
-    pub static ref NTCP_STYLE: I2PString = I2PString::new("NTCP");
+    pub(super) static ref NTCP_STYLE: I2PString = I2PString::new("NTCP");
 }
 
 // Max NTCP message size is 16kB

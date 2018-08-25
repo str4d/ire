@@ -15,10 +15,10 @@ use std::fmt;
 
 use constants;
 
-pub mod frame;
-pub mod math;
+pub(crate) mod frame;
+pub(crate) mod math;
 
-pub const AES_BLOCK_SIZE: usize = 16;
+pub(crate) const AES_BLOCK_SIZE: usize = 16;
 
 /// Errors that can occur during creation or verification of a Signature.
 pub enum SignatureError {
@@ -425,7 +425,7 @@ impl SessionKey {
 //
 
 // TODO: Use aesni if available
-pub struct Aes256 {
+pub(crate) struct Aes256 {
     ti: Aes,
     buf: [u8; AES_BLOCK_SIZE],
     iv_enc: [u8; AES_BLOCK_SIZE],
