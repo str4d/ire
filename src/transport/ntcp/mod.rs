@@ -209,6 +209,9 @@ impl Future for Engine {
     type Error = ();
 
     fn poll(&mut self) -> Poll<(), ()> {
-        self.session_engine.poll()
+        self.session_engine.poll(|from, frame| {
+            // TODO: Do something
+            debug!("Received frame from {}: {:?}", from, frame);
+        })
     }
 }

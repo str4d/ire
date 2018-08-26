@@ -2,7 +2,6 @@
 
 use futures::{sync::mpsc, task, Async, Future, Poll, Sink, Stream};
 use std::collections::HashMap;
-use std::fmt::Debug;
 use std::io;
 use std::sync::{Arc, Mutex};
 use tokio_codec::{Decoder, Encoder, Framed};
@@ -213,16 +212,11 @@ impl<F> SessionEngine<F> {
             engine: self.inbound.0.clone(),
         }
     }
-}
 
-impl<F> Future for SessionEngine<F>
-where
-    F: Debug,
-{
-    type Item = ();
-    type Error = ();
-
-    fn poll(&mut self) -> Poll<(), ()> {
+    pub fn poll<R>(&mut self, on_receive: R) -> Poll<(), ()>
+    where
+        R: Fn(Hash, F),
+    {
         // Write frames
         const FRAMES_PER_TICK: usize = 10;
         for i in 0..FRAMES_PER_TICK {
@@ -250,8 +244,7 @@ where
         // Read frames
         while let Async::Ready(f) = self.inbound.1.poll()? {
             if let Some((hash, frame)) = f {
-                // TODO: Do something
-                debug!("Received frame from {}: {:?}", hash, frame);
+                on_receive(hash, frame);
             } else {
                 // EOF was reached. The remote peer has disconnected.
                 return Ok(Async::Ready(()));
@@ -302,7 +295,7 @@ mod tests {
             assert!(received.is_empty());
 
             // Pass it through the engine, still not received
-            engine.poll().unwrap();
+            engine.poll(|h, f| ()).unwrap();
             received.clear();
             assert!(bob_net.read_to_string(&mut received).is_err());
             assert!(received.is_empty());
