@@ -1,3 +1,13 @@
+//! Messages within the I2P network.
+//!
+//! The I2P Network Protocol (I2NP), which is sandwiched between I2CP and the
+//! various I2P transport protocols, manages the routing and mixing of messages
+//! between routers, as well as the selection of what transports to use when
+//! communicating with a peer for which there are multiple common transports
+//! supported.
+//!
+//! [I2NP specification](https://geti2p.net/spec/i2np)
+
 use nom::IResult;
 use std::fmt;
 use std::time::SystemTime;
@@ -5,12 +15,14 @@ use std::time::SystemTime;
 use crypto::SessionKey;
 use data::{Certificate, Hash, I2PDate, LeaseSet, RouterInfo, SessionTag, TunnelId};
 
-pub mod frame;
+pub(crate) mod frame;
 
 //
 // Common structures
 //
 
+/// One record in a set of multiple records to request the creation of one hop
+/// in the tunnel.
 pub struct BuildRequestRecord {
     to_peer: Hash,
     receive_tid: TunnelId,
@@ -25,6 +37,9 @@ pub struct BuildRequestRecord {
     request_time: u32,
     send_msg_id: u32,
 }
+
+/// Reply to a BuildRequestRecord stating whether or not a particular hop agrees
+/// to participate.
 pub struct BuildResponseRecord {
     reply: u8,
 }
@@ -42,7 +57,10 @@ enum DatabaseStoreData {
     RI(RouterInfo),
     LS(LeaseSet),
 }
-pub(crate) struct DatabaseStore {
+
+/// An unsolicited database store, or the response to a successful DatabaseLookup
+/// message.
+pub struct DatabaseStore {
     key: Hash,
     ds_type: u8,
     reply: Option<ReplyPath>,
@@ -54,7 +72,10 @@ struct DatabaseLookupFlags {
     encryption: bool,
     lookup_type: u8,
 }
-pub(crate) struct DatabaseLookup {
+
+/// A request to look up an item in the network database. The response is either
+/// a DatabaseStore or a DatabaseSearchReply.
+pub struct DatabaseLookup {
     key: Hash,
     from: Hash,
     flags: DatabaseLookupFlags,
@@ -64,13 +85,18 @@ pub(crate) struct DatabaseLookup {
     tags: Option<Vec<SessionTag>>,
 }
 
-pub(crate) struct DatabaseSearchReply {
+/// The response to a failed DatabaseLookup message, containing a list of router
+/// hashes closest to the requested key.
+pub struct DatabaseSearchReply {
     key: Hash,
     peers: Vec<Hash>,
     from: Hash,
 }
 
-pub(crate) struct DeliveryStatus {
+/// A simple message acknowledgment. Generally created by the message originator,
+/// and wrapped in a Garlic message with the message itself, to be returned by
+/// the destination.
+pub struct DeliveryStatus {
     msg_id: u32,
     time_stamp: I2PDate,
 }
@@ -91,14 +117,19 @@ pub struct GarlicClove {
     expiration: I2PDate,
     cert: Certificate,
 }
-pub(crate) struct Garlic {
+
+/// Used to wrap multiple encrypted I2NP messages.
+pub struct Garlic {
     cloves: Vec<GarlicClove>,
     cert: Certificate,
     msg_id: u32,
     expiration: I2PDate,
 }
 
-pub(crate) struct TunnelData {
+/// A message sent from a tunnel's gateway or participant to the next participant
+/// or endpoint. The data is of fixed length, containing I2NP messages that are
+/// fragmented, batched, padded, and encrypted.
+pub struct TunnelData {
     tid: TunnelId,
     data: [u8; 1024],
 }
@@ -111,12 +142,14 @@ impl TunnelData {
     }
 }
 
-pub(crate) struct TunnelGateway {
+/// Wraps another I2NP message to be sent into a tunnel at the tunnel's inbound
+/// gateway.
+pub struct TunnelGateway {
     tid: TunnelId,
     data: Vec<u8>,
 }
 
-pub(crate) enum MessagePayload {
+pub enum MessagePayload {
     DatabaseStore(DatabaseStore),
     DatabaseLookup(DatabaseLookup),
     DatabaseSearchReply(DatabaseSearchReply),
@@ -124,6 +157,8 @@ pub(crate) enum MessagePayload {
     Garlic(Garlic),
     TunnelData(TunnelData),
     TunnelGateway(TunnelGateway),
+
+    /// Used by Garlic messages and Garlic Cloves to wrap arbitrary data.
     Data(Vec<u8>),
     TunnelBuild([[u8; 528]; 8]),
     TunnelBuildReply([[u8; 528]; 8]),
@@ -179,6 +214,15 @@ impl PartialEq for Message {
 }
 
 impl Message {
+    pub fn from_payload(payload: MessagePayload) -> Self {
+        // TODO Random id, correct expiration
+        Message {
+            id: 0,
+            expiration: I2PDate::from_system_time(SystemTime::now()),
+            payload,
+        }
+    }
+
     pub fn dummy_data() -> Self {
         Message {
             id: 0,

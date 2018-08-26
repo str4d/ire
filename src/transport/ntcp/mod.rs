@@ -1,3 +1,7 @@
+//! A legacy authenticated key agreement protocol over TCP.
+//!
+//! [NTCP specification](https://geti2p.net/en/docs/transport/ntcp)
+
 use bytes::BytesMut;
 use cookie_factory::GenError;
 use futures::{Future, Poll, Stream};
@@ -21,7 +25,7 @@ mod frame;
 mod handshake;
 
 lazy_static! {
-    pub static ref NTCP_STYLE: I2PString = I2PString::new("NTCP");
+    pub(super) static ref NTCP_STYLE: I2PString = I2PString::new("NTCP");
 }
 
 // Max NTCP message size is 16kB

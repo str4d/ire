@@ -1,3 +1,5 @@
+//! Cryptographic types and operations.
+
 use aesti::Aes;
 use ed25519_dalek::Keypair as EdKeypair;
 use ed25519_dalek::PublicKey as EdPublicKey;
@@ -13,11 +15,12 @@ use std::fmt;
 
 use constants;
 
-pub mod frame;
-pub mod math;
+pub(crate) mod frame;
+pub(crate) mod math;
 
-pub const AES_BLOCK_SIZE: usize = 16;
+pub(crate) const AES_BLOCK_SIZE: usize = 16;
 
+/// Errors that can occur during creation or verification of a Signature.
 pub enum SignatureError {
     NoSignature,
     TypeMismatch,
@@ -30,6 +33,7 @@ impl From<EdSignatureError> for SignatureError {
     }
 }
 
+/// Various signature algorithms present on the network.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum SigType {
     DsaSha1,
@@ -108,6 +112,7 @@ impl SigType {
     }
 }
 
+/// Various encryption algorithms present on the network.
 #[derive(Clone, Debug, PartialEq)]
 pub enum EncType {
     ElGamal2048,
@@ -140,6 +145,8 @@ impl EncType {
 // Key material and signatures
 //
 
+/// The public component of an ElGamal encryption keypair. Represents only the
+/// exponent, not the primes (which are constants).
 pub struct PublicKey(pub [u8; 256]);
 
 impl PublicKey {
@@ -181,6 +188,7 @@ impl PartialEq for PublicKey {
     }
 }
 
+/// The private component of an ElGamal encryption keypair.
 pub struct PrivateKey(pub [u8; 256]);
 
 impl PrivateKey {
@@ -210,6 +218,7 @@ impl fmt::Debug for PrivateKey {
     }
 }
 
+/// The public component of a signature keypair.
 #[derive(Clone, Debug, PartialEq)]
 pub enum SigningPublicKey {
     DsaSha1,
@@ -285,6 +294,7 @@ impl SigningPublicKey {
     }
 }
 
+/// The private component of a signature keypair.
 pub enum SigningPrivateKey {
     DsaSha1,
     EcdsaSha256P256,
@@ -367,6 +377,7 @@ impl Clone for SigningPrivateKey {
     }
 }
 
+/// A signature over some data.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Signature {
     DsaSha1,
@@ -398,6 +409,7 @@ impl Signature {
     }
 }
 
+/// A symmetric key used for AES-256 encryption.
 pub struct SessionKey(pub [u8; 32]);
 
 impl SessionKey {
@@ -413,7 +425,7 @@ impl SessionKey {
 //
 
 // TODO: Use aesni if available
-pub struct Aes256 {
+pub(crate) struct Aes256 {
     ti: Aes,
     buf: [u8; AES_BLOCK_SIZE],
     iv_enc: [u8; AES_BLOCK_SIZE],
