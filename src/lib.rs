@@ -1,3 +1,5 @@
+#![cfg_attr(all(test, feature = "nightly"), feature(test))]
+
 //! An I2P router implementation in Rust.
 
 #[macro_use]
@@ -32,6 +34,8 @@ extern crate tokio_timer;
 #[cfg(test)]
 #[macro_use]
 extern crate pretty_assertions;
+#[cfg(all(test, feature = "nightly"))]
+extern crate test;
 
 mod constants;
 pub mod crypto;

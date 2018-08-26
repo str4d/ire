@@ -214,6 +214,15 @@ impl PartialEq for Message {
 }
 
 impl Message {
+    pub fn from_payload(payload: MessagePayload) -> Self {
+        // TODO Random id, correct expiration
+        Message {
+            id: 0,
+            expiration: I2PDate::from_system_time(SystemTime::now()),
+            payload,
+        }
+    }
+
     pub fn dummy_data() -> Self {
         Message {
             id: 0,
