@@ -1,15 +1,16 @@
 //! Transports used for point-to-point communication between I2P routers.
 
-use futures::{sync::mpsc, Future};
+use futures::{sync::mpsc, Async, Future, Poll};
 use num::bigint::{BigUint, RandBigInt};
 use rand;
 use std::io;
 use std::iter::repeat;
+use std::net::SocketAddr;
 
 use constants::CryptoConstants;
 use crypto::math::rectify;
 use crypto::SessionKey;
-use data::Hash;
+use data::{Hash, RouterAddress, RouterSecretKeys};
 use i2np::Message;
 
 pub mod ntcp;
@@ -47,6 +48,62 @@ impl Handle {
         self.timestamp
             .unbounded_send((hash, ts))
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+    }
+}
+
+/// Coordinates the sending and receiving of frames over the various supported
+/// transports.
+pub struct Manager {
+    ntcp: ntcp::Engine,
+    ntcp2: ntcp2::Engine,
+}
+
+impl Manager {
+    pub fn new(ntcp_addr: SocketAddr, ntcp2_addr: SocketAddr, ntcp2_keyfile: &str) -> Self {
+        let ntcp = ntcp::Engine::new(ntcp_addr);
+        let ntcp2 = match ntcp2::Engine::from_file(ntcp2_addr, ntcp2_keyfile) {
+            Ok(ret) => ret,
+            Err(_) => {
+                let ret = ntcp2::Engine::new(ntcp2_addr);
+                ret.to_file(ntcp2_keyfile).unwrap();
+                ret
+            }
+        };
+        Manager { ntcp, ntcp2 }
+    }
+
+    pub fn addresses(&self) -> Vec<RouterAddress> {
+        vec![self.ntcp.address(), self.ntcp2.address()]
+    }
+
+    pub fn listen(&self, rsk: RouterSecretKeys) -> impl Future<Item = (), Error = io::Error> {
+        // Accept all incoming sockets
+        let listener = self
+            .ntcp
+            .listen(rsk.rid.clone(), rsk.signing_private_key.clone())
+            .map_err(|e| {
+                error!("NTCP listener error: {}", e);
+                e
+            });
+
+        let listener2 = self.ntcp2.listen(rsk.rid).map_err(|e| {
+            error!("NTCP2 listener error: {}", e);
+            e
+        });
+
+        listener.join(listener2).map(|_| ())
+    }
+}
+
+impl Future for Manager {
+    type Item = ();
+    type Error = ();
+
+    fn poll(&mut self) -> Poll<(), ()> {
+        match (self.ntcp.poll()?, self.ntcp2.poll()?) {
+            (Async::Ready(_), _) | (_, Async::Ready(_)) => Ok(Async::Ready(())),
+            _ => Ok(Async::NotReady),
+        }
     }
 }
 
@@ -98,6 +155,7 @@ mod tests {
     use num::Num;
     use std::io::{self, Read, Write};
     use std::sync::{Arc, Mutex};
+    use tempfile::tempdir;
     use tokio_io::{AsyncRead, AsyncWrite};
 
     use super::*;
@@ -285,6 +343,21 @@ mod tests {
             Ok::<(), ()>(())
         }).wait()
             .unwrap();
+    }
+
+    #[test]
+    fn manager_addresses() {
+        let dir = tempdir().unwrap();
+
+        let ntcp_addr = "127.0.0.1:0".parse().unwrap();
+        let ntcp2_addr = "127.0.0.2:0".parse().unwrap();
+        let ntcp2_keyfile = dir.path().join("test.ntcp2.keys.dat");
+
+        let manager = Manager::new(ntcp_addr, ntcp2_addr, ntcp2_keyfile.to_str().unwrap());
+        let addrs = manager.addresses();
+
+        assert_eq!(addrs[0].addr(), Some(ntcp_addr));
+        assert_eq!(addrs[1].addr(), Some(ntcp2_addr));
     }
 
     #[test]

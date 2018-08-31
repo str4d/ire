@@ -34,6 +34,8 @@ extern crate tokio_timer;
 #[cfg(test)]
 #[macro_use]
 extern crate pretty_assertions;
+#[cfg(test)]
+extern crate tempfile;
 #[cfg(all(test, feature = "nightly"))]
 extern crate test;
 
