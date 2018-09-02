@@ -49,7 +49,7 @@ pub struct BuildResponseRecord {
 // Messages
 //
 
-struct ReplyPath {
+pub struct ReplyPath {
     token: u32,
     tid: TunnelId,
     gateway: Hash,
@@ -66,6 +66,17 @@ pub struct DatabaseStore {
     ds_type: u8,
     reply: Option<ReplyPath>,
     data: DatabaseStoreData,
+}
+
+impl DatabaseStore {
+    pub fn from_ri(ri: RouterInfo, reply: Option<ReplyPath>) -> Self {
+        DatabaseStore {
+            key: ri.router_id.hash(),
+            ds_type: 0,
+            reply,
+            data: DatabaseStoreData::RI(ri),
+        }
+    }
 }
 
 struct DatabaseLookupFlags {

@@ -53,7 +53,7 @@ use super::{
 };
 use constants::I2P_BASE64;
 use data::{Hash, I2PString, RouterAddress, RouterIdentity, RouterInfo};
-use i2np::Message;
+use i2np::{DatabaseStore, Message, MessagePayload};
 
 mod frame;
 mod handshake;
@@ -243,8 +243,7 @@ where
     C: Decoder<Item = Frame, Error = io::Error>,
     C: Encoder<Item = Frame, Error = io::Error>,
 {
-    _ctx: SessionContext<Block>,
-    ri: RouterIdentity,
+    ctx: SessionContext<Block>,
     upstream: Framed<T, C>,
     engine: EngineTx<Block>,
     outbound: SessionRx<Block>,
@@ -259,11 +258,50 @@ where
     fn new(ri: RouterIdentity, upstream: Framed<T, C>, session_refs: SessionRefs<Block>) -> Self {
         let (tx, rx) = mpsc::unbounded();
         Session {
-            _ctx: SessionContext::new(ri.hash(), session_refs.state, tx),
-            ri: ri,
+            ctx: SessionContext::new(ri.hash(), session_refs.state, tx),
             upstream,
             engine: session_refs.engine,
             outbound: rx,
+        }
+    }
+
+    /// Handles a block at the session level. Optionally returns a block that
+    /// should be sent onwards to the transport engine.
+    fn handle_block(&self, block: Block) -> Option<Block> {
+        match block {
+            Block::RouterInfo(ri, _flags) => {
+                // Validate hash
+                if ri.router_id.hash() != self.ctx.hash {
+                    warn!("Received invalid RouterInfo block from {}", self.ctx.hash);
+                    return None;
+                }
+
+                // Treat as a DatabaseStore
+                debug!(
+                    "Converting RouterInfo block from {} into DatabaseStore message",
+                    self.ctx.hash
+                );
+                // TODO: Fake-store if we are a FF and flood flag is set
+                let fake_ds = Message::from_payload(MessagePayload::DatabaseStore(
+                    DatabaseStore::from_ri(ri, None),
+                ));
+
+                Some(Block::Message(fake_ds))
+            }
+            Block::Padding(_) => {
+                trace!("Dropping padding block from {}: {:?}", self.ctx.hash, block);
+                None
+            }
+            Block::Termination(_, _, _) => {
+                info!("Peer {} terminated session: {:?}", self.ctx.hash, block);
+                // TODO: Send a Termination in reply, then shut down
+                None
+            }
+            Block::Unknown(_, _) => {
+                debug!("Dropping unknown block: {:?}", block);
+                None
+            }
+            block => Some(block),
         }
     }
 }
@@ -319,9 +357,13 @@ where
         // Read frames
         while let Async::Ready(f) = self.upstream.poll()? {
             if let Some(frame) = f {
+                // TODO: Validate block ordering within the frame
                 for block in frame {
-                    // TODO: Handle Session-specific blocks here
-                    self.engine.unbounded_send((self.ri.hash(), block)).unwrap();
+                    if let Some(block) = self.handle_block(block) {
+                        self.engine
+                            .unbounded_send((self.ctx.hash.clone(), block))
+                            .unwrap()
+                    }
                 }
             } else {
                 // EOF was reached. The remote peer has disconnected.
