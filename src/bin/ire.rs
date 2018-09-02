@@ -8,7 +8,7 @@ extern crate ire;
 extern crate tokio;
 
 use clap::{App, Arg, ArgMatches, SubCommand};
-use futures::Future;
+use futures::{Future, Stream};
 use ire::{data, i2np, transport};
 
 fn main() {
@@ -141,7 +141,13 @@ fn cli_client(args: &ArgMatches) -> i32 {
                     Ok(())
                 })
                 .map_err(|e| error!("Connection error: {}", e));
-            tokio::run(ntcp.join(conn).map(|_| ()));
+            tokio::run(
+                ntcp.into_future()
+                    .map(|_| ())
+                    .map_err(|_| ())
+                    .join(conn)
+                    .map(|_| ()),
+            );
         }
         Some("NTCP2") => {
             let ntcp2 = transport::ntcp2::Engine::new("127.0.0.1:0".parse().unwrap());
@@ -159,7 +165,14 @@ fn cli_client(args: &ArgMatches) -> i32 {
                     Ok(())
                 })
                 .map_err(|e| error!("Connection error: {}", e));
-            tokio::run(ntcp2.join(conn).map(|_| ()));
+            tokio::run(
+                ntcp2
+                    .into_future()
+                    .map(|_| ())
+                    .map_err(|_| ())
+                    .join(conn)
+                    .map(|_| ()),
+            );
         }
         Some(_) => panic!("Unknown transport specified"),
         None => panic!("No transport specified"),

@@ -307,19 +307,25 @@ impl Transport for Engine {
     }
 }
 
-impl Future for Engine {
-    type Item = ();
+impl Stream for Engine {
+    type Item = (Hash, Message);
     type Error = ();
 
-    fn poll(&mut self) -> Poll<(), ()> {
-        self.session_engine.poll(
-            |msg| Frame::Standard(msg),
-            |ts| Frame::TimeSync(ts),
-            |from, frame| {
-                // TODO: Do something
-                debug!("Received frame from {}: {:?}", from, frame);
-            },
-        )
+    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
+        while let Async::Ready(f) = self
+            .session_engine
+            .poll(|msg| Frame::Standard(msg), |ts| Frame::TimeSync(ts))?
+        {
+            match f {
+                Some((from, Frame::Standard(msg))) => return Ok(Some((from, msg)).into()),
+                Some((from, frame)) => {
+                    // TODO: Do something
+                    debug!("Received frame from {}: {:?}", from, frame);
+                }
+                None => return Ok(Async::Ready(None)),
+            }
+        }
+        Ok(Async::NotReady)
     }
 }
 
@@ -327,7 +333,7 @@ impl Future for Engine {
 mod tests {
     use bytes::BytesMut;
     use cookie_factory::GenError;
-    use futures::{lazy, Future};
+    use futures::{lazy, Async, Future};
     use nom::{Err, Offset};
     use std::io::{self, Read, Write};
     use std::iter::repeat;
@@ -428,7 +434,7 @@ mod tests {
 
             // Pass it through the engine, still not received
             engine
-                .poll(|msg| Frame::Standard(msg), |_| panic!(), |_, _| ())
+                .poll(|msg| Frame::Standard(msg), |_| panic!())
                 .unwrap();
             received.clear();
             assert!(bob_net.read_to_end(&mut received).is_err());
@@ -463,29 +469,24 @@ mod tests {
             assert!(alice_net.write_all(DUMMY_MSG_NTCP_DATA).is_ok());
 
             // Check it has not yet been received
-            engine
-                .poll(|_| panic!(), |_| panic!(), |_, _| panic!())
-                .unwrap();
+            engine.poll(|_| panic!(), |_| panic!()).unwrap();
 
             // Pass it through the session
             session.poll().unwrap();
 
             // The engine should receive it now
-            engine
-                .poll(
-                    |_| panic!(),
-                    |_| panic!(),
-                    |h, frame| {
-                        assert_eq!(h, hash);
-                        match frame {
-                            Frame::Standard(msg) => {
-                                assert_eq!(msg, *DUMMY_MSG);
-                            }
-                            _ => panic!(),
+            match engine.poll(|_| panic!(), |_| panic!()).unwrap() {
+                Async::Ready(Some((h, frame))) => {
+                    assert_eq!(h, hash);
+                    match frame {
+                        Frame::Standard(msg) => {
+                            assert_eq!(msg, *DUMMY_MSG);
                         }
-                    },
-                )
-                .unwrap();
+                        _ => panic!(),
+                    }
+                }
+                _ => panic!(),
+            }
 
             Ok::<(), ()>(())
         }).wait()

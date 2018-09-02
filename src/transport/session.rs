@@ -141,16 +141,14 @@ impl<F> SessionEngine<F> {
         self.state.contains(hash)
     }
 
-    pub fn poll<P, Q, R>(
+    pub fn poll<P, Q>(
         &mut self,
         frame_message: P,
         frame_timestamp: Q,
-        on_receive: R,
-    ) -> Poll<(), ()>
+    ) -> Poll<Option<(Hash, F)>, ()>
     where
         P: Fn(Message) -> F,
         Q: Fn(u32) -> F,
-        R: Fn(Hash, F),
     {
         // Write timestamps first
         while let Async::Ready(f) = self.outbound_ts.poll().unwrap() {
@@ -176,18 +174,7 @@ impl<F> SessionEngine<F> {
             }
         }
 
-        // Read frames
-        while let Async::Ready(f) = self.inbound.1.poll()? {
-            if let Some((hash, frame)) = f {
-                on_receive(hash, frame);
-            } else {
-                // EOF was reached. The remote peer has disconnected.
-                return Ok(Async::Ready(()));
-            }
-        }
-
-        // We know we got a `NotReady` from both `self.outbound.1` and `self.inbound.1`,
-        // so the contract is respected.
-        Ok(Async::NotReady)
+        // Return the next inbound frame
+        self.inbound.1.poll()
     }
 }
