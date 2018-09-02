@@ -12,7 +12,6 @@ use cookie_factory::GenError;
 use nom::IResult;
 use std::fmt;
 use std::iter::repeat;
-use std::time::SystemTime;
 
 use crypto::SessionKey;
 use data::{Certificate, Hash, I2PDate, LeaseSet, RouterInfo, SessionTag, TunnelId};
@@ -244,7 +243,7 @@ impl Message {
         // TODO Random id, correct expiration
         Message {
             id: 0,
-            expiration: I2PDate::from_system_time(SystemTime::now()),
+            expiration: I2PDate(0x123456787c0),
             payload,
         }
     }
@@ -252,7 +251,7 @@ impl Message {
     pub fn dummy_data() -> Self {
         Message {
             id: 0,
-            expiration: I2PDate::from_system_time(SystemTime::now()),
+            expiration: I2PDate(0x123456787c0),
             payload: MessagePayload::Data(vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]),
         }
     }
@@ -269,6 +268,8 @@ impl Message {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use std::time::SystemTime;
 
     macro_rules! check_size {
         ($size_func:ident, $header_size:expr) => {{

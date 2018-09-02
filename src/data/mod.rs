@@ -60,7 +60,7 @@ impl fmt::Display for Hash {
 /// The number of milliseconds since midnight on January 1, 1970 in the GMT
 /// timezone. If the number is 0, the date is undefined or null.
 #[derive(Clone, Debug, PartialEq)]
-pub struct I2PDate(u64);
+pub struct I2PDate(pub(crate) u64);
 
 impl I2PDate {
     pub fn from_system_time(t: SystemTime) -> Self {
