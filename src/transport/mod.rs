@@ -94,7 +94,7 @@ impl DHSessionKeyBuilder {
 
 #[cfg(test)]
 mod tests {
-    use futures::Async;
+    use futures::{lazy, Async, Stream};
     use num::Num;
     use std::io::{self, Read, Write};
     use std::sync::{Arc, Mutex};
@@ -210,6 +210,81 @@ mod tests {
         fn shutdown(&mut self) -> io::Result<Async<()>> {
             Ok(().into())
         }
+    }
+
+    #[test]
+    fn handle_send() {
+        let (message, mut message_rx) = mpsc::unbounded();
+        let (timestamp, mut timestamp_rx) = mpsc::unbounded();
+        let handle = Handle { message, timestamp };
+
+        let hash = Hash::from_bytes(&[0; 32]);
+        let msg = Message::dummy_data();
+        let mut msg2 = Message::dummy_data();
+        // Ensure the two messages are identical
+        msg2.expiration = msg.expiration.clone();
+
+        // Run on a task context
+        lazy(move || {
+            // Check the queue is empty
+            assert_eq!(
+                (message_rx.poll(), timestamp_rx.poll()),
+                (Ok(Async::NotReady), Ok(Async::NotReady))
+            );
+
+            // Send a message
+            handle.send(hash.clone(), msg);
+
+            // Check it was received
+            assert_eq!(
+                (message_rx.poll(), timestamp_rx.poll()),
+                (Ok(Async::Ready(Some((hash, msg2)))), Ok(Async::NotReady))
+            );
+
+            // Check the queue is empty again
+            assert_eq!(
+                (message_rx.poll(), timestamp_rx.poll()),
+                (Ok(Async::NotReady), Ok(Async::NotReady))
+            );
+
+            Ok::<(), ()>(())
+        }).wait()
+            .unwrap();
+    }
+
+    #[test]
+    fn handle_timestamp() {
+        let (message, mut message_rx) = mpsc::unbounded();
+        let (timestamp, mut timestamp_rx) = mpsc::unbounded();
+        let handle = Handle { message, timestamp };
+
+        // Run on a task context
+        lazy(move || {
+            // Check the queue is empty
+            assert_eq!(
+                (message_rx.poll(), timestamp_rx.poll()),
+                (Ok(Async::NotReady), Ok(Async::NotReady))
+            );
+
+            // Send a message
+            let hash = Hash::from_bytes(&[0; 32]);
+            handle.timestamp(hash.clone(), 42);
+
+            // Check it was received
+            assert_eq!(
+                (message_rx.poll(), timestamp_rx.poll()),
+                (Ok(Async::NotReady), Ok(Async::Ready(Some((hash, 42)))))
+            );
+
+            // Check the queue is empty again
+            assert_eq!(
+                (message_rx.poll(), timestamp_rx.poll()),
+                (Ok(Async::NotReady), Ok(Async::NotReady))
+            );
+
+            Ok::<(), ()>(())
+        }).wait()
+            .unwrap();
     }
 
     #[test]
