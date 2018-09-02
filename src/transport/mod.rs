@@ -1,16 +1,54 @@
 //! Transports used for point-to-point communication between I2P routers.
 
+use futures::{sync::mpsc, Future};
 use num::bigint::{BigUint, RandBigInt};
 use rand;
+use std::io;
 use std::iter::repeat;
 
 use constants::CryptoConstants;
 use crypto::math::rectify;
 use crypto::SessionKey;
+use data::Hash;
+use i2np::Message;
 
 pub mod ntcp;
 pub mod ntcp2;
 mod session;
+
+/// Shorthand for the transmit half of a Transport-bound message channel.
+type MessageTx = mpsc::UnboundedSender<(Hash, Message)>;
+
+/// Shorthand for the receive half of a Transport-bound message channel.
+type MessageRx = mpsc::UnboundedReceiver<(Hash, Message)>;
+
+/// Shorthand for the transmit half of a Transport-bound timestamp channel.
+type TimestampTx = mpsc::UnboundedSender<(Hash, u32)>;
+
+/// Shorthand for the receive half of a Transport-bound timestamp channel.
+type TimestampRx = mpsc::UnboundedReceiver<(Hash, u32)>;
+
+/// A reference to a transport, that can be used to send messages and
+/// timestamps to other routers (if they are reachable via this transport).
+#[derive(Clone)]
+pub struct Handle {
+    message: MessageTx,
+    timestamp: TimestampTx,
+}
+
+impl Handle {
+    pub fn send(&self, hash: Hash, msg: Message) -> io::Result<()> {
+        self.message
+            .unbounded_send((hash, msg))
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+    }
+
+    pub fn timestamp(&self, hash: Hash, ts: u32) -> io::Result<()> {
+        self.timestamp
+            .unbounded_send((hash, ts))
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+    }
+}
 
 pub struct DHSessionKeyBuilder {
     dh_priv: BigUint,

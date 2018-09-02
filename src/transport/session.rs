@@ -7,7 +7,9 @@ use std::sync::{Arc, Mutex};
 use tokio_codec::{Decoder, Encoder, Framed};
 use tokio_io::{AsyncRead, AsyncWrite};
 
+use super::{Handle, MessageRx, TimestampRx};
 use data::{Hash, RouterIdentity};
+use i2np::Message;
 
 //
 // Session state
@@ -185,25 +187,29 @@ impl<F> Stream for SessionRefs<F> {
 // Connection management engine
 //
 
-pub type EngineHandle<F> = EngineTx<F>;
-
 pub struct SessionEngine<F> {
     state: SessionState<F>,
+    handle: Handle,
     inbound: (EngineTx<F>, EngineRx<F>),
-    outbound: (EngineTx<F>, EngineRx<F>),
+    outbound_msg: MessageRx,
+    outbound_ts: TimestampRx,
 }
 
 impl<F> SessionEngine<F> {
     pub fn new() -> Self {
+        let (message, outbound_msg) = mpsc::unbounded();
+        let (timestamp, outbound_ts) = mpsc::unbounded();
         SessionEngine {
             state: SessionState::new(),
             inbound: mpsc::unbounded(),
-            outbound: mpsc::unbounded(),
+            handle: Handle { message, timestamp },
+            outbound_msg,
+            outbound_ts,
         }
     }
 
-    pub fn handle(&self) -> EngineHandle<F> {
-        self.outbound.0.clone()
+    pub fn handle(&self) -> Handle {
+        self.handle.clone()
     }
 
     pub fn refs(&self) -> SessionRefs<F> {
@@ -213,31 +219,38 @@ impl<F> SessionEngine<F> {
         }
     }
 
-    pub fn poll<R>(&mut self, on_receive: R) -> Poll<(), ()>
+    pub fn poll<P, Q, R>(
+        &mut self,
+        frame_message: P,
+        frame_timestamp: Q,
+        on_receive: R,
+    ) -> Poll<(), ()>
     where
+        P: Fn(Message) -> F,
+        Q: Fn(u32) -> F,
         R: Fn(Hash, F),
     {
-        // Write frames
-        const FRAMES_PER_TICK: usize = 10;
-        for i in 0..FRAMES_PER_TICK {
-            match self.outbound.1.poll().unwrap() {
-                Async::Ready(Some((hash, frame))) => {
-                    self.state.get(&hash, |s| match s {
-                        Some(session) => {
-                            session.unbounded_send(frame).unwrap();
-                        }
-                        None => error!("No open session for {}", hash), // TODO: Open session instead of dropping
-                    });
-
-                    // If this is the last iteration, the loop will break even
-                    // though there could still be frames to read. Because we did
-                    // not reach `Async::NotReady`, we have to notify ourselves
-                    // in order to tell the executor to schedule the task again.
-                    if i + 1 == FRAMES_PER_TICK {
-                        task::current().notify();
+        // Write timestamps first
+        while let Async::Ready(f) = self.outbound_ts.poll().unwrap() {
+            if let Some((hash, ts)) = f {
+                self.state.get(&hash, |s| match s {
+                    Some(session) => {
+                        session.unbounded_send(frame_timestamp(ts)).unwrap();
                     }
-                }
-                _ => break,
+                    None => error!("No open session for {}", hash), // TODO: Open session instead of dropping
+                });
+            }
+        }
+
+        // Write messages
+        while let Async::Ready(f) = self.outbound_msg.poll().unwrap() {
+            if let Some((hash, msg)) = f {
+                self.state.get(&hash, |s| match s {
+                    Some(session) => {
+                        session.unbounded_send(frame_message(msg)).unwrap();
+                    }
+                    None => error!("No open session for {}", hash), // TODO: Open session instead of dropping
+                });
             }
         }
 
@@ -266,6 +279,7 @@ mod tests {
 
     use super::{Session, SessionEngine};
     use data::RouterSecretKeys;
+    use i2np::Message;
     use transport::tests::{AliceNet, BobNet, NetworkCable};
 
     #[test]
@@ -283,9 +297,7 @@ mod tests {
         // Run on a task context
         lazy(move || {
             let handle = engine.handle();
-            handle
-                .unbounded_send((hash.clone(), String::from_str("foo bar baz").unwrap()))
-                .unwrap();
+            handle.send(hash.clone(), Message::dummy_data()).unwrap();
 
             // Check it has not yet been received
             let mut bob_net = BobNet::new(cable);
@@ -294,7 +306,13 @@ mod tests {
             assert!(received.is_empty());
 
             // Pass it through the engine, still not received
-            engine.poll(|h, f| ()).unwrap();
+            engine
+                .poll(
+                    |m| String::from_str("foo bar baz").unwrap(),
+                    |_| panic!(),
+                    |h, f| (),
+                )
+                .unwrap();
             received.clear();
             assert!(bob_net.read_to_string(&mut received).is_err());
             assert!(received.is_empty());
@@ -328,17 +346,23 @@ mod tests {
             assert!(alice_net.write_all(b"foo bar baz\n").is_ok());
 
             // Check it has not yet been received
-            engine.poll(|_, _| panic!()).unwrap();
+            engine
+                .poll(|_| panic!(), |_| panic!(), |_, _| panic!())
+                .unwrap();
 
             // Pass it through the session
             session.poll().unwrap();
 
             // The engine should receive it now
             engine
-                .poll(|h, received| {
-                    assert_eq!(h, hash);
-                    assert_eq!(received, String::from_str("foo bar baz").unwrap());
-                })
+                .poll(
+                    |_| panic!(),
+                    |_| panic!(),
+                    |h, received| {
+                        assert_eq!(h, hash);
+                        assert_eq!(received, String::from_str("foo bar baz").unwrap());
+                    },
+                )
                 .unwrap();
 
             Ok::<(), ()>(())
