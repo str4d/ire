@@ -29,7 +29,7 @@
 
 use bytes::BytesMut;
 use cookie_factory::GenError;
-use futures::{Future, Poll, Stream};
+use futures::{sync::mpsc, task, Async, Future, Poll, Sink, Stream};
 use i2p_snow::{self, Builder};
 use nom::Err;
 use rand::{self, Rng};
@@ -43,12 +43,12 @@ use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 use tokio;
 use tokio::net::{TcpListener, TcpStream};
-use tokio_codec::{Decoder, Encoder};
-use tokio_io::IoFuture;
+use tokio_codec::{Decoder, Encoder, Framed};
+use tokio_io::{AsyncRead, AsyncWrite, IoFuture};
 use tokio_timer::Deadline;
 
 use super::{
-    session::{Session, SessionEngine},
+    session::{EngineTx, SessionContext, SessionEngine, SessionRefs, SessionRx},
     Bid, Handle, Transport,
 };
 use constants::I2P_BASE64;
@@ -234,6 +234,108 @@ impl Encoder for Codec {
 }
 
 //
+// Session handling
+//
+
+struct Session<T, C>
+where
+    T: AsyncRead + AsyncWrite,
+    C: Decoder<Item = Frame, Error = io::Error>,
+    C: Encoder<Item = Frame, Error = io::Error>,
+{
+    _ctx: SessionContext<Block>,
+    ri: RouterIdentity,
+    upstream: Framed<T, C>,
+    engine: EngineTx<Block>,
+    outbound: SessionRx<Block>,
+}
+
+impl<T, C> Session<T, C>
+where
+    T: AsyncRead + AsyncWrite,
+    C: Decoder<Item = Frame, Error = io::Error>,
+    C: Encoder<Item = Frame, Error = io::Error>,
+{
+    fn new(ri: RouterIdentity, upstream: Framed<T, C>, session_refs: SessionRefs<Block>) -> Self {
+        let (tx, rx) = mpsc::unbounded();
+        Session {
+            _ctx: SessionContext::new(ri.hash(), session_refs.state, tx),
+            ri: ri,
+            upstream,
+            engine: session_refs.engine,
+            outbound: rx,
+        }
+    }
+}
+
+impl<T, C> Future for Session<T, C>
+where
+    T: AsyncRead + AsyncWrite,
+    C: Decoder<Item = Frame, Error = io::Error>,
+    C: Encoder<Item = Frame, Error = io::Error>,
+{
+    type Item = ();
+    type Error = io::Error;
+
+    fn poll(&mut self) -> Poll<(), io::Error> {
+        // Write frames
+        const FRAMES_PER_TICK: usize = 10;
+        for i in 0..FRAMES_PER_TICK {
+            let mut done = false;
+
+            // Create frame from blocks
+            const BLOCKS_PER_FRAME: usize = 10;
+            let mut frame = Vec::with_capacity(BLOCKS_PER_FRAME);
+            // TODO: Limit frame size instead of blocks per frame
+            for _ in 0..BLOCKS_PER_FRAME {
+                match self.outbound.poll().unwrap() {
+                    Async::Ready(Some(block)) => {
+                        frame.push(block);
+                    }
+                    _ => {
+                        done = true;
+                        break;
+                    }
+                }
+            }
+
+            if !frame.is_empty() {
+                // TODO: Add padding
+                self.upstream.start_send(frame)?;
+            }
+
+            // If this is the last iteration, the loop will break even
+            // though there could still be frames to read. Because we did
+            // not reach `Async::NotReady`, we have to notify ourselves
+            // in order to tell the executor to schedule the task again.
+            if i + 1 == FRAMES_PER_TICK && !done {
+                task::current().notify();
+            }
+        }
+
+        // Flush frames
+        self.upstream.poll_complete()?;
+
+        // Read frames
+        while let Async::Ready(f) = self.upstream.poll()? {
+            if let Some(frame) = f {
+                for block in frame {
+                    // TODO: Handle Session-specific blocks here
+                    self.engine.unbounded_send((self.ri.hash(), block)).unwrap();
+                }
+            } else {
+                // EOF was reached. The remote peer has disconnected.
+                return Ok(Async::Ready(()));
+            }
+        }
+
+        // We know we got a `NotReady` from either `self.outbound` or `self.upstream`,
+        // so the contract is respected.
+        Ok(Async::NotReady)
+    }
+}
+
+//
 // Connection management engine
 //
 
@@ -242,7 +344,7 @@ pub struct Engine {
     static_private_key: Vec<u8>,
     static_public_key: Vec<u8>,
     aesobfse_iv: [u8; 16],
-    session_engine: SessionEngine<Frame>,
+    session_engine: SessionEngine<Block>,
 }
 
 impl Engine {
@@ -386,12 +488,182 @@ impl Future for Engine {
 
     fn poll(&mut self) -> Poll<(), ()> {
         self.session_engine.poll(
-            |msg| vec![Block::Message(msg)],
-            |ts| vec![Block::DateTime(ts)],
-            |from, frame| {
+            |msg| Block::Message(msg),
+            |ts| Block::DateTime(ts),
+            |from, block| {
                 // TODO: Do something
-                debug!("Received frame from {}: {:?}", from, frame);
+                debug!("Received block from {}: {:?}", from, block);
             },
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use bytes::BytesMut;
+    use cookie_factory::GenError;
+    use futures::{lazy, Future};
+    use nom::{Err, Offset};
+    use std::io::{self, Read, Write};
+    use std::iter::repeat;
+    use tokio_codec::{Decoder, Encoder};
+
+    use super::{frame, Block, Frame, NTCP2_MTU, Session, SessionEngine};
+    use data::RouterSecretKeys;
+    use i2np::Message;
+    use transport::tests::{AliceNet, BobNet, NetworkCable};
+
+    struct TestCodec;
+
+    impl Decoder for TestCodec {
+        type Item = Frame;
+        type Error = io::Error;
+
+        fn decode(&mut self, buf: &mut BytesMut) -> io::Result<Option<Frame>> {
+            if buf.len() < 3 {
+                return Ok(None);
+            }
+            let (consumed, f) = match frame::frame(buf) {
+                Err(Err::Incomplete(_)) => return Ok(None),
+                Err(Err::Error(e)) | Err(Err::Failure(e)) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        format!("parse error: {:?}", e),
+                    ))
+                }
+                Ok((i, frame)) => (buf.offset(i), frame),
+            };
+
+            buf.split_to(consumed);
+
+            Ok(Some(f))
+        }
+    }
+
+    impl Encoder for TestCodec {
+        type Item = Frame;
+        type Error = io::Error;
+
+        fn encode(&mut self, frame: Frame, buf: &mut BytesMut) -> io::Result<()> {
+            let start = buf.len();
+            buf.extend(repeat(0).take(NTCP2_MTU));
+
+            match frame::gen_frame((buf, start), &frame).map(|tup| tup.1) {
+                Ok(sz) => {
+                    buf.truncate(sz);
+                    Ok(())
+                }
+                Err(e) => match e {
+                    GenError::BufferTooSmall(sz) => Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        format!("message ({}) larger than MTU ({})", sz - start, NTCP2_MTU),
+                    )),
+                    GenError::InvalidOffset
+                    | GenError::CustomError(_)
+                    | GenError::NotYetImplemented => Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "could not generate",
+                    )),
+                },
+            }
+        }
+    }
+
+    lazy_static! {
+        static ref DUMMY_MSG: Message = Message::dummy_data();
+    }
+
+    const DUMMY_MSG_NTCP2_DATA: &'static [u8] = &[
+        0x03, 0x00, 0x17, 0x14, 0x00, 0x00, 0x00, 0x00, 0x4a, 0x90, 0xbe, 0x58, 0x00, 0x00, 0x00,
+        0x0a, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09,
+    ];
+
+    #[test]
+    fn session_send() {
+        let rid = RouterSecretKeys::new().rid;
+        let hash = rid.hash();
+
+        let cable = NetworkCable::new();
+        let alice_net = AliceNet::new(cable.clone());
+        let alice_framed = TestCodec {}.framed(alice_net);
+
+        let mut engine = SessionEngine::new();
+        let mut session = Session::new(rid, alice_framed, engine.refs());
+
+        // Run on a task context
+        lazy(move || {
+            let handle = engine.handle();
+            handle.send(hash.clone(), Message::dummy_data()).unwrap();
+
+            // Check it has not yet been received
+            let mut bob_net = BobNet::new(cable);
+            let mut received = Vec::new();
+            assert!(bob_net.read_to_end(&mut received).is_err());
+            assert!(received.is_empty());
+
+            // Pass it through the engine, still not received
+            engine
+                .poll(|msg| Block::Message(msg), |_| panic!(), |_, _| ())
+                .unwrap();
+            received.clear();
+            assert!(bob_net.read_to_end(&mut received).is_err());
+            assert!(received.is_empty());
+
+            // Pass it through the session, now it's on the wire
+            session.poll().unwrap();
+            received.clear();
+            assert!(bob_net.read_to_end(&mut received).is_err());
+            assert_eq!(&received, &DUMMY_MSG_NTCP2_DATA);
+
+            Ok::<(), ()>(())
+        }).wait()
+            .unwrap();
+    }
+
+    #[test]
+    fn session_receive() {
+        let rid = RouterSecretKeys::new().rid;
+        let hash = rid.hash();
+
+        let cable = NetworkCable::new();
+        let bob_net = BobNet::new(cable.clone());
+        let bob_framed = TestCodec {}.framed(bob_net);
+
+        let mut engine = SessionEngine::new();
+        let mut session = Session::new(rid, bob_framed, engine.refs());
+
+        // Run on a task context
+        lazy(move || {
+            let mut alice_net = AliceNet::new(cable);
+            assert!(alice_net.write_all(DUMMY_MSG_NTCP2_DATA).is_ok());
+
+            // Check it has not yet been received
+            engine
+                .poll(|_| panic!(), |_| panic!(), |_, _| panic!())
+                .unwrap();
+
+            // Pass it through the session
+            session.poll().unwrap();
+
+            // The engine should receive it now
+            engine
+                .poll(
+                    |_| panic!(),
+                    |_| panic!(),
+                    |h, block| {
+                        assert_eq!(h, hash);
+                        match block {
+                            Block::Message(msg) => {
+                                assert_eq!(msg, *DUMMY_MSG);
+                            }
+                            _ => panic!(),
+                        }
+                    },
+                )
+                .unwrap();
+
+            Ok::<(), ()>(())
+        }).wait()
+            .unwrap();
     }
 }
