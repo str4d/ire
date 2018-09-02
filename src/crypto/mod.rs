@@ -240,46 +240,40 @@ impl SigningPublicKey {
 impl SigningPublicKey {
     pub fn from_bytes(sig_type: &SigType, data: &[u8]) -> Result<Self, SignatureError> {
         match sig_type {
-            &SigType::DsaSha1 => panic!("Not implemented"),
-            &SigType::EcdsaSha256P256 => panic!("Not implemented"),
-            &SigType::EcdsaSha384P384 => panic!("Not implemented"),
-            &SigType::EcdsaSha512P521 => panic!("Not implemented"),
+            &SigType::DsaSha1 => unimplemented!(),
+            &SigType::EcdsaSha256P256 => unimplemented!(),
+            &SigType::EcdsaSha384P384 => unimplemented!(),
+            &SigType::EcdsaSha512P521 => unimplemented!(),
             &SigType::Ed25519 => Ok(SigningPublicKey::Ed25519(EdPublicKey::from_bytes(data)?)),
         }
     }
 
     pub fn from_secret(priv_key: &SigningPrivateKey) -> Self {
         match priv_key {
-            &SigningPrivateKey::DsaSha1 => panic!("Not implemented"),
-            &SigningPrivateKey::EcdsaSha256P256 => panic!("Not implemented"),
-            &SigningPrivateKey::EcdsaSha384P384 => panic!("Not implemented"),
-            &SigningPrivateKey::EcdsaSha512P521 => panic!("Not implemented"),
+            &SigningPrivateKey::DsaSha1 => unimplemented!(),
+            &SigningPrivateKey::EcdsaSha256P256 => unimplemented!(),
+            &SigningPrivateKey::EcdsaSha384P384 => unimplemented!(),
+            &SigningPrivateKey::EcdsaSha512P521 => unimplemented!(),
             &SigningPrivateKey::Ed25519(ref kp) => SigningPublicKey::Ed25519(kp.public.clone()),
         }
     }
 
     pub fn as_bytes(&self) -> &[u8] {
         match self {
-            &SigningPublicKey::DsaSha1 => panic!("Not implemented"),
-            &SigningPublicKey::EcdsaSha256P256 => panic!("Not implemented"),
-            &SigningPublicKey::EcdsaSha384P384 => panic!("Not implemented"),
-            &SigningPublicKey::EcdsaSha512P521 => panic!("Not implemented"),
+            &SigningPublicKey::DsaSha1 => unimplemented!(),
+            &SigningPublicKey::EcdsaSha256P256 => unimplemented!(),
+            &SigningPublicKey::EcdsaSha384P384 => unimplemented!(),
+            &SigningPublicKey::EcdsaSha512P521 => unimplemented!(),
             &SigningPublicKey::Ed25519(ref pk) => pk.as_bytes(),
         }
     }
 
     pub fn verify(&self, message: &[u8], signature: &Signature) -> Result<(), SignatureError> {
         match (self, signature) {
-            (&SigningPublicKey::DsaSha1, &Signature::DsaSha1) => panic!("Not implemented"),
-            (&SigningPublicKey::EcdsaSha256P256, &Signature::EcdsaSha256P256) => {
-                panic!("Not implemented")
-            }
-            (&SigningPublicKey::EcdsaSha384P384, &Signature::EcdsaSha384P384) => {
-                panic!("Not implemented")
-            }
-            (&SigningPublicKey::EcdsaSha512P521, &Signature::EcdsaSha512P521) => {
-                panic!("Not implemented")
-            }
+            (&SigningPublicKey::DsaSha1, &Signature::DsaSha1) => unimplemented!(),
+            (&SigningPublicKey::EcdsaSha256P256, &Signature::EcdsaSha256P256) => unimplemented!(),
+            (&SigningPublicKey::EcdsaSha384P384, &Signature::EcdsaSha384P384) => unimplemented!(),
+            (&SigningPublicKey::EcdsaSha512P521, &Signature::EcdsaSha512P521) => unimplemented!(),
             (&SigningPublicKey::Ed25519(ref pk), &Signature::Ed25519(ref s)) => {
                 pk.verify::<Sha512>(message, s).map_err(|e| e.into())
             }
@@ -308,10 +302,10 @@ impl SigningPrivateKey {
     pub fn with_type(sig_type: &SigType) -> Self {
         let mut rng = rand::thread_rng();
         match sig_type {
-            &SigType::DsaSha1 => panic!("Not implemented"),
-            &SigType::EcdsaSha256P256 => panic!("Not implemented"),
-            &SigType::EcdsaSha384P384 => panic!("Not implemented"),
-            &SigType::EcdsaSha512P521 => panic!("Not implemented"),
+            &SigType::DsaSha1 => unimplemented!(),
+            &SigType::EcdsaSha256P256 => unimplemented!(),
+            &SigType::EcdsaSha384P384 => unimplemented!(),
+            &SigType::EcdsaSha512P521 => unimplemented!(),
             &SigType::Ed25519 => loop {
                 let mut keydata = [0u8; ED_SECRET_KEY_LENGTH];
                 rng.fill(&mut keydata);
@@ -325,10 +319,10 @@ impl SigningPrivateKey {
 
     pub fn from_bytes(sig_type: &SigType, data: &[u8]) -> Result<Self, SignatureError> {
         match sig_type {
-            &SigType::DsaSha1 => panic!("Not implemented"),
-            &SigType::EcdsaSha256P256 => panic!("Not implemented"),
-            &SigType::EcdsaSha384P384 => panic!("Not implemented"),
-            &SigType::EcdsaSha512P521 => panic!("Not implemented"),
+            &SigType::DsaSha1 => unimplemented!(),
+            &SigType::EcdsaSha256P256 => unimplemented!(),
+            &SigType::EcdsaSha384P384 => unimplemented!(),
+            &SigType::EcdsaSha512P521 => unimplemented!(),
             &SigType::Ed25519 => {
                 let secret = EdSecretKey::from_bytes(data)?;
                 let public = EdPublicKey::from_secret::<Sha512>(&secret);
@@ -339,20 +333,20 @@ impl SigningPrivateKey {
 
     pub fn as_bytes(&self) -> &[u8] {
         match self {
-            &SigningPrivateKey::DsaSha1 => panic!("Not implemented"),
-            &SigningPrivateKey::EcdsaSha256P256 => panic!("Not implemented"),
-            &SigningPrivateKey::EcdsaSha384P384 => panic!("Not implemented"),
-            &SigningPrivateKey::EcdsaSha512P521 => panic!("Not implemented"),
+            &SigningPrivateKey::DsaSha1 => unimplemented!(),
+            &SigningPrivateKey::EcdsaSha256P256 => unimplemented!(),
+            &SigningPrivateKey::EcdsaSha384P384 => unimplemented!(),
+            &SigningPrivateKey::EcdsaSha512P521 => unimplemented!(),
             &SigningPrivateKey::Ed25519(ref kp) => kp.secret.as_bytes(),
         }
     }
 
     pub fn sign(&self, msg: &Vec<u8>) -> Signature {
         match self {
-            &SigningPrivateKey::DsaSha1 => panic!("Not implemented"),
-            &SigningPrivateKey::EcdsaSha256P256 => panic!("Not implemented"),
-            &SigningPrivateKey::EcdsaSha384P384 => panic!("Not implemented"),
-            &SigningPrivateKey::EcdsaSha512P521 => panic!("Not implemented"),
+            &SigningPrivateKey::DsaSha1 => unimplemented!(),
+            &SigningPrivateKey::EcdsaSha256P256 => unimplemented!(),
+            &SigningPrivateKey::EcdsaSha384P384 => unimplemented!(),
+            &SigningPrivateKey::EcdsaSha512P521 => unimplemented!(),
             &SigningPrivateKey::Ed25519(ref kp) => Signature::Ed25519(kp.sign::<Sha512>(msg)),
         }
     }
@@ -362,10 +356,10 @@ impl SigningPrivateKey {
 impl Clone for SigningPrivateKey {
     fn clone(&self) -> Self {
         match self {
-            &SigningPrivateKey::DsaSha1 => panic!("Not implemented"),
-            &SigningPrivateKey::EcdsaSha256P256 => panic!("Not implemented"),
-            &SigningPrivateKey::EcdsaSha384P384 => panic!("Not implemented"),
-            &SigningPrivateKey::EcdsaSha512P521 => panic!("Not implemented"),
+            &SigningPrivateKey::DsaSha1 => unimplemented!(),
+            &SigningPrivateKey::EcdsaSha256P256 => unimplemented!(),
+            &SigningPrivateKey::EcdsaSha384P384 => unimplemented!(),
+            &SigningPrivateKey::EcdsaSha512P521 => unimplemented!(),
             &SigningPrivateKey::Ed25519(ref kp) => SigningPrivateKey::Ed25519(EdKeypair {
                 public: kp.public.clone(),
                 secret: EdSecretKey::from_bytes(kp.secret.as_bytes()).unwrap(),
@@ -387,20 +381,20 @@ pub enum Signature {
 impl Signature {
     pub fn from_bytes(sig_type: &SigType, data: &[u8]) -> Result<Self, SignatureError> {
         match sig_type {
-            &SigType::DsaSha1 => panic!("Not implemented"),
-            &SigType::EcdsaSha256P256 => panic!("Not implemented"),
-            &SigType::EcdsaSha384P384 => panic!("Not implemented"),
-            &SigType::EcdsaSha512P521 => panic!("Not implemented"),
+            &SigType::DsaSha1 => unimplemented!(),
+            &SigType::EcdsaSha256P256 => unimplemented!(),
+            &SigType::EcdsaSha384P384 => unimplemented!(),
+            &SigType::EcdsaSha512P521 => unimplemented!(),
             &SigType::Ed25519 => Ok(Signature::Ed25519(EdSignature::from_bytes(data)?)),
         }
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
         match self {
-            &Signature::DsaSha1 => panic!("Not implemented"),
-            &Signature::EcdsaSha256P256 => panic!("Not implemented"),
-            &Signature::EcdsaSha384P384 => panic!("Not implemented"),
-            &Signature::EcdsaSha512P521 => panic!("Not implemented"),
+            &Signature::DsaSha1 => unimplemented!(),
+            &Signature::EcdsaSha256P256 => unimplemented!(),
+            &Signature::EcdsaSha384P384 => unimplemented!(),
+            &Signature::EcdsaSha512P521 => unimplemented!(),
             &Signature::Ed25519(ref s) => Vec::from(&s.to_bytes()[..]),
         }
     }
