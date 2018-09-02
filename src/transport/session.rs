@@ -48,6 +48,10 @@ impl<F> Clone for SessionState<F> {
 }
 
 impl<F> SessionState<F> {
+    fn contains(&self, hash: &Hash) -> bool {
+        self.0.lock().unwrap().sessions.contains_key(hash)
+    }
+
     fn get<G>(&self, hash: &Hash, func: G)
     where
         G: FnOnce(Option<&SessionTx<F>>),
@@ -217,6 +221,10 @@ impl<F> SessionEngine<F> {
             state: self.state.clone(),
             engine: self.inbound.0.clone(),
         }
+    }
+
+    pub fn have_session(&self, hash: &Hash) -> bool {
+        self.state.contains(hash)
     }
 
     pub fn poll<P, Q, R>(

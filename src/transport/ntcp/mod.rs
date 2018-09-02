@@ -18,10 +18,10 @@ use tokio_timer::Deadline;
 
 use super::{
     session::{Session, SessionEngine},
-    Handle,
+    Bid, Handle, Transport,
 };
 use crypto::{Aes256, SigningPrivateKey};
-use data::{I2PString, RouterAddress, RouterIdentity, RouterInfo};
+use data::{Hash, I2PString, RouterAddress, RouterIdentity, RouterInfo};
 use i2np::Message;
 
 mod frame;
@@ -204,6 +204,23 @@ impl Engine {
             tokio::spawn(session.map_err(|_| ()));
             Ok(())
         }))
+    }
+}
+
+impl Transport for Engine {
+    fn bid(&self, hash: &Hash, msg_size: usize) -> Option<Bid> {
+        if msg_size > NTCP_MTU {
+            return None;
+        }
+
+        Some(Bid {
+            bid: if self.session_engine.have_session(hash) {
+                25
+            } else {
+                70
+            },
+            handle: self.session_engine.handle(),
+        })
     }
 }
 
