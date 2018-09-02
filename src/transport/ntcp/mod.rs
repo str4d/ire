@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use tokio;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_codec::{Decoder, Encoder, Framed};
-use tokio_io::{AsyncRead, AsyncWrite, IoFuture};
+use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_timer::Deadline;
 
 use super::{
@@ -235,7 +235,11 @@ impl Engine {
         RouterAddress::new(&NTCP_STYLE, self.addr)
     }
 
-    pub fn listen(&self, own_ri: RouterIdentity, own_key: SigningPrivateKey) -> IoFuture<()> {
+    pub fn listen(
+        &self,
+        own_ri: RouterIdentity,
+        own_key: SigningPrivateKey,
+    ) -> impl Future<Item = (), Error = io::Error> {
         // Bind to the address
         let listener = TcpListener::bind(&self.addr).unwrap();
 
@@ -244,7 +248,7 @@ impl Engine {
         let conns = listener.incoming().zip(session_refs);
 
         // For each incoming connection:
-        Box::new(conns.for_each(move |(conn, session_refs)| {
+        conns.for_each(move |(conn, session_refs)| {
             info!("Incoming connection!");
             // Execute the handshake
             let conn = handshake::IBHandshake::new(conn, own_ri.clone(), own_key.clone());
@@ -255,7 +259,7 @@ impl Engine {
             tokio::spawn(process_conn.map_err(|_| ()));
 
             Ok(())
-        }))
+        })
     }
 
     pub fn connect(
@@ -263,7 +267,7 @@ impl Engine {
         own_ri: RouterIdentity,
         own_key: SigningPrivateKey,
         peer_ri: RouterInfo,
-    ) -> IoFuture<()> {
+    ) -> impl Future<Item = (), Error = io::Error> {
         // TODO return error if there are no valid NTCP addresses (for some reason)
         let addr = peer_ri
             .address(&NTCP_STYLE, |_| true)
@@ -282,11 +286,11 @@ impl Engine {
 
         // Once connected:
         let session_refs = self.session_engine.refs();
-        Box::new(timed.and_then(|(ri, conn)| {
+        timed.and_then(|(ri, conn)| {
             let session = Session::new(ri, conn, session_refs);
             tokio::spawn(session.map_err(|_| ()));
             Ok(())
-        }))
+        })
     }
 }
 

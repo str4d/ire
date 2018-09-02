@@ -44,7 +44,7 @@ use std::time::{Duration, Instant};
 use tokio;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_codec::{Decoder, Encoder, Framed};
-use tokio_io::{AsyncRead, AsyncWrite, IoFuture};
+use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_timer::Deadline;
 
 use super::{
@@ -456,7 +456,7 @@ impl Engine {
         ra
     }
 
-    pub fn listen(&self, own_rid: RouterIdentity) -> IoFuture<()> {
+    pub fn listen(&self, own_rid: RouterIdentity) -> impl Future<Item = (), Error = io::Error> {
         // Bind to the address
         let listener = TcpListener::bind(&self.addr).unwrap();
         let static_key = self.static_private_key.clone();
@@ -468,7 +468,7 @@ impl Engine {
         let conns = listener.incoming().zip(session_refs);
 
         // For each incoming connection:
-        Box::new(conns.for_each(move |(conn, session_refs)| {
+        conns.for_each(move |(conn, session_refs)| {
             info!("Incoming connection!");
             // Execute the handshake
             let conn = handshake::IBHandshake::new(conn, &static_key, &aesobfse_key, &aesobfse_iv);
@@ -478,10 +478,14 @@ impl Engine {
 
             tokio::spawn(process_conn.map_err(|e| error!("Error while listening: {:?}", e)));
             Ok(())
-        }))
+        })
     }
 
-    pub fn connect(&self, own_ri: RouterInfo, peer_ri: RouterInfo) -> io::Result<IoFuture<()>> {
+    pub fn connect(
+        &self,
+        own_ri: RouterInfo,
+        peer_ri: RouterInfo,
+    ) -> io::Result<impl Future<Item = (), Error = io::Error>> {
         // Connect to the peer
         let transport = match handshake::OBHandshake::new(
             |sa| Box::new(TcpStream::connect(sa)),
@@ -499,11 +503,11 @@ impl Engine {
 
         // Once connected:
         let session_refs = self.session_engine.refs();
-        Ok(Box::new(timed.and_then(|(ri, conn)| {
+        Ok(timed.and_then(|(ri, conn)| {
             let session = Session::new(ri, conn, session_refs);
             tokio::spawn(session.map_err(|_| ()));
             Ok(())
-        })))
+        }))
     }
 }
 
