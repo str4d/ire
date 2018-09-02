@@ -8,7 +8,7 @@ extern crate ire;
 extern crate tokio;
 
 use clap::{App, Arg, ArgMatches, SubCommand};
-use futures::Future;
+use futures::{Future, Stream};
 use ire::{data, i2np, transport};
 
 fn main() {
@@ -104,33 +104,18 @@ fn cli_server(args: &ArgMatches) -> i32 {
     let ntcp2_addr = args.value_of("ntcp2").unwrap().parse().unwrap();
     let ntcp2_keyfile = args.value_of("ntcp2Keys").unwrap();
 
-    let ntcp = transport::ntcp::Engine::new(ntcp_addr);
-    let ntcp2 = match transport::ntcp2::Engine::from_file(ntcp2_addr, ntcp2_keyfile) {
-        Ok(ret) => ret,
-        Err(_) => {
-            let ret = transport::ntcp2::Engine::new(ntcp2_addr);
-            ret.to_file(ntcp2_keyfile).unwrap();
-            ret
-        }
-    };
+    let manager = transport::Manager::new(ntcp_addr, ntcp2_addr, ntcp2_keyfile);
 
     let mut ri = data::RouterInfo::new(rsk.rid.clone());
-    ri.set_addresses(vec![ntcp.address(), ntcp2.address()]);
+    ri.set_addresses(manager.addresses());
     ri.sign(&rsk.signing_private_key);
     ri.to_file(args.value_of("routerInfo").unwrap()).unwrap();
 
-    // Accept all incoming sockets
     info!("NTCP:  Listening on {}", ntcp_addr);
-    let listener = ntcp
-        .listen(rsk.rid.clone(), rsk.signing_private_key.clone())
-        .map_err(|e| error!("NTCP listener error: {}", e));
-
     info!("NTCP2: Listening on {}", ntcp2_addr);
-    let listener2 = ntcp2
-        .listen(rsk.rid)
-        .map_err(|e| error!("NTCP2 listener error: {}", e));
+    let listener = manager.listen(rsk);
 
-    tokio::run(ntcp.join4(ntcp2, listener, listener2).map(|_| ()));
+    tokio::run(manager.join(listener.map_err(|_| ())).map(|_| ()));
     0
 }
 
@@ -156,7 +141,13 @@ fn cli_client(args: &ArgMatches) -> i32 {
                     Ok(())
                 })
                 .map_err(|e| error!("Connection error: {}", e));
-            tokio::run(ntcp.join(conn).map(|_| ()));
+            tokio::run(
+                ntcp.into_future()
+                    .map(|_| ())
+                    .map_err(|_| ())
+                    .join(conn)
+                    .map(|_| ()),
+            );
         }
         Some("NTCP2") => {
             let ntcp2 = transport::ntcp2::Engine::new("127.0.0.1:0".parse().unwrap());
@@ -174,7 +165,14 @@ fn cli_client(args: &ArgMatches) -> i32 {
                     Ok(())
                 })
                 .map_err(|e| error!("Connection error: {}", e));
-            tokio::run(ntcp2.join(conn).map(|_| ()));
+            tokio::run(
+                ntcp2
+                    .into_future()
+                    .map(|_| ())
+                    .map_err(|_| ())
+                    .join(conn)
+                    .map(|_| ()),
+            );
         }
         Some(_) => panic!("Unknown transport specified"),
         None => panic!("No transport specified"),

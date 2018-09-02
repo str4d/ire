@@ -8,9 +8,10 @@
 //!
 //! [I2NP specification](https://geti2p.net/spec/i2np)
 
+use cookie_factory::GenError;
 use nom::IResult;
 use std::fmt;
-use std::time::SystemTime;
+use std::iter::repeat;
 
 use crypto::SessionKey;
 use data::{Certificate, Hash, I2PDate, LeaseSet, RouterInfo, SessionTag, TunnelId};
@@ -48,7 +49,7 @@ pub struct BuildResponseRecord {
 // Messages
 //
 
-struct ReplyPath {
+pub struct ReplyPath {
     token: u32,
     tid: TunnelId,
     gateway: Hash,
@@ -65,6 +66,17 @@ pub struct DatabaseStore {
     ds_type: u8,
     reply: Option<ReplyPath>,
     data: DatabaseStoreData,
+}
+
+impl DatabaseStore {
+    pub fn from_ri(ri: RouterInfo, reply: Option<ReplyPath>) -> Self {
+        DatabaseStore {
+            key: ri.router_id.hash(),
+            ds_type: 0,
+            reply,
+            data: DatabaseStoreData::RI(ri),
+        }
+    }
 }
 
 struct DatabaseLookupFlags {
@@ -213,12 +225,36 @@ impl PartialEq for Message {
     }
 }
 
+macro_rules! measure_size {
+    ($gen_item:ident, $item:expr) => {{
+        let mut size;
+        let mut buf_len = 1024;
+        let mut buf = vec![0; buf_len];
+        loop {
+            match frame::$gen_item((&mut buf, 0), $item) {
+                Ok((_, sz)) => {
+                    size = sz;
+                    break;
+                }
+                Err(e) => match e {
+                    GenError::BufferTooSmall(sz) => {
+                        buf.extend(repeat(0).take(sz - buf_len));
+                        buf_len = buf.len();
+                    }
+                    e => panic!("Couldn't serialize Message: {:?}", e),
+                },
+            }
+        }
+        size
+    }};
+}
+
 impl Message {
     pub fn from_payload(payload: MessagePayload) -> Self {
         // TODO Random id, correct expiration
         Message {
             id: 0,
-            expiration: I2PDate::from_system_time(SystemTime::now()),
+            expiration: I2PDate(0x123456787c0),
             payload,
         }
     }
@@ -226,8 +262,46 @@ impl Message {
     pub fn dummy_data() -> Self {
         Message {
             id: 0,
-            expiration: I2PDate::from_system_time(SystemTime::now()),
+            expiration: I2PDate(0x123456787c0),
             payload: MessagePayload::Data(vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]),
         }
+    }
+
+    pub fn size(&self) -> usize {
+        measure_size!(gen_message, self)
+    }
+
+    pub fn ntcp2_size(&self) -> usize {
+        measure_size!(gen_ntcp2_message, self)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use std::time::SystemTime;
+
+    macro_rules! check_size {
+        ($size_func:ident, $header_size:expr) => {{
+            assert_eq!(Message::dummy_data().$size_func(), $header_size + 4 + 10);
+            assert_eq!(
+                Message::from_payload(MessagePayload::DeliveryStatus(DeliveryStatus {
+                    msg_id: 0,
+                    time_stamp: I2PDate::from_system_time(SystemTime::now())
+                })).$size_func(),
+                $header_size + 12
+            );
+        }};
+    }
+
+    #[test]
+    fn message_size() {
+        check_size!(size, 16)
+    }
+
+    #[test]
+    fn message_ntcp2_size() {
+        check_size!(ntcp2_size, 9)
     }
 }

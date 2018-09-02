@@ -1,20 +1,22 @@
 //! Transports used for point-to-point communication between I2P routers.
 
-use futures::{sync::mpsc, Future};
+use futures::{sync::mpsc, Async, Future, Poll, Sink, StartSend, Stream};
 use num::bigint::{BigUint, RandBigInt};
 use rand;
 use std::io;
-use std::iter::repeat;
+use std::iter::{once, repeat};
+use std::net::SocketAddr;
 
 use constants::CryptoConstants;
 use crypto::math::rectify;
 use crypto::SessionKey;
-use data::Hash;
+use data::{Hash, RouterAddress, RouterSecretKeys};
 use i2np::Message;
 
 pub mod ntcp;
 pub mod ntcp2;
 mod session;
+mod util;
 
 /// Shorthand for the transmit half of a Transport-bound message channel.
 type MessageTx = mpsc::UnboundedSender<(Hash, Message)>;
@@ -47,6 +49,121 @@ impl Handle {
         self.timestamp
             .unbounded_send((hash, ts))
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+    }
+}
+
+/// A bid from a transport indicating how much it thinks it will "cost" to
+/// send a particular message.
+struct Bid {
+    bid: u32,
+    handle: Handle,
+}
+
+impl Sink for Bid {
+    type SinkItem = (Hash, Message);
+    type SinkError = ();
+
+    fn start_send(
+        &mut self,
+        message: Self::SinkItem,
+    ) -> StartSend<Self::SinkItem, Self::SinkError> {
+        self.handle.message.start_send(message).map_err(|_| ())
+    }
+
+    fn poll_complete(&mut self) -> Poll<(), Self::SinkError> {
+        self.handle.message.poll_complete().map_err(|_| ())
+    }
+}
+
+/// Coordinates the sending and receiving of frames over the various supported
+/// transports.
+pub struct Manager {
+    ntcp: ntcp::Engine,
+    ntcp2: ntcp2::Engine,
+    select_flag: bool,
+}
+
+trait Transport {
+    fn bid(&self, hash: &Hash, msg_size: usize) -> Option<Bid>;
+}
+
+impl Manager {
+    pub fn new(ntcp_addr: SocketAddr, ntcp2_addr: SocketAddr, ntcp2_keyfile: &str) -> Self {
+        let ntcp = ntcp::Engine::new(ntcp_addr);
+        let ntcp2 = match ntcp2::Engine::from_file(ntcp2_addr, ntcp2_keyfile) {
+            Ok(ret) => ret,
+            Err(_) => {
+                let ret = ntcp2::Engine::new(ntcp2_addr);
+                ret.to_file(ntcp2_keyfile).unwrap();
+                ret
+            }
+        };
+        Manager {
+            ntcp,
+            ntcp2,
+            select_flag: false,
+        }
+    }
+
+    pub fn addresses(&self) -> Vec<RouterAddress> {
+        vec![self.ntcp.address(), self.ntcp2.address()]
+    }
+
+    pub fn listen(&self, rsk: RouterSecretKeys) -> impl Future<Item = (), Error = io::Error> {
+        // Accept all incoming sockets
+        let listener = self
+            .ntcp
+            .listen(rsk.rid.clone(), rsk.signing_private_key.clone())
+            .map_err(|e| {
+                error!("NTCP listener error: {}", e);
+                e
+            });
+
+        let listener2 = self.ntcp2.listen(rsk.rid).map_err(|e| {
+            error!("NTCP2 listener error: {}", e);
+            e
+        });
+
+        listener.join(listener2).map(|_| ())
+    }
+
+    /// Send an I2NP message to a peer over one of our transports.
+    ///
+    /// Returns an Err giving back the message if it cannot be sent over any of
+    /// our transports.
+    pub fn send(
+        &self,
+        hash: Hash,
+        msg: Message,
+    ) -> Result<impl Future<Item = (), Error = ()>, (Hash, Message)> {
+        match once(self.ntcp.bid(&hash, msg.size()))
+            .chain(once(self.ntcp2.bid(&hash, msg.ntcp2_size())))
+            .filter_map(|b| b)
+            .min_by_key(|b| b.bid)
+        {
+            Some(bid) => Ok(bid.send((hash, msg)).map(|_| ())),
+            None => Err((hash, msg)),
+        }
+    }
+}
+
+impl Future for Manager {
+    type Item = ();
+    type Error = ();
+
+    fn poll(&mut self) -> Poll<(), ()> {
+        let mut select = util::Select {
+            stream1: &mut self.ntcp,
+            stream2: &mut self.ntcp2,
+            flag: &mut self.select_flag,
+        };
+        while let Async::Ready(f) = select.poll()? {
+            if let Some((from, msg)) = f {
+                // TODO: Do something
+                debug!("Received message from {}: {:?}", from, msg);
+            }
+        }
+        Ok(Async::NotReady)
     }
 }
 
@@ -98,6 +215,7 @@ mod tests {
     use num::Num;
     use std::io::{self, Read, Write};
     use std::sync::{Arc, Mutex};
+    use tempfile::tempdir;
     use tokio_io::{AsyncRead, AsyncWrite};
 
     use super::*;
@@ -285,6 +403,21 @@ mod tests {
             Ok::<(), ()>(())
         }).wait()
             .unwrap();
+    }
+
+    #[test]
+    fn manager_addresses() {
+        let dir = tempdir().unwrap();
+
+        let ntcp_addr = "127.0.0.1:0".parse().unwrap();
+        let ntcp2_addr = "127.0.0.2:0".parse().unwrap();
+        let ntcp2_keyfile = dir.path().join("test.ntcp2.keys.dat");
+
+        let manager = Manager::new(ntcp_addr, ntcp2_addr, ntcp2_keyfile.to_str().unwrap());
+        let addrs = manager.addresses();
+
+        assert_eq!(addrs[0].addr(), Some(ntcp_addr));
+        assert_eq!(addrs[1].addr(), Some(ntcp2_addr));
     }
 
     #[test]
