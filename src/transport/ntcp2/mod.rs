@@ -40,12 +40,12 @@ use std::hash::Hasher;
 use std::io::{self, Read, Write};
 use std::iter::repeat;
 use std::net::SocketAddr;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio;
 use tokio::net::{TcpListener, TcpStream};
 use tokio_codec::{Decoder, Encoder, Framed};
 use tokio_io::{AsyncRead, AsyncWrite};
-use tokio_timer::Deadline;
+use tokio_timer::Timeout;
 
 use super::{
     session::{EngineTx, SessionContext, SessionEngine, SessionRefs, SessionRx},
@@ -498,7 +498,7 @@ impl Engine {
         };
 
         // Add a timeout
-        let timed = Deadline::new(transport, Instant::now() + Duration::new(10, 0))
+        let timed = Timeout::new(transport, Duration::new(10, 0))
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e));
 
         // Once connected:
