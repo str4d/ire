@@ -98,7 +98,6 @@ impl SigType {
             &EncType::ElGamal2048 => {
                 constants::KEYCERT_SIGKEY_BYTES.saturating_sub(self.pubkey_len() as usize)
             }
-            _ => panic!("Unsupported SigType/EncType combination"),
         }
     }
 
@@ -107,7 +106,6 @@ impl SigType {
             &EncType::ElGamal2048 => {
                 (self.pubkey_len() as usize).saturating_sub(constants::KEYCERT_SIGKEY_BYTES)
             }
-            _ => panic!("Unsupported SigType/EncType combination"),
         }
     }
 }
@@ -136,7 +134,6 @@ impl EncType {
     pub fn extra_data_len(&self, sig_type: &SigType) -> usize {
         match self {
             &EncType::ElGamal2048 => 0,
-            _ => panic!("Unsupported SigType/EncType combination"),
         }
     }
 }
