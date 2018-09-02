@@ -10,7 +10,6 @@ extern crate tokio;
 use clap::{App, Arg, ArgMatches, SubCommand};
 use futures::Future;
 use ire::{data, i2np, transport};
-use std::io;
 
 fn main() {
     env_logger::init();
@@ -150,22 +149,8 @@ fn cli_client(args: &ArgMatches) -> i32 {
             let handle = ntcp.handle();
             let conn = ntcp
                 .connect(rsk.rid, rsk.signing_private_key, peer_ri)
-                .and_then(move |_| {
-                    match handle
-                        .unbounded_send((hash.clone(), transport::ntcp::Frame::TimeSync(42)))
-                    {
-                        Ok(()) => Ok((handle, hash)),
-                        Err(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
-                    }
-                })
-                .and_then(|(handle, hash)| {
-                    handle
-                        .unbounded_send((
-                            hash.clone(),
-                            transport::ntcp::Frame::Standard(i2np::Message::dummy_data()),
-                        ))
-                        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
-                })
+                .and_then(move |_| handle.timestamp(hash.clone(), 42).map(|_| (handle, hash)))
+                .and_then(|(handle, hash)| handle.send(hash, i2np::Message::dummy_data()))
                 .and_then(|_| {
                     info!("Dummy data sent!");
                     Ok(())
@@ -181,21 +166,9 @@ fn cli_client(args: &ArgMatches) -> i32 {
                 .unwrap()
                 .and_then(move |_| {
                     info!("Connection established!");
-                    match handle
-                        .unbounded_send((hash.clone(), vec![transport::ntcp2::Block::DateTime(42)]))
-                    {
-                        Ok(()) => Ok((handle, hash)),
-                        Err(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
-                    }
+                    handle.timestamp(hash.clone(), 42).map(|_| (handle, hash))
                 })
-                .and_then(|(handle, hash)| {
-                    handle
-                        .unbounded_send((
-                            hash.clone(),
-                            vec![transport::ntcp2::Block::Message(i2np::Message::dummy_data())],
-                        ))
-                        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
-                })
+                .and_then(|(handle, hash)| handle.send(hash, i2np::Message::dummy_data()))
                 .and_then(|_| {
                     info!("Dummy data sent!");
                     Ok(())

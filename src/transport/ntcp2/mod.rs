@@ -47,7 +47,10 @@ use tokio_codec::{Decoder, Encoder};
 use tokio_io::IoFuture;
 use tokio_timer::Deadline;
 
-use super::session::{EngineHandle, Session, SessionEngine};
+use super::{
+    session::{Session, SessionEngine},
+    Handle,
+};
 use constants::I2P_BASE64;
 use data::{I2PString, RouterAddress, RouterIdentity, RouterInfo};
 use i2np::Message;
@@ -291,7 +294,7 @@ impl Engine {
         keys.write(&data).map(|_| ())
     }
 
-    pub fn handle(&self) -> EngineHandle<Frame> {
+    pub fn handle(&self) -> Handle {
         self.session_engine.handle()
     }
 
@@ -365,6 +368,13 @@ impl Future for Engine {
     type Error = ();
 
     fn poll(&mut self) -> Poll<(), ()> {
-        self.session_engine.poll()
+        self.session_engine.poll(
+            |msg| vec![Block::Message(msg)],
+            |ts| vec![Block::DateTime(ts)],
+            |from, frame| {
+                // TODO: Do something
+                debug!("Received frame from {}: {:?}", from, frame);
+            },
+        )
     }
 }

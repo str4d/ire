@@ -16,7 +16,10 @@ use tokio_codec::{Decoder, Encoder};
 use tokio_io::IoFuture;
 use tokio_timer::Deadline;
 
-use super::session::{EngineHandle, Session, SessionEngine};
+use super::{
+    session::{Session, SessionEngine},
+    Handle,
+};
 use crypto::{Aes256, SigningPrivateKey};
 use data::{I2PString, RouterAddress, RouterIdentity, RouterInfo};
 use i2np::Message;
@@ -141,7 +144,7 @@ impl Engine {
         }
     }
 
-    pub fn handle(&self) -> EngineHandle<Frame> {
+    pub fn handle(&self) -> Handle {
         self.session_engine.handle()
     }
 
@@ -209,6 +212,13 @@ impl Future for Engine {
     type Error = ();
 
     fn poll(&mut self) -> Poll<(), ()> {
-        self.session_engine.poll()
+        self.session_engine.poll(
+            |msg| Frame::Standard(msg),
+            |ts| Frame::TimeSync(ts),
+            |from, frame| {
+                // TODO: Do something
+                debug!("Received frame from {}: {:?}", from, frame);
+            },
+        )
     }
 }
