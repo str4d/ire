@@ -735,7 +735,7 @@ where
 
         // TODO: Find a way to refer to the codec from here, to deduplicate state
         let codec = OutboundHandshakeCodec::new(dh_key_builder, iv_enc, ri_remote.clone());
-        let mut conn = codec.framed(stream);
+        let conn = codec.framed(stream);
 
         // Part 1
         debug!("Sending SessionRequest");

@@ -589,7 +589,7 @@ mod tests {
         let rsk = RouterSecretKeys::new();
         let mut ri = RouterInfo::new(rsk.rid);
         let style = I2PString::new("test");
-        assert!(ri.address(&style, |ra| true).is_none());
+        assert!(ri.address(&style, |_| true).is_none());
 
         ri.set_addresses(vec![
             RouterAddress::new(&I2PString::new("other"), "127.0.0.1:12345".parse().unwrap()),
@@ -597,7 +597,7 @@ mod tests {
             RouterAddress::new(&style, "127.0.0.1:34567".parse().unwrap()),
         ]);
 
-        let ra = ri.address(&style, |ra| true).unwrap();
+        let ra = ri.address(&style, |_| true).unwrap();
         assert_eq!(ra.transport_style, style);
         assert_eq!(ra.addr().unwrap(), "127.0.0.1:23456".parse().unwrap());
 

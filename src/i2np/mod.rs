@@ -227,7 +227,7 @@ impl PartialEq for Message {
 
 macro_rules! measure_size {
     ($gen_item:ident, $item:expr) => {{
-        let mut size;
+        let size;
         let mut buf_len = 1024;
         let mut buf = vec![0; buf_len];
         loop {

@@ -351,7 +351,7 @@ mod tests {
             );
 
             // Send a message
-            handle.send(hash.clone(), msg);
+            handle.send(hash.clone(), msg).unwrap();
 
             // Check it was received
             assert_eq!(
@@ -386,7 +386,7 @@ mod tests {
 
             // Send a message
             let hash = Hash::from_bytes(&[0; 32]);
-            handle.timestamp(hash.clone(), 42);
+            handle.timestamp(hash.clone(), 42).unwrap();
 
             // Check it was received
             assert_eq!(
