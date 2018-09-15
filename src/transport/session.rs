@@ -105,27 +105,40 @@ impl<F> Stream for SessionRefs<F> {
 // Connection management engine
 //
 
-pub(super) struct SessionEngine<F> {
+pub(super) struct SessionManager<F> {
     state: SessionState<F>,
     handle: Handle,
-    inbound: (EngineTx<F>, EngineRx<F>),
+    inbound: EngineTx<F>,
+}
+
+pub(super) struct SessionEngine<F> {
+    state: SessionState<F>,
+    inbound_msg: EngineRx<F>,
     outbound_msg: MessageRx,
     outbound_ts: TimestampRx,
 }
 
-impl<F> SessionEngine<F> {
-    pub fn new() -> Self {
-        let (message, outbound_msg) = mpsc::unbounded();
-        let (timestamp, outbound_ts) = mpsc::unbounded();
-        SessionEngine {
-            state: SessionState::new(),
-            inbound: mpsc::unbounded(),
+pub(super) fn new_manager<F>() -> (SessionManager<F>, SessionEngine<F>) {
+    let (message, outbound_msg) = mpsc::unbounded();
+    let (timestamp, outbound_ts) = mpsc::unbounded();
+    let (inbound, inbound_msg) = mpsc::unbounded();
+    let state = SessionState::new();
+    (
+        SessionManager {
+            state: state.clone(),
             handle: Handle { message, timestamp },
+            inbound,
+        },
+        SessionEngine {
+            state,
+            inbound_msg,
             outbound_msg,
             outbound_ts,
-        }
-    }
+        },
+    )
+}
 
+impl<F> SessionManager<F> {
     pub fn handle(&self) -> Handle {
         self.handle.clone()
     }
@@ -133,14 +146,16 @@ impl<F> SessionEngine<F> {
     pub(super) fn refs(&self) -> SessionRefs<F> {
         SessionRefs {
             state: self.state.clone(),
-            engine: self.inbound.0.clone(),
+            engine: self.inbound.clone(),
         }
     }
 
     pub fn have_session(&self, hash: &Hash) -> bool {
         self.state.contains(hash)
     }
+}
 
+impl<F> SessionEngine<F> {
     pub fn poll<P, Q>(
         &mut self,
         frame_message: P,
@@ -175,6 +190,6 @@ impl<F> SessionEngine<F> {
         }
 
         // Return the next inbound frame
-        self.inbound.1.poll()
+        self.inbound_msg.poll()
     }
 }
