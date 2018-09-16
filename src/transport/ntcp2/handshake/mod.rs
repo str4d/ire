@@ -528,7 +528,7 @@ where
 mod tests {
     use super::{IBHandshake, IBHandshakeState, OBHandshake, OBHandshakeState};
     use transport::{
-        ntcp2::Engine,
+        ntcp2::Manager,
         tests::{AliceNet, BobNet, NetworkCable},
     };
 
@@ -572,16 +572,16 @@ mod tests {
             bob_aesobfse_iv,
         ) = {
             let sk = RouterSecretKeys::new();
-            let engine = Engine::new("127.0.0.1:0".parse().unwrap());
+            let (manager, _) = Manager::new("127.0.0.1:0".parse().unwrap());
             let mut ri = RouterInfo::new(sk.rid.clone());
-            ri.set_addresses(vec![engine.address()]);
+            ri.set_addresses(vec![manager.address()]);
             ri.sign(&sk.signing_private_key);
             (
                 ri,
-                engine.static_public_key,
-                engine.static_private_key,
+                manager.static_public_key,
+                manager.static_private_key,
                 sk.rid.hash().0,
-                engine.aesobfse_iv,
+                manager.aesobfse_iv,
             )
         };
 

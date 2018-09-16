@@ -17,7 +17,9 @@ use tokio_io::{AsyncRead, AsyncWrite};
 use tokio_timer::Timeout;
 
 use super::{
-    session::{EngineTx, SessionContext, SessionEngine, SessionRefs, SessionRx},
+    session::{
+        self, EngineTx, SessionContext, SessionEngine, SessionManager, SessionRefs, SessionRx,
+    },
     Bid, Handle, Transport,
 };
 use crypto::{Aes256, SigningPrivateKey};
@@ -214,21 +216,29 @@ where
 // Connection management engine
 //
 
-pub struct Engine {
+pub struct Manager {
     addr: SocketAddr,
+    session_manager: SessionManager<Frame>,
+}
+
+pub struct Engine {
     session_engine: SessionEngine<Frame>,
 }
 
-impl Engine {
-    pub fn new(addr: SocketAddr) -> Self {
-        Engine {
-            addr,
-            session_engine: SessionEngine::new(),
-        }
+impl Manager {
+    pub fn new(addr: SocketAddr) -> (Self, Engine) {
+        let (session_manager, session_engine) = session::new_manager();
+        (
+            Manager {
+                addr,
+                session_manager,
+            },
+            Engine { session_engine },
+        )
     }
 
     pub fn handle(&self) -> Handle {
-        self.session_engine.handle()
+        self.session_manager.handle()
     }
 
     pub fn address(&self) -> RouterAddress {
@@ -244,7 +254,7 @@ impl Engine {
         let listener = TcpListener::bind(&self.addr).unwrap();
 
         // Give each incoming connection the references it needs
-        let session_refs = self.session_engine.refs();
+        let session_refs = self.session_manager.refs();
         let conns = listener.incoming().zip(session_refs);
 
         // For each incoming connection:
@@ -285,7 +295,7 @@ impl Engine {
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e));
 
         // Once connected:
-        let session_refs = self.session_engine.refs();
+        let session_refs = self.session_manager.refs();
         timed.and_then(|(ri, conn)| {
             let session = Session::new(ri, conn, session_refs);
             tokio::spawn(session.map_err(|_| ()));
@@ -294,19 +304,19 @@ impl Engine {
     }
 }
 
-impl Transport for Engine {
+impl Transport for Manager {
     fn bid(&self, hash: &Hash, msg_size: usize) -> Option<Bid> {
         if msg_size > NTCP_MTU {
             return None;
         }
 
         Some(Bid {
-            bid: if self.session_engine.have_session(hash) {
+            bid: if self.session_manager.have_session(hash) {
                 25
             } else {
                 70
             },
-            handle: self.session_engine.handle(),
+            handle: self.session_manager.handle(),
         })
     }
 }
@@ -343,7 +353,7 @@ mod tests {
     use std::iter::repeat;
     use tokio_codec::{Decoder, Encoder};
 
-    use super::{frame, Frame, Session, SessionEngine, NTCP_MTU};
+    use super::{frame, session, Frame, Session, NTCP_MTU};
     use data::RouterSecretKeys;
     use i2np::Message;
     use transport::tests::{AliceNet, BobNet, NetworkCable};
@@ -422,12 +432,12 @@ mod tests {
         let alice_net = AliceNet::new(cable.clone());
         let alice_framed = TestCodec {}.framed(alice_net);
 
-        let mut engine = SessionEngine::new();
-        let mut session = Session::new(rid, alice_framed, engine.refs());
+        let (manager, mut engine) = session::new_manager();
+        let mut session = Session::new(rid, alice_framed, manager.refs());
 
         // Run on a task context
         lazy(move || {
-            let handle = engine.handle();
+            let handle = manager.handle();
             handle.send(hash.clone(), Message::dummy_data()).unwrap();
 
             // Check it has not yet been received
@@ -464,8 +474,8 @@ mod tests {
         let bob_net = BobNet::new(cable.clone());
         let bob_framed = TestCodec {}.framed(bob_net);
 
-        let mut engine = SessionEngine::new();
-        let mut session = Session::new(rid, bob_framed, engine.refs());
+        let (manager, mut engine) = session::new_manager();
+        let mut session = Session::new(rid, bob_framed, manager.refs());
 
         // Run on a task context
         lazy(move || {
