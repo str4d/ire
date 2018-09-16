@@ -36,7 +36,7 @@ fn inner_main() -> i32 {
                     ),
                 )
                 .subcommand(
-                    SubCommand::with_name("server")
+                    SubCommand::with_name("router")
                         .arg(
                             Arg::with_name("routerKeys")
                                 .help("Path to the server's router.keys.dat")
@@ -88,7 +88,7 @@ fn inner_main() -> i32 {
     match matches.subcommand() {
         ("cli", Some(matches)) => match matches.subcommand() {
             ("gen", Some(matches)) => cli_gen(matches),
-            ("server", Some(matches)) => cli_server(matches),
+            ("router", Some(matches)) => cli_router(matches),
             ("client", Some(matches)) => cli_client(matches),
             (&_, _) => panic!("Invalid matches for cli subcommand"),
         },
@@ -102,7 +102,7 @@ fn cli_gen(args: &ArgMatches) -> i32 {
     0
 }
 
-fn cli_server(args: &ArgMatches) -> i32 {
+fn cli_router(args: &ArgMatches) -> i32 {
     let config = Config::new(
         args.value_of("routerKeys").unwrap().to_owned(),
         args.value_of("routerInfo").unwrap().to_owned(),

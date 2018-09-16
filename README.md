@@ -26,37 +26,39 @@ and implemented.
   - [x] Message parsing
   - [ ] Message handling
 - Transports
-  - [ ] Transport manager
+  - [x] Transport manager
   - [ ] NTCP
     - [x] Handshake
-    - [ ] Connection tracking
+    - [x] Session tracking
+    - [ ] Automatic session creation
   - [ ] NTCP2
     - [x] Handshake
-    - [ ] Connection tracking
+    - [x] Session tracking
+    - [ ] Automatic session creation
   - [ ] SSU
 
 ## Usage
 
-The binary implements a basic client and server that can be used to test the NTCP
-handshake:
+The binary implements a router, along with a basic client that can be used to
+test the various transports:
 
-1. Generate keys for the server and client:
+1. Generate keys for the router and client:
 
   ```bash
-$ cargo run --release cli gen server.router.keys.dat
+$ cargo run --release cli gen router.keys.dat
 $ cargo run --release cli gen client.router.keys.dat
   ```
 
-2. Run the server:
+2. Run the router:
 
   ```bash
-$ RUST_LOG=ire=debug cargo run --release cli server server.router.keys.dat server.router.info 127.0.0.1:12345 127.0.0.1:12346
+$ RUST_LOG=ire=debug cargo run --release cli router router.keys.dat router.info 127.0.0.1:12345 127.0.0.1:12346 ntcp2.keys.dat
   ```
 
 3. Run a client:
 
   ```bash
-$ RUST_LOG=ire=debug cargo run --release cli client client.router.keys.dat server.router.info [NTCP|NTCP2]
+$ RUST_LOG=ire=debug cargo run --release cli client client.router.keys.dat router.info [NTCP|NTCP2]
   ```
 
 ## Code of Conduct
