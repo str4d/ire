@@ -383,17 +383,20 @@ where
 // Connection management engine
 //
 
-pub struct Engine {
+pub struct Manager {
     addr: SocketAddr,
     static_private_key: Vec<u8>,
     static_public_key: Vec<u8>,
     aesobfse_iv: [u8; 16],
     session_manager: SessionManager<Block>,
+}
+
+pub struct Engine {
     session_engine: SessionEngine<Block>,
 }
 
-impl Engine {
-    pub fn new(addr: SocketAddr) -> Self {
+impl Manager {
+    pub fn new(addr: SocketAddr) -> (Self, Engine) {
         let builder: Builder = Builder::new(NTCP2_NOISE_PROTOCOL_NAME.parse().unwrap());
         let dh = builder.generate_keypair().unwrap();
 
@@ -403,17 +406,19 @@ impl Engine {
 
         let (session_manager, session_engine) = session::new_manager();
 
-        Engine {
-            addr,
-            static_private_key: dh.private,
-            static_public_key: dh.public,
-            aesobfse_iv,
-            session_manager,
-            session_engine,
-        }
+        (
+            Manager {
+                addr,
+                static_private_key: dh.private,
+                static_public_key: dh.public,
+                aesobfse_iv,
+                session_manager,
+            },
+            Engine { session_engine },
+        )
     }
 
-    pub fn from_file(addr: SocketAddr, path: &str) -> io::Result<Self> {
+    pub fn from_file(addr: SocketAddr, path: &str) -> io::Result<(Self, Engine)> {
         let mut keys = File::open(path)?;
         let mut data: Vec<u8> = Vec::new();
         keys.read_to_end(&mut data)?;
@@ -428,14 +433,16 @@ impl Engine {
 
         let (session_manager, session_engine) = session::new_manager();
 
-        Ok(Engine {
-            addr,
-            static_private_key,
-            static_public_key,
-            aesobfse_iv,
-            session_manager,
-            session_engine,
-        })
+        Ok((
+            Manager {
+                addr,
+                static_private_key,
+                static_public_key,
+                aesobfse_iv,
+                session_manager,
+            },
+            Engine { session_engine },
+        ))
     }
 
     pub fn to_file(&self, path: &str) -> io::Result<()> {
@@ -520,7 +527,7 @@ impl Engine {
     }
 }
 
-impl Transport for Engine {
+impl Transport for Manager {
     fn bid(&self, hash: &Hash, msg_size: usize) -> Option<Bid> {
         if msg_size > NTCP2_MTU {
             return None;

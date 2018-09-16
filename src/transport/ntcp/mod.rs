@@ -216,20 +216,25 @@ where
 // Connection management engine
 //
 
-pub struct Engine {
+pub struct Manager {
     addr: SocketAddr,
     session_manager: SessionManager<Frame>,
+}
+
+pub struct Engine {
     session_engine: SessionEngine<Frame>,
 }
 
-impl Engine {
-    pub fn new(addr: SocketAddr) -> Self {
+impl Manager {
+    pub fn new(addr: SocketAddr) -> (Self, Engine) {
         let (session_manager, session_engine) = session::new_manager();
-        Engine {
-            addr,
-            session_manager,
-            session_engine,
-        }
+        (
+            Manager {
+                addr,
+                session_manager,
+            },
+            Engine { session_engine },
+        )
     }
 
     pub fn handle(&self) -> Handle {
@@ -299,7 +304,7 @@ impl Engine {
     }
 }
 
-impl Transport for Engine {
+impl Transport for Manager {
     fn bid(&self, hash: &Hash, msg_size: usize) -> Option<Bid> {
         if msg_size > NTCP_MTU {
             return None;

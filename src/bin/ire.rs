@@ -104,7 +104,7 @@ fn cli_server(args: &ArgMatches) -> i32 {
     let ntcp2_addr = args.value_of("ntcp2").unwrap().parse().unwrap();
     let ntcp2_keyfile = args.value_of("ntcp2Keys").unwrap();
 
-    let manager = transport::Manager::new(ntcp_addr, ntcp2_addr, ntcp2_keyfile);
+    let mut manager = transport::Manager::new(ntcp_addr, ntcp2_addr, ntcp2_keyfile);
 
     let mut ri = data::RouterInfo::new(rsk.rid.clone());
     ri.set_addresses(manager.addresses());
@@ -115,7 +115,7 @@ fn cli_server(args: &ArgMatches) -> i32 {
     info!("NTCP2: Listening on {}", ntcp2_addr);
     let listener = manager.listen(rsk);
 
-    tokio::run(manager.join(listener.map_err(|_| ())).map(|_| ()));
+    tokio::run(listener.map_err(|_| ()));
     0
 }
 
@@ -130,7 +130,7 @@ fn cli_client(args: &ArgMatches) -> i32 {
     info!("Connecting to {}", peer_ri.router_id.hash());
     match args.value_of("transport") {
         Some("NTCP") => {
-            let ntcp = transport::ntcp::Engine::new("127.0.0.1:0".parse().unwrap());
+            let (ntcp, engine) = transport::ntcp::Manager::new("127.0.0.1:0".parse().unwrap());
             let handle = ntcp.handle();
             let conn = ntcp
                 .connect(rsk.rid, rsk.signing_private_key, peer_ri)
@@ -142,7 +142,8 @@ fn cli_client(args: &ArgMatches) -> i32 {
                 })
                 .map_err(|e| error!("Connection error: {}", e));
             tokio::run(
-                ntcp.into_future()
+                engine
+                    .into_future()
                     .map(|_| ())
                     .map_err(|_| ())
                     .join(conn)
@@ -150,7 +151,7 @@ fn cli_client(args: &ArgMatches) -> i32 {
             );
         }
         Some("NTCP2") => {
-            let ntcp2 = transport::ntcp2::Engine::new("127.0.0.1:0".parse().unwrap());
+            let (ntcp2, engine) = transport::ntcp2::Manager::new("127.0.0.1:0".parse().unwrap());
             let handle = ntcp2.handle();
             let conn = ntcp2
                 .connect(ri, peer_ri)
@@ -166,7 +167,7 @@ fn cli_client(args: &ArgMatches) -> i32 {
                 })
                 .map_err(|e| error!("Connection error: {}", e));
             tokio::run(
-                ntcp2
+                engine
                     .into_future()
                     .map(|_| ())
                     .map_err(|_| ())

@@ -78,6 +78,12 @@ impl Sink for Bid {
 /// Coordinates the sending and receiving of frames over the various supported
 /// transports.
 pub struct Manager {
+    ntcp: ntcp::Manager,
+    ntcp2: ntcp2::Manager,
+    engine: Option<Engine>,
+}
+
+pub struct Engine {
     ntcp: ntcp::Engine,
     ntcp2: ntcp2::Engine,
     select_flag: bool,
@@ -89,19 +95,24 @@ trait Transport {
 
 impl Manager {
     pub fn new(ntcp_addr: SocketAddr, ntcp2_addr: SocketAddr, ntcp2_keyfile: &str) -> Self {
-        let ntcp = ntcp::Engine::new(ntcp_addr);
-        let ntcp2 = match ntcp2::Engine::from_file(ntcp2_addr, ntcp2_keyfile) {
-            Ok(ret) => ret,
-            Err(_) => {
-                let ret = ntcp2::Engine::new(ntcp2_addr);
-                ret.to_file(ntcp2_keyfile).unwrap();
-                ret
-            }
-        };
+        let (ntcp_manager, ntcp_engine) = ntcp::Manager::new(ntcp_addr);
+        let (ntcp2_manager, ntcp2_engine) =
+            match ntcp2::Manager::from_file(ntcp2_addr, ntcp2_keyfile) {
+                Ok(ret) => ret,
+                Err(_) => {
+                    let (ntcp2_manager, ntcp2_engine) = ntcp2::Manager::new(ntcp2_addr);
+                    ntcp2_manager.to_file(ntcp2_keyfile).unwrap();
+                    (ntcp2_manager, ntcp2_engine)
+                }
+            };
         Manager {
-            ntcp,
-            ntcp2,
-            select_flag: false,
+            ntcp: ntcp_manager,
+            ntcp2: ntcp2_manager,
+            engine: Some(Engine {
+                ntcp: ntcp_engine,
+                ntcp2: ntcp2_engine,
+                select_flag: false,
+            }),
         }
     }
 
@@ -109,8 +120,9 @@ impl Manager {
         vec![self.ntcp.address(), self.ntcp2.address()]
     }
 
-    pub fn listen(&self, rsk: RouterSecretKeys) -> impl Future<Item = (), Error = io::Error> {
-        // Accept all incoming sockets
+    pub fn listen(&mut self, rsk: RouterSecretKeys) -> impl Future<Item = (), Error = io::Error> {
+        let engine = self.engine.take().expect("Cannot call listen() twice");
+
         let listener = self
             .ntcp
             .listen(rsk.rid.clone(), rsk.signing_private_key.clone())
@@ -124,7 +136,10 @@ impl Manager {
             e
         });
 
-        listener.join(listener2).map(|_| ())
+        engine
+            .map_err(|_| io::Error::new(io::ErrorKind::Other, "Error in transport::Engine"))
+            .join3(listener, listener2)
+            .map(|_| ())
     }
 
     /// Send an I2NP message to a peer over one of our transports.
@@ -147,7 +162,7 @@ impl Manager {
     }
 }
 
-impl Future for Manager {
+impl Future for Engine {
     type Item = ();
     type Error = ();
 
