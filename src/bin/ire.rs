@@ -9,7 +9,7 @@ extern crate tokio;
 
 use clap::{App, Arg, ArgMatches, SubCommand};
 use futures::{Future, Stream};
-use ire::{data, i2np, transport};
+use ire::{data, i2np, router::types::CommSystem, transport};
 
 fn main() {
     env_logger::init();
@@ -113,9 +113,9 @@ fn cli_server(args: &ArgMatches) -> i32 {
 
     info!("NTCP:  Listening on {}", ntcp_addr);
     info!("NTCP2: Listening on {}", ntcp2_addr);
-    let listener = manager.listen(rsk);
+    let runner = manager.start(rsk);
 
-    tokio::run(listener.map_err(|_| ()));
+    tokio::run(runner.map_err(|_| ()));
     0
 }
 
