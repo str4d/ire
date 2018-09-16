@@ -4,7 +4,13 @@ use std::sync::{Arc, Mutex};
 
 use data::RouterSecretKeys;
 
+mod builder;
+mod config;
+mod mock;
 pub mod types;
+
+pub use self::builder::Builder;
+pub use self::config::Config;
 
 /// An I2P router.
 pub struct Router {
