@@ -241,6 +241,7 @@ impl RouterIdentity {
 }
 
 /// Key material for a RouterIdentity.
+#[derive(Clone)]
 pub struct RouterSecretKeys {
     pub rid: RouterIdentity,
     private_key: PrivateKey,
