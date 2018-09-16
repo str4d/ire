@@ -473,6 +473,8 @@ impl Manager {
     }
 
     pub fn listen(&self, own_rid: RouterIdentity) -> impl Future<Item = (), Error = io::Error> {
+        info!("Listening on {}", self.addr);
+
         // Bind to the address
         let listener = TcpListener::bind(&self.addr).unwrap();
         let static_key = self.static_private_key.clone();

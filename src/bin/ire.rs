@@ -9,7 +9,11 @@ extern crate tokio;
 
 use clap::{App, Arg, ArgMatches, SubCommand};
 use futures::{Future, Stream};
-use ire::{data, i2np, transport};
+use ire::{
+    data, i2np,
+    router::{Builder, Config},
+    transport,
+};
 
 fn main() {
     env_logger::init();
@@ -32,7 +36,7 @@ fn inner_main() -> i32 {
                     ),
                 )
                 .subcommand(
-                    SubCommand::with_name("server")
+                    SubCommand::with_name("router")
                         .arg(
                             Arg::with_name("routerKeys")
                                 .help("Path to the server's router.keys.dat")
@@ -84,7 +88,7 @@ fn inner_main() -> i32 {
     match matches.subcommand() {
         ("cli", Some(matches)) => match matches.subcommand() {
             ("gen", Some(matches)) => cli_gen(matches),
-            ("server", Some(matches)) => cli_server(matches),
+            ("router", Some(matches)) => cli_router(matches),
             ("client", Some(matches)) => cli_client(matches),
             (&_, _) => panic!("Invalid matches for cli subcommand"),
         },
@@ -98,24 +102,20 @@ fn cli_gen(args: &ArgMatches) -> i32 {
     0
 }
 
-fn cli_server(args: &ArgMatches) -> i32 {
-    let rsk = data::RouterSecretKeys::from_file(args.value_of("routerKeys").unwrap()).unwrap();
-    let ntcp_addr = args.value_of("ntcp").unwrap().parse().unwrap();
-    let ntcp2_addr = args.value_of("ntcp2").unwrap().parse().unwrap();
-    let ntcp2_keyfile = args.value_of("ntcp2Keys").unwrap();
+fn cli_router(args: &ArgMatches) -> i32 {
+    let config = Config::new(
+        args.value_of("routerKeys").unwrap().to_owned(),
+        args.value_of("routerInfo").unwrap().to_owned(),
+        args.value_of("ntcp").unwrap().parse().unwrap(),
+        args.value_of("ntcp2").unwrap().parse().unwrap(),
+        args.value_of("ntcp2Keys").unwrap().to_owned(),
+    );
 
-    let mut manager = transport::Manager::new(ntcp_addr, ntcp2_addr, ntcp2_keyfile);
+    let mut r = Builder::from_config(config).unwrap().build().unwrap();
 
-    let mut ri = data::RouterInfo::new(rsk.rid.clone());
-    ri.set_addresses(manager.addresses());
-    ri.sign(&rsk.signing_private_key);
-    ri.to_file(args.value_of("routerInfo").unwrap()).unwrap();
+    let runner = r.start();
 
-    info!("NTCP:  Listening on {}", ntcp_addr);
-    info!("NTCP2: Listening on {}", ntcp2_addr);
-    let listener = manager.listen(rsk);
-
-    tokio::run(listener.map_err(|_| ()));
+    tokio::run(runner.map_err(|_| ()));
     0
 }
 

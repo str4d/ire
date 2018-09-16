@@ -250,6 +250,8 @@ impl Manager {
         own_ri: RouterIdentity,
         own_key: SigningPrivateKey,
     ) -> impl Future<Item = (), Error = io::Error> {
+        info!("Listening on {}", self.addr);
+
         // Bind to the address
         let listener = TcpListener::bind(&self.addr).unwrap();
 

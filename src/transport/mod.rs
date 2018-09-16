@@ -6,12 +6,14 @@ use rand;
 use std::io;
 use std::iter::{once, repeat};
 use std::net::SocketAddr;
+use tokio_io::IoFuture;
 
 use constants::CryptoConstants;
 use crypto::math::rectify;
 use crypto::SessionKey;
 use data::{Hash, RouterAddress, RouterSecretKeys};
 use i2np::Message;
+use router::types::CommSystem;
 
 pub mod ntcp;
 pub mod ntcp2;
@@ -115,12 +117,14 @@ impl Manager {
             }),
         }
     }
+}
 
-    pub fn addresses(&self) -> Vec<RouterAddress> {
+impl CommSystem for Manager {
+    fn addresses(&self) -> Vec<RouterAddress> {
         vec![self.ntcp.address(), self.ntcp2.address()]
     }
 
-    pub fn listen(&mut self, rsk: RouterSecretKeys) -> impl Future<Item = (), Error = io::Error> {
+    fn start(&mut self, rsk: RouterSecretKeys) -> IoFuture<()> {
         let engine = self.engine.take().expect("Cannot call listen() twice");
 
         let listener = self
@@ -136,27 +140,27 @@ impl Manager {
             e
         });
 
-        engine
-            .map_err(|_| io::Error::new(io::ErrorKind::Other, "Error in transport::Engine"))
-            .join3(listener, listener2)
-            .map(|_| ())
+        Box::new(
+            engine
+                .map_err(|_| io::Error::new(io::ErrorKind::Other, "Error in transport::Engine"))
+                .join3(listener, listener2)
+                .map(|_| ()),
+        )
     }
 
     /// Send an I2NP message to a peer over one of our transports.
     ///
     /// Returns an Err giving back the message if it cannot be sent over any of
     /// our transports.
-    pub fn send(
-        &self,
-        hash: Hash,
-        msg: Message,
-    ) -> Result<impl Future<Item = (), Error = ()>, (Hash, Message)> {
+    fn send(&self, hash: Hash, msg: Message) -> Result<IoFuture<()>, (Hash, Message)> {
         match once(self.ntcp.bid(&hash, msg.size()))
             .chain(once(self.ntcp2.bid(&hash, msg.ntcp2_size())))
             .filter_map(|b| b)
             .min_by_key(|b| b.bid)
         {
-            Some(bid) => Ok(bid.send((hash, msg)).map(|_| ())),
+            Some(bid) => Ok(Box::new(bid.send((hash, msg)).map(|_| ()).map_err(|_| {
+                io::Error::new(io::ErrorKind::Other, "Error in transport::Engine")
+            }))),
             None => Err((hash, msg)),
         }
     }
