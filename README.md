@@ -45,20 +45,20 @@ test the various transports:
 1. Generate keys for the router and client:
 
   ```bash
-$ cargo run --release cli gen router.keys.dat
-$ cargo run --release cli gen client.router.keys.dat
+$ cargo run --features cli --release cli gen router.keys.dat
+$ cargo run --features cli --release cli gen client.router.keys.dat
   ```
 
 2. Run the router:
 
   ```bash
-$ RUST_LOG=ire=debug cargo run --release cli router router.keys.dat router.info 127.0.0.1:12345 127.0.0.1:12346 ntcp2.keys.dat
+$ RUST_LOG=ire=debug cargo run --features cli --release cli router router.keys.dat router.info 127.0.0.1:12345 127.0.0.1:12346 ntcp2.keys.dat
   ```
 
 3. Run a client:
 
   ```bash
-$ RUST_LOG=ire=debug cargo run --release cli client client.router.keys.dat router.info [NTCP|NTCP2]
+$ RUST_LOG=ire=debug cargo run --features cli --release cli client client.router.keys.dat router.info [NTCP|NTCP2]
   ```
 
 ## Code of Conduct
