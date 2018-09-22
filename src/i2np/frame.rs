@@ -489,7 +489,8 @@ fn gen_tunnel_data<'a>(
 named!(
     tunnel_gateway<MessagePayload>,
     do_parse!(
-        tid: tunnel_id >> data: length_bytes!(be_u16)
+        tid: tunnel_id
+            >> data: length_bytes!(be_u16)
             >> (MessagePayload::TunnelGateway(TunnelGateway {
                 tid,
                 data: Vec::from(data),
@@ -586,8 +587,7 @@ fn variable_tunnel_build<'a>(input: &'a [u8]) -> IResult<&'a [u8], MessagePayloa
                     let mut x = [0u8; 528];
                     x.copy_from_slice(s);
                     x
-                })
-                .collect(),
+                }).collect(),
         ),
     ))
 }
@@ -616,8 +616,7 @@ fn variable_tunnel_build_reply<'a>(input: &'a [u8]) -> IResult<&'a [u8], Message
                     let mut x = [0u8; 528];
                     x.copy_from_slice(s);
                     x
-                })
-                .collect(),
+                }).collect(),
         ),
     ))
 }
@@ -895,9 +894,7 @@ mod tests {
                 expiration: I2PDate::from_system_time(UNIX_EPOCH),
                 payload: MessagePayload::Data(vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]),
             },
-            [
-                20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
-            ]
+            [20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 10, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9,]
         );
 
         eval!(

@@ -358,7 +358,8 @@ fn gen_destination<'a>(
             >> gen_cond!(
                 dest.padding.is_some(),
                 gen_slice!(dest.padding.as_ref().unwrap())
-            ) >> gen_truncated_signing_key(&dest.signing_key)
+            )
+            >> gen_truncated_signing_key(&dest.signing_key)
             >> gen_certificate(&dest.certificate)
     )
 }

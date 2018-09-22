@@ -8,7 +8,7 @@ use ed25519_dalek::Signature as EdSignature;
 use ed25519_dalek::SignatureError as EdSignatureError;
 use ed25519_dalek::SECRET_KEY_LENGTH as ED_SECRET_KEY_LENGTH;
 use nom::Err;
-use num::BigUint;
+use num_bigint::BigUint;
 use rand::{self, Rng};
 use sha2::Sha512;
 use std::fmt;

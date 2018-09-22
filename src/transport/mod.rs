@@ -1,7 +1,7 @@
 //! Transports used for point-to-point communication between I2P routers.
 
 use futures::{sync::mpsc, Async, Future, Poll, Sink, StartSend, Stream};
-use num::bigint::{BigUint, RandBigInt};
+use num_bigint::{BigUint, RandBigInt};
 use rand;
 use std::io;
 use std::iter::{once, repeat};
@@ -231,7 +231,7 @@ impl DHSessionKeyBuilder {
 #[cfg(test)]
 mod tests {
     use futures::{lazy, Async, Stream};
-    use num::Num;
+    use num_traits::Num;
     use std::io::{self, Read, Write};
     use std::sync::{Arc, Mutex};
     use tempfile::tempdir;
@@ -386,7 +386,7 @@ mod tests {
 
             Ok::<(), ()>(())
         }).wait()
-            .unwrap();
+        .unwrap();
     }
 
     #[test]
@@ -421,7 +421,7 @@ mod tests {
 
             Ok::<(), ()>(())
         }).wait()
-            .unwrap();
+        .unwrap();
     }
 
     #[test]

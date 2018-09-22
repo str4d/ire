@@ -752,8 +752,7 @@ mod tests {
                             &bob_aesobfse_key,
                             &bob_aesobfse_iv,
                         )
-                    })
-                    .and_then(|(ri, conn)| {
+                    }).and_then(|(ri, conn)| {
                         let drain = Drain { sock: conn };
                         drain
                             .map(|_| ())
@@ -766,13 +765,12 @@ mod tests {
                     alice_ri.clone(),
                     bob_ri.clone(),
                 ).unwrap()
-                    .and_then(move |(ri, conn)| Transfer {
-                        sock: conn,
-                        rem: MB,
-                        chunk: write_size,
-                        frame_size,
-                    })
-                    .map_err(|e| panic!("client err: {:?}", e));
+                .and_then(move |(ri, conn)| Transfer {
+                    sock: conn,
+                    rem: MB,
+                    chunk: write_size,
+                    frame_size,
+                }).map_err(|e| panic!("client err: {:?}", e));
 
                 server.join(client).wait().unwrap();
             });

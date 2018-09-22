@@ -22,13 +22,15 @@ extern crate ed25519_dalek;
 extern crate flate2;
 extern crate i2p_snow;
 extern crate itertools;
-extern crate num;
+extern crate num_bigint;
+extern crate num_traits;
 extern crate rand;
 extern crate sha2;
 extern crate siphasher;
-extern crate tokio;
 extern crate tokio_codec;
+extern crate tokio_executor;
 extern crate tokio_io;
+extern crate tokio_tcp;
 extern crate tokio_timer;
 
 #[cfg(test)]
