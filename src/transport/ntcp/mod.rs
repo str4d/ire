@@ -10,10 +10,10 @@ use std::io;
 use std::iter::repeat;
 use std::net::SocketAddr;
 use std::time::Duration;
-use tokio;
-use tokio::net::{TcpListener, TcpStream};
 use tokio_codec::{Decoder, Encoder, Framed};
+use tokio_executor::spawn;
 use tokio_io::{AsyncRead, AsyncWrite};
+use tokio_tcp::{TcpListener, TcpStream};
 use tokio_timer::Timeout;
 
 use super::{
@@ -268,7 +268,7 @@ impl Manager {
             // Once connected:
             let process_conn = conn.and_then(|(ri, conn)| Session::new(ri, conn, session_refs));
 
-            tokio::spawn(process_conn.map_err(|_| ()));
+            spawn(process_conn.map_err(|_| ()));
 
             Ok(())
         })
@@ -300,7 +300,7 @@ impl Manager {
         let session_refs = self.session_manager.refs();
         timed.and_then(|(ri, conn)| {
             let session = Session::new(ri, conn, session_refs);
-            tokio::spawn(session.map_err(|_| ()));
+            spawn(session.map_err(|_| ()));
             Ok(())
         })
     }

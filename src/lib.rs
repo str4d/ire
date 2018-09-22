@@ -26,9 +26,10 @@ extern crate num;
 extern crate rand;
 extern crate sha2;
 extern crate siphasher;
-extern crate tokio;
 extern crate tokio_codec;
+extern crate tokio_executor;
 extern crate tokio_io;
+extern crate tokio_tcp;
 extern crate tokio_timer;
 
 #[cfg(test)]
