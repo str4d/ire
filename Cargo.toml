@@ -19,7 +19,6 @@ bytes = "0.4"
 clap = { version = "2.32", optional = true }
 cookie-factory = "0.2"
 data-encoding = "2.1"
-ed25519-dalek = "0.8"
 env_logger = { version = "0.5", optional = true }
 flate2 = "1.0"
 futures = "0.1"
@@ -32,6 +31,8 @@ num-bigint = { version = "0.2", features = ["rand"] }
 num-traits = "0.2"
 rand = "0.5"
 sha2 = "0.7"
+signatory = { version = "0.9.0-alpha3", features = ["ed25519"] }
+signatory-dalek = "0.9.0-alpha3"
 siphasher = "0.2"
 tokio = { version = "0.1", optional = true }
 tokio-codec = "0.1"

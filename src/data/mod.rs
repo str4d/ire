@@ -16,8 +16,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use constants;
 use crypto::{
-    EncType, PrivateKey, PublicKey, SigType, Signature, SignatureError, SigningPrivateKey,
-    SigningPublicKey,
+    self, EncType, PrivateKey, PublicKey, SigType, Signature, SigningPrivateKey, SigningPublicKey,
 };
 
 pub(crate) mod frame;
@@ -181,7 +180,7 @@ impl RouterIdentity {
 
     fn from_secrets(private_key: &PrivateKey, signing_private_key: &SigningPrivateKey) -> Self {
         let public_key = PublicKey::from_secret(private_key);
-        let signing_key = SigningPublicKey::from_secret(signing_private_key);
+        let signing_key = SigningPublicKey::from_secret(signing_private_key).unwrap();
         let certificate = match signing_key.sig_type() {
             SigType::DsaSha1 => Certificate::Null,
             SigType::Ed25519 => Certificate::Key(KeyCertificate {
@@ -503,16 +502,16 @@ impl RouterInfo {
 
     pub fn sign(&mut self, spk: &SigningPrivateKey) {
         let sig_msg = self.signature_bytes();
-        self.signature = Some(spk.sign(&sig_msg));
+        self.signature = Some(spk.sign(&sig_msg).unwrap());
     }
 
-    pub fn verify(&self) -> Result<(), SignatureError> {
+    pub fn verify(&self) -> Result<(), crypto::Error> {
         match &self.signature.as_ref() {
             &Some(s) => {
                 let sig_msg = self.signature_bytes();
                 self.router_id.signing_key.verify(&sig_msg, s)
             }
-            &None => Err(SignatureError::NoSignature),
+            &None => Err(crypto::Error::NoSignature),
         }
     }
 }
