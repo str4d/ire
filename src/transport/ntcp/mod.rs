@@ -464,7 +464,7 @@ mod tests {
 
             Ok::<(), ()>(())
         }).wait()
-            .unwrap();
+        .unwrap();
     }
 
     #[test]
@@ -506,6 +506,6 @@ mod tests {
 
             Ok::<(), ()>(())
         }).wait()
-            .unwrap();
+        .unwrap();
     }
 }

@@ -34,56 +34,47 @@ fn inner_main() -> i32 {
                             .help("Path to write the router.keys.dat to")
                             .required(true),
                     ),
-                )
-                .subcommand(
+                ).subcommand(
                     SubCommand::with_name("router")
                         .arg(
                             Arg::with_name("routerKeys")
                                 .help("Path to the server's router.keys.dat")
                                 .required(true),
-                        )
-                        .arg(
+                        ).arg(
                             Arg::with_name("routerInfo")
                                 .help("Path to write the router.info to")
                                 .required(true),
-                        )
-                        .arg(
+                        ).arg(
                             Arg::with_name("ntcp")
                                 .help("Address:Port to bind NTCP to")
                                 .required(true),
-                        )
-                        .arg(
+                        ).arg(
                             Arg::with_name("ntcp2")
                                 .help("Address:Port to bind NTCP2 to")
                                 .required(true),
-                        )
-                        .arg(
+                        ).arg(
                             Arg::with_name("ntcp2Keys")
                                 .help("Path to the server's NTCP2 keys")
                                 .required(true),
                         ),
-                )
-                .subcommand(
+                ).subcommand(
                     SubCommand::with_name("client")
                         .arg(
                             Arg::with_name("routerKeys")
                                 .help("Path to the client's router.keys.dat")
                                 .required(true),
-                        )
-                        .arg(
+                        ).arg(
                             Arg::with_name("peerInfo")
                                 .help("Path to the peer's router.info file")
                                 .required(true),
-                        )
-                        .arg(
+                        ).arg(
                             Arg::with_name("transport")
                                 .help("Transport to test")
                                 .possible_values(&["NTCP", "NTCP2"])
                                 .required(true),
                         ),
                 ),
-        )
-        .get_matches();
+        ).get_matches();
 
     match matches.subcommand() {
         ("cli", Some(matches)) => match matches.subcommand() {
@@ -139,8 +130,7 @@ fn cli_client(args: &ArgMatches) -> i32 {
                 .and_then(|_| {
                     info!("Dummy data sent!");
                     Ok(())
-                })
-                .map_err(|e| error!("Connection error: {}", e));
+                }).map_err(|e| error!("Connection error: {}", e));
             tokio::run(
                 engine
                     .into_future()
@@ -159,13 +149,11 @@ fn cli_client(args: &ArgMatches) -> i32 {
                 .and_then(move |_| {
                     info!("Connection established!");
                     handle.timestamp(hash.clone(), 42).map(|_| (handle, hash))
-                })
-                .and_then(|(handle, hash)| handle.send(hash, i2np::Message::dummy_data()))
+                }).and_then(|(handle, hash)| handle.send(hash, i2np::Message::dummy_data()))
                 .and_then(|_| {
                     info!("Dummy data sent!");
                     Ok(())
-                })
-                .map_err(|e| error!("Connection error: {}", e));
+                }).map_err(|e| error!("Connection error: {}", e));
             tokio::run(
                 engine
                     .into_future()

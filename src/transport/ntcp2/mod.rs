@@ -578,7 +578,7 @@ mod tests {
     use std::iter::repeat;
     use tokio_codec::{Decoder, Encoder};
 
-    use super::{frame, session, Block, Frame, NTCP2_MTU, Session};
+    use super::{frame, session, Block, Frame, Session, NTCP2_MTU};
     use data::RouterSecretKeys;
     use i2np::Message;
     use transport::tests::{AliceNet, BobNet, NetworkCable};
@@ -687,7 +687,7 @@ mod tests {
 
             Ok::<(), ()>(())
         }).wait()
-            .unwrap();
+        .unwrap();
     }
 
     #[test]
@@ -729,6 +729,6 @@ mod tests {
 
             Ok::<(), ()>(())
         }).wait()
-            .unwrap();
+        .unwrap();
     }
 }
