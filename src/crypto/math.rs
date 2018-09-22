@@ -1,4 +1,4 @@
-use num::bigint::BigUint;
+use num_bigint::BigUint;
 
 pub fn rectify(bi: &BigUint, len: usize) -> Vec<u8> {
     let mut b = bi.to_bytes_be();

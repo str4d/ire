@@ -1,5 +1,6 @@
 use data_encoding::{Encoding, Specification};
-use num::{BigUint, Num};
+use num_bigint::BigUint;
+use num_traits::Num;
 
 lazy_static! {
     pub static ref I2P_BASE64: Encoding = {
