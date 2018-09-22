@@ -13,7 +13,8 @@ extern crate log;
 #[macro_use]
 extern crate nom;
 
-extern crate aesti;
+extern crate aes;
+extern crate block_modes;
 extern crate byteorder;
 extern crate bytes;
 extern crate cookie_factory;

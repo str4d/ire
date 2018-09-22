@@ -1,6 +1,7 @@
 //! Cryptographic types and operations.
 
-use aesti::Aes;
+use aes::{self, block_cipher_trait::generic_array::GenericArray};
+use block_modes::{block_padding::ZeroPadding, BlockMode, BlockModeIv, Cbc};
 use ed25519_dalek::Keypair as EdKeypair;
 use ed25519_dalek::PublicKey as EdPublicKey;
 use ed25519_dalek::SecretKey as EdSecretKey;
@@ -415,12 +416,9 @@ impl SessionKey {
 // Algorithm implementations
 //
 
-// TODO: Use aesni if available
 pub(crate) struct Aes256 {
-    ti: Aes,
-    buf: [u8; AES_BLOCK_SIZE],
-    iv_enc: [u8; AES_BLOCK_SIZE],
-    iv_dec: [u8; AES_BLOCK_SIZE],
+    cbc_enc: Cbc<aes::Aes256, ZeroPadding>,
+    cbc_dec: Cbc<aes::Aes256, ZeroPadding>,
 }
 
 impl Aes256 {
@@ -429,26 +427,11 @@ impl Aes256 {
         iv_enc: &[u8; AES_BLOCK_SIZE],
         iv_dec: &[u8; AES_BLOCK_SIZE],
     ) -> Self {
-        let mut iv_enc_copy = [0; AES_BLOCK_SIZE];
-        let mut iv_dec_copy = [0; AES_BLOCK_SIZE];
-        iv_enc_copy.copy_from_slice(iv_enc);
-        iv_dec_copy.copy_from_slice(iv_dec);
+        let key = GenericArray::from_slice(&key.0);
         Aes256 {
-            ti: Aes::with_key(&key.0).unwrap(),
-            buf: [0; AES_BLOCK_SIZE],
-            iv_enc: iv_enc_copy,
-            iv_dec: iv_dec_copy,
+            cbc_enc: Cbc::new_fixkey(key, GenericArray::from_slice(iv_enc)),
+            cbc_dec: Cbc::new_fixkey(key, GenericArray::from_slice(iv_dec)),
         }
-    }
-
-    fn encrypt(&mut self, block: &mut [u8; AES_BLOCK_SIZE]) {
-        self.ti.encrypt(&mut self.buf, block);
-        block.copy_from_slice(&self.buf);
-    }
-
-    fn decrypt(&mut self, block: &mut [u8; AES_BLOCK_SIZE]) {
-        self.ti.decrypt(&mut self.buf, block);
-        block.copy_from_slice(&self.buf);
     }
 
     pub fn encrypt_blocks(&mut self, buf: &mut [u8]) -> Option<usize> {
@@ -458,23 +441,11 @@ impl Aes256 {
         }
 
         // Integer division, leaves extra bytes unencrypted at the end
-        let end = buf.len() / AES_BLOCK_SIZE;
-        for i in 0..end {
-            // CBC mode, chained across received messages
-            for j in 0..AES_BLOCK_SIZE {
-                if i == 0 {
-                    buf[j] ^= self.iv_enc[j];
-                } else {
-                    buf[i * AES_BLOCK_SIZE + j] ^= buf[(i - 1) * AES_BLOCK_SIZE + j];
-                }
-            }
-            self.encrypt(array_mut_ref![buf, i * AES_BLOCK_SIZE, AES_BLOCK_SIZE]);
+        let end = (buf.len() / AES_BLOCK_SIZE) * AES_BLOCK_SIZE;
+        match self.cbc_enc.encrypt_nopad(&mut buf[..end]) {
+            Ok(_) => Some(end),
+            Err(_) => None,
         }
-        // Copy ciphertext from the last block for use with next message
-        self.iv_enc
-            .copy_from_slice(&buf[(end - 1) * AES_BLOCK_SIZE..end * AES_BLOCK_SIZE]);
-
-        Some(end * AES_BLOCK_SIZE)
     }
 
     pub fn decrypt_blocks(&mut self, buf: &mut [u8]) -> Option<usize> {
@@ -484,24 +455,11 @@ impl Aes256 {
         }
 
         // Integer division, leaves extra bytes undecrypted at the end
-        let mut tmp_block = [0; AES_BLOCK_SIZE];
-        let end = buf.len() / AES_BLOCK_SIZE;
-        for i in 0..end {
-            // Copy the block ciphertext for use in next round
-            tmp_block.copy_from_slice(&buf[i * AES_BLOCK_SIZE..(i + 1) * AES_BLOCK_SIZE]);
-            // Decrypt the block
-            self.decrypt(array_mut_ref![buf, i * AES_BLOCK_SIZE, AES_BLOCK_SIZE]);
-            // CBC mode, chained across received messages
-            for j in 0..AES_BLOCK_SIZE {
-                buf[i * AES_BLOCK_SIZE + j] ^= self.iv_dec[j];
-            }
-            // Swap for efficiency
-            let tmp = self.iv_dec;
-            self.iv_dec = tmp_block;
-            tmp_block = tmp;
+        let end = (buf.len() / AES_BLOCK_SIZE) * AES_BLOCK_SIZE;
+        match self.cbc_dec.decrypt_nopad(&mut buf[..end]) {
+            Ok(_) => Some(end),
+            Err(_) => None,
         }
-
-        Some(end * AES_BLOCK_SIZE)
     }
 }
 
@@ -534,126 +492,6 @@ mod tests {
             4
         );
         assert_eq!(SigType::Ed25519.extra_data_len(&EncType::ElGamal2048), 0);
-    }
-
-    #[test]
-    fn aes_256_ecb_test_vectors() {
-        struct TestVector {
-            key: SessionKey,
-            plaintext: [u8; 16],
-            ciphertext: [u8; 16],
-        };
-        // From https://csrc.nist.gov/CSRC/media/Projects/Cryptographic-Algorithm-Validation-Program/documents/aes/KAT_AES.zip
-        // Source: http://csrc.nist.gov/groups/STM/cavp/block-ciphers.html
-        let test_vectors = vec![
-            TestVector {
-                // ECBVarKey256 count 0
-                key: SessionKey([
-                    0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                ]),
-                plaintext: [
-                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                    0x00, 0x00, 0x00,
-                ],
-                ciphertext: [
-                    0xe3, 0x5a, 0x6d, 0xcb, 0x19, 0xb2, 0x01, 0xa0, 0x1e, 0xbc, 0xfa, 0x8a, 0xa2,
-                    0x2b, 0x57, 0x59,
-                ],
-            },
-            TestVector {
-                // ECBVarKey256 count 45
-                key: SessionKey([
-                    0xff, 0xff, 0xff, 0xff, 0xff, 0xfc, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                ]),
-                plaintext: [
-                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                    0x00, 0x00, 0x00,
-                ],
-                ciphertext: [
-                    0x82, 0xbd, 0xa1, 0x18, 0xa3, 0xed, 0x7a, 0xf3, 0x14, 0xfa, 0x2c, 0xcc, 0x5c,
-                    0x07, 0xb7, 0x61,
-                ],
-            },
-            TestVector {
-                // ECBVarKey256 count 255
-                key: SessionKey([
-                    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-                    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-                    0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-                ]),
-                plaintext: [
-                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                    0x00, 0x00, 0x00,
-                ],
-                ciphertext: [
-                    0x4b, 0xf8, 0x5f, 0x1b, 0x5d, 0x54, 0xad, 0xbc, 0x30, 0x7b, 0x0a, 0x04, 0x83,
-                    0x89, 0xad, 0xcb,
-                ],
-            },
-            TestVector {
-                // ECBVarTxt256 count 0
-                key: SessionKey([
-                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                ]),
-                plaintext: [
-                    0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                    0x00, 0x00, 0x00,
-                ],
-                ciphertext: [
-                    0xdd, 0xc6, 0xbf, 0x79, 0x0c, 0x15, 0x76, 0x0d, 0x8d, 0x9a, 0xeb, 0x6f, 0x9a,
-                    0x75, 0xfd, 0x4e,
-                ],
-            },
-            TestVector {
-                // ECBVarTxt256 count 77
-                key: SessionKey([
-                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                ]),
-                plaintext: [
-                    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xfc, 0x00, 0x00, 0x00,
-                    0x00, 0x00, 0x00,
-                ],
-                ciphertext: [
-                    0xb9, 0x5b, 0xa0, 0x5b, 0x33, 0x2d, 0xa6, 0x1e, 0xf6, 0x3a, 0x2b, 0x31, 0xfc,
-                    0xad, 0x98, 0x79,
-                ],
-            },
-            TestVector {
-                // ECBVarTxt256 count 127
-                key: SessionKey([
-                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                ]),
-                plaintext: [
-                    0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-                    0xff, 0xff, 0xff,
-                ],
-                ciphertext: [
-                    0xac, 0xda, 0xce, 0x80, 0x78, 0xa3, 0x2b, 0x1a, 0x18, 0x2b, 0xfa, 0x49, 0x87,
-                    0xca, 0x13, 0x47,
-                ],
-            },
-        ];
-
-        let unused = [0u8; 16];
-        for tv in test_vectors.iter() {
-            let mut aes = Aes256::new(&tv.key, &unused, &unused);
-            let mut block = [0u8; 16];
-            block.copy_from_slice(&tv.plaintext);
-            aes.encrypt(&mut block);
-            assert_eq!(block, tv.ciphertext);
-            aes.decrypt(&mut block);
-            assert_eq!(block, tv.plaintext);
-        }
     }
 
     #[test]

@@ -1,9 +1,31 @@
 [[package]]
-name = "aesti"
-version = "0.3.0"
+name = "aes"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
- "index-fixed 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "aes-soft 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "aesni 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "block-cipher-trait 0.5.3 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "aes-soft"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+dependencies = [
+ "block-cipher-trait 0.5.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "byte-tools 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "opaque-debug 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "aesni"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+dependencies = [
+ "block-cipher-trait 0.5.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "opaque-debug 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "stream-cipher 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
@@ -88,6 +110,28 @@ dependencies = [
  "arrayref 0.3.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "byte-tools 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
+
+[[package]]
+name = "block-cipher-trait"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+dependencies = [
+ "generic-array 0.9.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "block-modes"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+dependencies = [
+ "block-cipher-trait 0.5.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "block-padding 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
+
+[[package]]
+name = "block-padding"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "byte-tools"
@@ -361,11 +405,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "index-fixed"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-
-[[package]]
 name = "iovec"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -378,8 +417,9 @@ dependencies = [
 name = "ire"
 version = "0.0.1"
 dependencies = [
- "aesti 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "aes 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "arrayref 0.3.5 (registry+https://github.com/rust-lang/crates.io-index)",
+ "block-modes 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "byteorder 1.2.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "bytes 0.4.10 (registry+https://github.com/rust-lang/crates.io-index)",
  "clap 2.32.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -577,6 +617,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
  "libc 0.2.43 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
+
+[[package]]
+name = "opaque-debug"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "owning_ref"
@@ -801,6 +846,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 name = "static_slice"
 version = "0.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
+
+[[package]]
+name = "stream-cipher"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+dependencies = [
+ "generic-array 0.9.0 (registry+https://github.com/rust-lang/crates.io-index)",
+]
 
 [[package]]
 name = "strsim"
@@ -1160,7 +1213,9 @@ dependencies = [
 ]
 
 [metadata]
-"checksum aesti 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)" = "a00920481cdd7615157206fc540bfe1b7a1fe19c6d6fe3ec58ae44108454716d"
+"checksum aes 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)" = "e6fb1737cdc8da3db76e90ca817a194249a38fcb500c2e6ecec39b29448aa873"
+"checksum aes-soft 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)" = "67cc03b0a090a05cb01e96998a01905d7ceedce1bc23b756c0bb7faa0682ccb1"
+"checksum aesni 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)" = "6810b7fb9f2bb4f76f05ac1c170b8dde285b6308955dc3afd89710268c958d9e"
 "checksum aho-corasick 0.6.8 (registry+https://github.com/rust-lang/crates.io-index)" = "68f56c7353e5a9547cbd76ed90f7bb5ffc3ba09d4ea9bd1d8c06c8b1142eeb5a"
 "checksum ansi_term 0.11.0 (registry+https://github.com/rust-lang/crates.io-index)" = "ee49baf6cb617b853aa8d93bf420db2383fab46d314482ca2803b40d5fde979b"
 "checksum arrayref 0.3.5 (registry+https://github.com/rust-lang/crates.io-index)" = "0d382e583f07208808f6b1249e60848879ba3543f57c32277bf52d69c2f0f0ee"
@@ -1171,6 +1226,9 @@ dependencies = [
 "checksum bitflags 1.0.4 (registry+https://github.com/rust-lang/crates.io-index)" = "228047a76f468627ca71776ecdebd732a3423081fcf5125585bcd7c49886ce12"
 "checksum blake2-rfc 0.2.18 (registry+https://github.com/rust-lang/crates.io-index)" = "5d6d530bdd2d52966a6d03b7a964add7ae1a288d25214066fd4b600f0f796400"
 "checksum block-buffer 0.3.3 (registry+https://github.com/rust-lang/crates.io-index)" = "a076c298b9ecdb530ed9d967e74a6027d6a7478924520acddcddc24c1c8ab3ab"
+"checksum block-cipher-trait 0.5.3 (registry+https://github.com/rust-lang/crates.io-index)" = "370424437b9459f3dfd68428ed9376ddfe03d8b70ede29cc533b3557df186ab4"
+"checksum block-modes 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "862511b40f91a3305dc119fdfdc25b561779f78828495e41b71d360b8c9f56df"
+"checksum block-padding 0.1.0 (registry+https://github.com/rust-lang/crates.io-index)" = "75bc2cfa52dc218b47ea000b15e6e5d00ca2f831db31e41592383c14d8802907"
 "checksum byte-tools 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)" = "560c32574a12a89ecd91f5e742165893f86e3ab98d21f8ea548658eb9eef5f40"
 "checksum byteorder 1.2.6 (registry+https://github.com/rust-lang/crates.io-index)" = "90492c5858dd7d2e78691cfb89f90d273a2800fc11d98f60786e5d87e2f83781"
 "checksum bytes 0.4.10 (registry+https://github.com/rust-lang/crates.io-index)" = "0ce55bd354b095246fc34caf4e9e242f5297a7fd938b090cadfea6eee614aa62"
@@ -1204,7 +1262,6 @@ dependencies = [
 "checksum generic-array 0.9.0 (registry+https://github.com/rust-lang/crates.io-index)" = "ef25c5683767570c2bbd7deba372926a55eaae9982d7726ee2a1050239d45b9d"
 "checksum humantime 1.1.1 (registry+https://github.com/rust-lang/crates.io-index)" = "0484fda3e7007f2a4a0d9c3a703ca38c71c54c55602ce4660c419fd32e188c9e"
 "checksum i2p_snow 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)" = "ddb25b125b4d4a07c50470fa23cb7a9d3f22d13e859d1444599fcd9d5b76f004"
-"checksum index-fixed 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)" = "71de4baa2982d390b754cf334468ac898548130a3b9902d39e9174f164929020"
 "checksum iovec 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)" = "dbe6e417e7d0975db6512b90796e8ce223145ac4e33c377e4a42882a0e88bb08"
 "checksum itertools 0.7.8 (registry+https://github.com/rust-lang/crates.io-index)" = "f58856976b776fedd95533137617a02fb25719f40e7d9b01c7043cd65474f450"
 "checksum kernel32-sys 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)" = "7507624b29483431c0ba2d82aece8ca6cdba9382bff4ddd0f7490560c056098d"
@@ -1226,6 +1283,7 @@ dependencies = [
 "checksum num-integer 0.1.39 (registry+https://github.com/rust-lang/crates.io-index)" = "e83d528d2677f0518c570baf2b7abdcf0cd2d248860b68507bdcb3e91d4c0cea"
 "checksum num-traits 0.2.6 (registry+https://github.com/rust-lang/crates.io-index)" = "0b3a5d7cc97d6d30d8b9bc8fa19bf45349ffe46241e8816f50f62f6d6aaabee1"
 "checksum num_cpus 1.8.0 (registry+https://github.com/rust-lang/crates.io-index)" = "c51a3322e4bca9d212ad9a158a02abc6934d005490c054a2778df73a70aa0a30"
+"checksum opaque-debug 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)" = "d620c9c26834b34f039489ac0dfdb12c7ac15ccaf818350a64c9b5334a452ad7"
 "checksum owning_ref 0.3.3 (registry+https://github.com/rust-lang/crates.io-index)" = "cdf84f41639e037b484f93433aa3897863b561ed65c6e59c7073d7c561710f37"
 "checksum parking_lot 0.6.4 (registry+https://github.com/rust-lang/crates.io-index)" = "f0802bff09003b291ba756dc7e79313e51cc31667e94afbe847def490424cde5"
 "checksum parking_lot_core 0.3.1 (registry+https://github.com/rust-lang/crates.io-index)" = "ad7f7e6ebdc79edff6fdcb87a55b620174f7a989e3eb31b65231f4af57f00b8c"
@@ -1255,6 +1313,7 @@ dependencies = [
 "checksum smallvec 0.6.5 (registry+https://github.com/rust-lang/crates.io-index)" = "153ffa32fd170e9944f7e0838edf824a754ec4c1fc64746fcc9fe1f8fa602e5d"
 "checksum stable_deref_trait 1.1.1 (registry+https://github.com/rust-lang/crates.io-index)" = "dba1a27d3efae4351c8051072d619e3ade2820635c3958d826bfea39d59b54c8"
 "checksum static_slice 0.0.3 (registry+https://github.com/rust-lang/crates.io-index)" = "92a7e0c5e3dfb52e8fbe0e63a1b947bbb17b4036408b151353c4491374931362"
+"checksum stream-cipher 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)" = "30dc6118470d69ce0fdcf7e6f95e95853f7f4f72f80d835d4519577c323814ab"
 "checksum strsim 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)" = "bb4f380125926a99e52bc279241539c018323fab05ad6368b56f93d9369ff550"
 "checksum subtle 0.6.3 (registry+https://github.com/rust-lang/crates.io-index)" = "b3d2ddb6e9a9cc03eb7806a1c994ae1221259669bbe4efe9dd2dff136d3a117d"
 "checksum subtle 0.7.1 (registry+https://github.com/rust-lang/crates.io-index)" = "5938f1b89f10d6356339f071eca74209deeae0b6891c2678d655feb78637e369"
