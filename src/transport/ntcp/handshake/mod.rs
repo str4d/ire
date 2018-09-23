@@ -674,9 +674,16 @@ where
                     debug!("Sending SessionConfirmB");
                     // Generate message to be signed
                     let msg = gen_session_confirm_sig_msg(&self.shared, false);
-                    let scb = HandshakeFrame::SessionConfirmB(SessionConfirmB {
-                        sig: self.shared.own_key.sign(&msg),
-                    });
+                    let sig = match self.shared.own_key.sign(&msg) {
+                        Ok(sig) => sig,
+                        Err(_) => {
+                            return Err(io::Error::new(
+                                io::ErrorKind::Other,
+                                "Could not create SessionConfirmB signature",
+                            ))
+                        }
+                    };
+                    let scb = HandshakeFrame::SessionConfirmB(SessionConfirmB { sig });
 
                     IBHandshakeState::SessionConfirmB(conn.send(scb))
                 }
@@ -812,10 +819,19 @@ where
 
                     // Part 3
                     debug!("Sending SessionConfirmA");
+                    let sig = match self.shared.own_key.sign(&msg) {
+                        Ok(sig) => sig,
+                        Err(_) => {
+                            return Err(io::Error::new(
+                                io::ErrorKind::Other,
+                                "Could not create SessionConfirmA signature",
+                            ))
+                        }
+                    };
                     let sca = HandshakeFrame::SessionConfirmA(SessionConfirmA {
                         ri_a: self.shared.own_ri.clone(),
                         ts_a: self.shared.ts_a,
-                        sig: self.shared.own_key.sign(&msg),
+                        sig,
                     });
                     OBHandshakeState::SessionConfirmA(conn.send(sca))
                 }

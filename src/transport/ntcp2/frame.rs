@@ -301,6 +301,7 @@ mod tests {
 
     use data::I2PDate;
     use i2np::MessagePayload;
+    use tests::ROUTER_INFO;
 
     use super::*;
 
@@ -343,13 +344,12 @@ mod tests {
 
     #[test]
     fn test_router_info() {
-        let data = include_bytes!("../../../assets/router.info");
-        let ri = match router_info(data) {
+        let ri = match router_info(ROUTER_INFO) {
             Ok((_, ri)) => ri,
             Err(_) => panic!(),
         };
         let mut ri_block = vec![0x02, 0x02, 0x9f, 0x01];
-        ri_block.extend_from_slice(data);
+        ri_block.extend_from_slice(ROUTER_INFO);
 
         eval_block!(
             Block::RouterInfo(ri.clone(), RouterInfoFlags { flood: true }),

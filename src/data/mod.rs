@@ -16,8 +16,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use constants;
 use crypto::{
-    EncType, PrivateKey, PublicKey, SigType, Signature, SignatureError, SigningPrivateKey,
-    SigningPublicKey,
+    self, EncType, PrivateKey, PublicKey, SigType, Signature, SigningPrivateKey, SigningPublicKey,
 };
 
 pub(crate) mod frame;
@@ -181,7 +180,7 @@ impl RouterIdentity {
 
     fn from_secrets(private_key: &PrivateKey, signing_private_key: &SigningPrivateKey) -> Self {
         let public_key = PublicKey::from_secret(private_key);
-        let signing_key = SigningPublicKey::from_secret(signing_private_key);
+        let signing_key = SigningPublicKey::from_secret(signing_private_key).unwrap();
         let certificate = match signing_key.sig_type() {
             SigType::DsaSha1 => Certificate::Null,
             SigType::Ed25519 => Certificate::Key(KeyCertificate {
@@ -503,16 +502,16 @@ impl RouterInfo {
 
     pub fn sign(&mut self, spk: &SigningPrivateKey) {
         let sig_msg = self.signature_bytes();
-        self.signature = Some(spk.sign(&sig_msg));
+        self.signature = Some(spk.sign(&sig_msg).unwrap());
     }
 
-    pub fn verify(&self) -> Result<(), SignatureError> {
+    pub fn verify(&self) -> Result<(), crypto::Error> {
         match &self.signature.as_ref() {
             &Some(s) => {
                 let sig_msg = self.signature_bytes();
                 self.router_id.signing_key.verify(&sig_msg, s)
             }
-            &None => Err(SignatureError::NoSignature),
+            &None => Err(crypto::Error::NoSignature),
         }
     }
 }
@@ -520,6 +519,7 @@ impl RouterInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tests::{RI_SIGTYPE_1, RI_SIGTYPE_2, ROUTER_INFO};
 
     #[test]
     fn hash_xor() {
@@ -558,13 +558,12 @@ mod tests {
 
     #[test]
     fn router_identity_hash() {
-        let data = include_bytes!("../../assets/router.info");
         let ri_hash = Hash([
             0x26, 0x7a, 0x87, 0x78, 0x0d, 0x0c, 0xa0, 0x9a, 0x21, 0xa0, 0x29, 0xb7, 0x4d, 0x7b,
             0xc3, 0x4d, 0x07, 0xc3, 0x53, 0x02, 0x72, 0xc6, 0x30, 0xaa, 0x4c, 0xc1, 0x1d, 0x61,
             0x90, 0xc7, 0xb6, 0xb4,
         ]);
-        match frame::router_info(data) {
+        match frame::router_info(ROUTER_INFO) {
             Ok((_, ri)) => {
                 assert_eq!(ri.router_id.hash(), ri_hash);
             }
@@ -619,14 +618,27 @@ mod tests {
         assert!(ri.verify().is_ok());
     }
 
-    #[test]
-    fn router_info_verify() {
-        let data = include_bytes!("../../assets/router.info");
+    fn router_info_verify(data: &[u8]) {
         match frame::router_info(data) {
             Ok((_, ri)) => {
                 assert!(ri.verify().is_ok());
             }
-            _ => panic!("RouterInfo parsing failed"),
+            Err(e) => panic!("RouterInfo parsing failed: {}", e),
         }
+    }
+
+    #[test]
+    fn router_info_verify_sigtype_1() {
+        router_info_verify(RI_SIGTYPE_1)
+    }
+
+    #[test]
+    fn router_info_verify_sigtype_2() {
+        router_info_verify(RI_SIGTYPE_2)
+    }
+
+    #[test]
+    fn router_info_verify_sigtype_7() {
+        router_info_verify(ROUTER_INFO)
     }
 }

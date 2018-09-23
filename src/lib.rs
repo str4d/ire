@@ -13,12 +13,12 @@ extern crate log;
 #[macro_use]
 extern crate nom;
 
-extern crate aesti;
+extern crate aes;
+extern crate block_modes;
 extern crate byteorder;
 extern crate bytes;
 extern crate cookie_factory;
 extern crate data_encoding;
-extern crate ed25519_dalek;
 extern crate flate2;
 extern crate i2p_snow;
 extern crate itertools;
@@ -26,6 +26,9 @@ extern crate num_bigint;
 extern crate num_traits;
 extern crate rand;
 extern crate sha2;
+extern crate signatory;
+extern crate signatory_dalek;
+extern crate signatory_ring;
 extern crate siphasher;
 extern crate tokio_codec;
 extern crate tokio_executor;
@@ -47,3 +50,6 @@ pub mod data;
 pub mod i2np;
 pub mod router;
 pub mod transport;
+
+#[cfg(test)]
+mod tests;

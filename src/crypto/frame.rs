@@ -11,6 +11,8 @@ named!(pub sig_type<SigType>,
     switch!(be_u16,
         constants::DSA_SHA1 => value!(SigType::DsaSha1) |
         constants::ECDSA_SHA256_P256 => value!(SigType::EcdsaSha256P256) |
+        constants::ECDSA_SHA384_P384 => value!(SigType::EcdsaSha384P384) |
+        constants::ECDSA_SHA512_P521 => value!(SigType::EcdsaSha512P521) |
         constants::ED25519 => value!(SigType::Ed25519)
     )
 );

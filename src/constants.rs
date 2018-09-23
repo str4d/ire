@@ -42,18 +42,10 @@ pub const RFC3526_2048BIT_MODP_GROUP: &'static str =
      DE2BCBF6_95581718_3995497C_EA956AE5_15D22618_98FA0510\
      15728E5A_8AACAA68_FFFFFFFF_FFFFFFFF";
 
-pub struct CryptoConstants {
-    pub elg_g: BigUint,
-    pub elg_p: BigUint,
-}
-
-impl CryptoConstants {
-    pub fn new() -> Self {
-        CryptoConstants {
-            elg_g: BigUint::parse_bytes(b"2", 10).unwrap(),
-            elg_p: BigUint::from_str_radix(RFC3526_2048BIT_MODP_GROUP, 16).unwrap(),
-        }
-    }
+lazy_static! {
+    pub static ref ELGAMAL_G: BigUint = BigUint::parse_bytes(b"2", 10).unwrap();
+    pub static ref ELGAMAL_P: BigUint =
+        BigUint::from_str_radix(RFC3526_2048BIT_MODP_GROUP, 16).unwrap();
 }
 
 // Certificate types

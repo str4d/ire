@@ -17,10 +17,18 @@ and implemented.
 ### Implemented Features
 
 - Cryptographic primitives
+  - Signing
+    - [ ] ECDSA_SHA256_P256
+    - [ ] ECDSA_SHA384_P384
+    - [ ] ECDSA_SHA512_P521
+    - [x] Ed25519
+  - Verifying
+    - [ ] DSA
+    - [x] ECDSA_SHA256_P256
+    - [x] ECDSA_SHA384_P384
+    - [ ] ECDSA_SHA512_P521
+    - [x] Ed25519
   - [ ] ElGamal
-  - [ ] DSA
-  - [ ] ECDSA
-  - [x] Ed25519
   - [x] AES256
 - I2NP
   - [x] Message parsing
