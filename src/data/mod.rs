@@ -16,7 +16,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use constants;
 use crypto::{
-    self, EncType, PrivateKey, PublicKey, SigType, Signature, SigningPrivateKey, SigningPublicKey,
+    self, elgamal, EncType, PrivateKey, PublicKey, SigType, Signature, SigningPrivateKey,
+    SigningPublicKey,
 };
 
 pub(crate) mod frame;
@@ -178,9 +179,7 @@ impl RouterIdentity {
         }
     }
 
-    fn from_secrets(private_key: &PrivateKey, signing_private_key: &SigningPrivateKey) -> Self {
-        let public_key = PublicKey::from_secret(private_key);
-        let signing_key = SigningPublicKey::from_secret(signing_private_key).unwrap();
+    fn from_keys(public_key: PublicKey, signing_key: SigningPublicKey) -> Self {
         let certificate = match signing_key.sig_type() {
             SigType::DsaSha1 => Certificate::Null,
             SigType::Ed25519 => Certificate::Key(KeyCertificate {
@@ -249,10 +248,11 @@ pub struct RouterSecretKeys {
 
 impl RouterSecretKeys {
     pub fn new() -> Self {
-        let private_key = PrivateKey::new();
+        let (private_key, public_key) = elgamal::KeyPairGenerator::generate();
         let signing_private_key = SigningPrivateKey::new();
+        let signing_key = SigningPublicKey::from_secret(&signing_private_key).unwrap();
         RouterSecretKeys {
-            rid: RouterIdentity::from_secrets(&private_key, &signing_private_key),
+            rid: RouterIdentity::from_keys(public_key, signing_key),
             private_key,
             signing_private_key,
         }

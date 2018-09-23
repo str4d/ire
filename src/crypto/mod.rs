@@ -3,8 +3,6 @@
 use aes::{self, block_cipher_trait::generic_array::GenericArray};
 use block_modes::{block_padding::ZeroPadding, BlockMode, BlockModeIv, Cbc};
 use nom::Err;
-use num_bigint::BigUint;
-use rand::{OsRng, Rng};
 use signatory::{
     curve::{NistP256, NistP384, WeierstrassCurve},
     ecdsa::{EcdsaPublicKey, FixedSignature},
@@ -21,6 +19,7 @@ use std::fmt;
 use constants;
 
 pub(crate) mod dh;
+pub(crate) mod elgamal;
 pub(crate) mod frame;
 pub(crate) mod math;
 
@@ -163,15 +162,6 @@ impl PublicKey {
         x.copy_from_slice(buf);
         PublicKey(x)
     }
-
-    pub fn from_secret(priv_key: &PrivateKey) -> Self {
-        let priv_key_bi = BigUint::from_bytes_be(&priv_key.0[..]);
-        let pub_key_bi = constants::ELGAMAL_G.modpow(&priv_key_bi, &constants::ELGAMAL_P);
-        let buf = math::rectify(&pub_key_bi, 256);
-        let mut x = [0u8; 256];
-        x.copy_from_slice(&buf[..]);
-        PublicKey(x)
-    }
 }
 
 impl Clone for PublicKey {
@@ -199,13 +189,6 @@ impl PartialEq for PublicKey {
 pub struct PrivateKey(pub [u8; 256]);
 
 impl PrivateKey {
-    pub fn new() -> Self {
-        let mut rng = OsRng::new().expect("should be able to construct RNG");
-        let mut keydata = [0u8; 256];
-        rng.fill(&mut keydata);
-        PrivateKey(keydata)
-    }
-
     fn from_bytes(buf: &[u8; 256]) -> Self {
         let mut x = [0u8; 256];
         x.copy_from_slice(buf);
