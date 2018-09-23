@@ -31,5 +31,32 @@ pub fn rectify(bi: &BigUint, len: usize) -> Vec<u8> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use num_bigint::BigUint;
+    use num_traits::{One, Zero};
+
+    use super::rectify;
+
+    #[test]
+    fn rectify_zero() {
+        assert_eq!(&rectify(&BigUint::zero(), 1), &[0]);
+        assert_eq!(&rectify(&BigUint::zero(), 8), &[0, 0, 0, 0, 0, 0, 0, 0]);
+        assert_eq!(&rectify(&BigUint::zero(), 32), &[0u8; 32]);
+    }
+
+    #[test]
+    fn rectify_one() {
+        assert_eq!(&rectify(&BigUint::one(), 1), &[1]);
+        assert_eq!(&rectify(&BigUint::one(), 4), &[0, 0, 0, 1]);
+        assert_eq!(&rectify(&BigUint::one(), 8), &[0, 0, 0, 0, 0, 0, 0, 1]);
+    }
+
+    #[test]
+    fn rectify_value() {
+        let val = [0xff, 0xab, 0xcd, 0xef];
+        assert_eq!(&rectify(&BigUint::from_bytes_be(&val), 4), &val);
+        assert_eq!(
+            &rectify(&BigUint::from_bytes_be(&val), 5),
+            &[0x00, 0xff, 0xab, 0xcd, 0xef]
+        );
+    }
 }
