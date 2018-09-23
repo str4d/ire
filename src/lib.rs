@@ -28,6 +28,7 @@ extern crate rand;
 extern crate sha2;
 extern crate signatory;
 extern crate signatory_dalek;
+extern crate signatory_ring;
 extern crate siphasher;
 extern crate tokio_codec;
 extern crate tokio_executor;

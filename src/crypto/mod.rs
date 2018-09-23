@@ -6,10 +6,16 @@ use nom::Err;
 use num_bigint::BigUint;
 use rand::{self, Rng};
 use signatory::{
-    ed25519, error::Error as SignatoryError, public_key, sign, verify, Ed25519PublicKey,
-    Ed25519Seed, Ed25519Signature, Signature as SignatorySignature,
+    curve::{NistP256, NistP384, WeierstrassCurve},
+    ecdsa::{EcdsaPublicKey, FixedSignature},
+    ed25519,
+    error::Error as SignatoryError,
+    generic_array::typenum::Unsigned,
+    public_key, sign, verify, verify_sha256, verify_sha384, Ed25519PublicKey, Ed25519Seed,
+    Ed25519Signature, Signature as SignatorySignature,
 };
 use signatory_dalek::{Ed25519Signer, Ed25519Verifier};
+use signatory_ring::ecdsa::{P256Verifier, P384Verifier};
 use std::fmt;
 
 use constants;
@@ -65,8 +71,8 @@ impl SigType {
     pub fn pubkey_len(&self) -> u32 {
         match *self {
             SigType::DsaSha1 => 128,
-            SigType::EcdsaSha256P256 => 64,
-            SigType::EcdsaSha384P384 => 96,
+            SigType::EcdsaSha256P256 => <NistP256 as WeierstrassCurve>::UntaggedPointSize::to_u32(),
+            SigType::EcdsaSha384P384 => <NistP384 as WeierstrassCurve>::UntaggedPointSize::to_u32(),
             SigType::EcdsaSha512P521 => 132,
             SigType::Ed25519 => ed25519::PUBLIC_KEY_SIZE as u32,
         }
@@ -75,8 +81,8 @@ impl SigType {
     pub fn privkey_len(&self) -> u32 {
         match *self {
             SigType::DsaSha1 => 20,
-            SigType::EcdsaSha256P256 => 32,
-            SigType::EcdsaSha384P384 => 48,
+            SigType::EcdsaSha256P256 => <NistP256 as WeierstrassCurve>::ScalarSize::to_u32(),
+            SigType::EcdsaSha384P384 => <NistP384 as WeierstrassCurve>::ScalarSize::to_u32(),
             SigType::EcdsaSha512P521 => 66,
             SigType::Ed25519 => ed25519::SEED_SIZE as u32,
         }
@@ -85,8 +91,12 @@ impl SigType {
     pub fn sig_len(&self) -> u32 {
         match *self {
             SigType::DsaSha1 => 40,
-            SigType::EcdsaSha256P256 => 64,
-            SigType::EcdsaSha384P384 => 96,
+            SigType::EcdsaSha256P256 => {
+                <NistP256 as WeierstrassCurve>::FixedSignatureSize::to_u32()
+            }
+            SigType::EcdsaSha384P384 => {
+                <NistP384 as WeierstrassCurve>::FixedSignatureSize::to_u32()
+            }
             SigType::EcdsaSha512P521 => 132,
             SigType::Ed25519 => ed25519::SIGNATURE_SIZE as u32,
         }
@@ -219,8 +229,8 @@ impl fmt::Debug for PrivateKey {
 #[derive(Clone, Debug, PartialEq)]
 pub enum SigningPublicKey {
     DsaSha1,
-    EcdsaSha256P256,
-    EcdsaSha384P384,
+    EcdsaSha256P256(EcdsaPublicKey<NistP256>),
+    EcdsaSha384P384(EcdsaPublicKey<NistP384>),
     EcdsaSha512P521,
     Ed25519(Ed25519PublicKey),
 }
@@ -229,8 +239,8 @@ impl SigningPublicKey {
     pub fn sig_type(&self) -> SigType {
         match self {
             &SigningPublicKey::DsaSha1 => SigType::DsaSha1,
-            &SigningPublicKey::EcdsaSha256P256 => SigType::EcdsaSha256P256,
-            &SigningPublicKey::EcdsaSha384P384 => SigType::EcdsaSha384P384,
+            &SigningPublicKey::EcdsaSha256P256(_) => SigType::EcdsaSha256P256,
+            &SigningPublicKey::EcdsaSha384P384(_) => SigType::EcdsaSha384P384,
             &SigningPublicKey::EcdsaSha512P521 => SigType::EcdsaSha512P521,
             &SigningPublicKey::Ed25519(_) => SigType::Ed25519,
         }
@@ -241,8 +251,12 @@ impl SigningPublicKey {
     pub fn from_bytes(sig_type: &SigType, data: &[u8]) -> Result<Self, Error> {
         match sig_type {
             &SigType::DsaSha1 => unimplemented!(),
-            &SigType::EcdsaSha256P256 => unimplemented!(),
-            &SigType::EcdsaSha384P384 => unimplemented!(),
+            &SigType::EcdsaSha256P256 => Ok(SigningPublicKey::EcdsaSha256P256(
+                EcdsaPublicKey::from_untagged_point(GenericArray::from_slice(data)),
+            )),
+            &SigType::EcdsaSha384P384 => Ok(SigningPublicKey::EcdsaSha384P384(
+                EcdsaPublicKey::from_untagged_point(GenericArray::from_slice(data)),
+            )),
             &SigType::EcdsaSha512P521 => unimplemented!(),
             &SigType::Ed25519 => Ok(SigningPublicKey::Ed25519(Ed25519PublicKey::from_bytes(
                 data,
@@ -265,8 +279,8 @@ impl SigningPublicKey {
     pub fn as_bytes(&self) -> &[u8] {
         match self {
             &SigningPublicKey::DsaSha1 => unimplemented!(),
-            &SigningPublicKey::EcdsaSha256P256 => unimplemented!(),
-            &SigningPublicKey::EcdsaSha384P384 => unimplemented!(),
+            &SigningPublicKey::EcdsaSha256P256(ref pk) => &pk.as_bytes()[1..],
+            &SigningPublicKey::EcdsaSha384P384(ref pk) => &pk.as_bytes()[1..],
             &SigningPublicKey::EcdsaSha512P521 => unimplemented!(),
             &SigningPublicKey::Ed25519(ref pk) => pk.as_bytes(),
         }
@@ -275,8 +289,12 @@ impl SigningPublicKey {
     pub fn verify(&self, message: &[u8], signature: &Signature) -> Result<(), Error> {
         match (self, signature) {
             (&SigningPublicKey::DsaSha1, &Signature::DsaSha1) => unimplemented!(),
-            (&SigningPublicKey::EcdsaSha256P256, &Signature::EcdsaSha256P256) => unimplemented!(),
-            (&SigningPublicKey::EcdsaSha384P384, &Signature::EcdsaSha384P384) => unimplemented!(),
+            (&SigningPublicKey::EcdsaSha256P256(ref pk), &Signature::EcdsaSha256P256(ref s)) => {
+                Ok(verify_sha256(&P256Verifier::from(pk), message, s)?)
+            }
+            (&SigningPublicKey::EcdsaSha384P384(ref pk), &Signature::EcdsaSha384P384(ref s)) => {
+                Ok(verify_sha384(&P384Verifier::from(pk), message, s)?)
+            }
             (&SigningPublicKey::EcdsaSha512P521, &Signature::EcdsaSha512P521) => unimplemented!(),
             (&SigningPublicKey::Ed25519(ref pk), &Signature::Ed25519(ref s)) => {
                 Ok(verify(&Ed25519Verifier::from(pk), message, s)?)
@@ -365,8 +383,8 @@ impl Clone for SigningPrivateKey {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Signature {
     DsaSha1,
-    EcdsaSha256P256,
-    EcdsaSha384P384,
+    EcdsaSha256P256(FixedSignature<NistP256>),
+    EcdsaSha384P384(FixedSignature<NistP384>),
     EcdsaSha512P521,
     Ed25519(Ed25519Signature),
 }
@@ -375,8 +393,12 @@ impl Signature {
     pub fn from_bytes(sig_type: &SigType, data: &[u8]) -> Result<Self, Error> {
         match sig_type {
             &SigType::DsaSha1 => unimplemented!(),
-            &SigType::EcdsaSha256P256 => unimplemented!(),
-            &SigType::EcdsaSha384P384 => unimplemented!(),
+            &SigType::EcdsaSha256P256 => Ok(Signature::EcdsaSha256P256(
+                FixedSignature::from_bytes(data)?,
+            )),
+            &SigType::EcdsaSha384P384 => Ok(Signature::EcdsaSha384P384(
+                FixedSignature::from_bytes(data)?,
+            )),
             &SigType::EcdsaSha512P521 => unimplemented!(),
             &SigType::Ed25519 => Ok(Signature::Ed25519(Ed25519Signature::from_bytes(data)?)),
         }
@@ -385,8 +407,8 @@ impl Signature {
     pub fn to_bytes(&self) -> Vec<u8> {
         match self {
             &Signature::DsaSha1 => unimplemented!(),
-            &Signature::EcdsaSha256P256 => unimplemented!(),
-            &Signature::EcdsaSha384P384 => unimplemented!(),
+            &Signature::EcdsaSha256P256(ref s) => Vec::from(s.as_ref()),
+            &Signature::EcdsaSha384P384(ref s) => Vec::from(s.as_ref()),
             &Signature::EcdsaSha512P521 => unimplemented!(),
             &Signature::Ed25519(ref s) => Vec::from(&s.as_bytes()[..]),
         }
