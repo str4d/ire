@@ -50,3 +50,6 @@ pub mod data;
 pub mod i2np;
 pub mod router;
 pub mod transport;
+
+#[cfg(test)]
+mod tests;

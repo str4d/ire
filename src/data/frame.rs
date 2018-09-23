@@ -510,12 +510,13 @@ pub fn gen_router_info<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tests::ROUTER_INFO;
 
     use nom::HexDisplay;
 
     #[test]
     fn test_router_info() {
-        let data = include_bytes!("../../assets/router.info");
+        let data = ROUTER_INFO;
         println!("bytes:\n{}", &data.to_hex(8));
         // Test parsing
         match router_info(data) {

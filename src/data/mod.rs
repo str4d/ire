@@ -519,6 +519,7 @@ impl RouterInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tests::ROUTER_INFO;
 
     #[test]
     fn hash_xor() {
@@ -557,13 +558,12 @@ mod tests {
 
     #[test]
     fn router_identity_hash() {
-        let data = include_bytes!("../../assets/router.info");
         let ri_hash = Hash([
             0x26, 0x7a, 0x87, 0x78, 0x0d, 0x0c, 0xa0, 0x9a, 0x21, 0xa0, 0x29, 0xb7, 0x4d, 0x7b,
             0xc3, 0x4d, 0x07, 0xc3, 0x53, 0x02, 0x72, 0xc6, 0x30, 0xaa, 0x4c, 0xc1, 0x1d, 0x61,
             0x90, 0xc7, 0xb6, 0xb4,
         ]);
-        match frame::router_info(data) {
+        match frame::router_info(ROUTER_INFO) {
             Ok((_, ri)) => {
                 assert_eq!(ri.router_id.hash(), ri_hash);
             }
@@ -620,8 +620,7 @@ mod tests {
 
     #[test]
     fn router_info_verify() {
-        let data = include_bytes!("../../assets/router.info");
-        match frame::router_info(data) {
+        match frame::router_info(ROUTER_INFO) {
             Ok((_, ri)) => {
                 assert!(ri.verify().is_ok());
             }
