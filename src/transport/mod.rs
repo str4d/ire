@@ -8,7 +8,7 @@ use std::iter::{once, repeat};
 use std::net::SocketAddr;
 use tokio_io::IoFuture;
 
-use constants::CryptoConstants;
+use constants::{ELGAMAL_G, ELGAMAL_P};
 use crypto::math::rectify;
 use crypto::SessionKey;
 use data::{Hash, RouterAddress, RouterSecretKeys};
@@ -195,8 +195,7 @@ impl DHSessionKeyBuilder {
     pub fn new() -> Self {
         let mut rng = rand::thread_rng();
         let dh_priv = rng.gen_biguint(2048);
-        let cc = CryptoConstants::new();
-        let dh_pub = cc.elg_g.modpow(&dh_priv, &cc.elg_p);
+        let dh_pub = ELGAMAL_G.modpow(&dh_priv, &ELGAMAL_P);
         DHSessionKeyBuilder { dh_priv, dh_pub }
     }
 
@@ -207,8 +206,7 @@ impl DHSessionKeyBuilder {
     pub fn build_session_key(&self, peer_pub: &[u8; 256]) -> SessionKey {
         // Calculate the exchanged DH key
         let peer_pub = BigUint::from_bytes_be(peer_pub);
-        let cc = CryptoConstants::new();
-        let dh_key = peer_pub.modpow(&self.dh_priv, &cc.elg_p);
+        let dh_key = peer_pub.modpow(&self.dh_priv, &ELGAMAL_P);
         // Represent the exchanged key as a positive minimal-length two's-complement
         // big-endian byte array. If most significant bit is 1, prepend a zero-byte
         // (to match Java's BigInteger.toByteArray() representation).

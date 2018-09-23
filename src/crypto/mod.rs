@@ -165,8 +165,7 @@ impl PublicKey {
 
     pub fn from_secret(priv_key: &PrivateKey) -> Self {
         let priv_key_bi = BigUint::from_bytes_be(&priv_key.0[..]);
-        let cc = constants::CryptoConstants::new();
-        let pub_key_bi = cc.elg_g.modpow(&priv_key_bi, &cc.elg_p);
+        let pub_key_bi = constants::ELGAMAL_G.modpow(&priv_key_bi, &constants::ELGAMAL_P);
         let buf = math::rectify(&pub_key_bi, 256);
         let mut x = [0u8; 256];
         x.copy_from_slice(&buf[..]);
