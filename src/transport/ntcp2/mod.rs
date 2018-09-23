@@ -32,7 +32,7 @@ use cookie_factory::GenError;
 use futures::{sync::mpsc, task, Async, Future, Poll, Sink, Stream};
 use i2p_snow::{self, Builder};
 use nom::Err;
-use rand::{self, Rng};
+use rand::{OsRng, Rng};
 use siphasher::sip::SipHasher;
 use std::fmt;
 use std::fs::File;
@@ -401,7 +401,7 @@ impl Manager {
         let dh = builder.generate_keypair().unwrap();
 
         let mut aesobfse_iv = [0; 16];
-        let mut rng = rand::thread_rng();
+        let mut rng = OsRng::new().expect("should be able to construct RNG");
         rng.fill(&mut aesobfse_iv[..]);
 
         let (session_manager, session_engine) = session::new_manager();

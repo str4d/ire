@@ -1,6 +1,7 @@
 use data_encoding::{Encoding, Specification};
 use num_bigint::BigUint;
-use num_traits::Num;
+use num_traits::{Num, One};
+use std::ops::Sub;
 
 lazy_static! {
     pub static ref I2P_BASE64: Encoding = {
@@ -46,6 +47,8 @@ lazy_static! {
     pub static ref ELGAMAL_G: BigUint = BigUint::parse_bytes(b"2", 10).unwrap();
     pub static ref ELGAMAL_P: BigUint =
         BigUint::from_str_radix(RFC3526_2048BIT_MODP_GROUP, 16).unwrap();
+    pub static ref ELGAMAL_PM1: BigUint = (&(*ELGAMAL_P)).sub(BigUint::one());
+    pub static ref ELGAMAL_PM2: BigUint = (&(*ELGAMAL_PM1)).sub(BigUint::one());
 }
 
 // Certificate types

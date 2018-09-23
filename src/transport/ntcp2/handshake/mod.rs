@@ -3,7 +3,7 @@ use cookie_factory::GenError;
 use futures::{Async, Future, Poll};
 use i2p_snow::{Builder, Session};
 use nom::Err;
-use rand::{self, Rng};
+use rand::{OsRng, Rng};
 use siphasher::sip::SipHasher;
 use std::io;
 use std::net::SocketAddr;
@@ -139,7 +139,7 @@ where
                     ts_b.add_assign(Duration::from_millis(500));
                     let ts_b = ts_b.as_secs() as u32;
 
-                    let mut rng = rand::thread_rng();
+                    let mut rng = OsRng::new().expect("should be able to construct RNG");
                     // TODO: Sample padding sizes from an appropriate distribution
                     let sc_padlen = rng.gen_range(0, 16);
 
@@ -327,7 +327,7 @@ where
         }
 
         let sc_padlen = {
-            let mut rng = rand::thread_rng();
+            let mut rng = OsRng::new().expect("should be able to construct RNG");
             // TODO: Sample padding sizes from an appropriate distribution
             rng.gen_range(0, 16)
         };
@@ -394,7 +394,7 @@ where
                     ts_a.add_assign(Duration::from_millis(500));
                     let ts_a = ts_a.as_secs() as u32;
 
-                    let mut rng = rand::thread_rng();
+                    let mut rng = OsRng::new().expect("should be able to construct RNG");
                     // TODO: Sample padding sizes from an appropriate distribution
                     let padlen = rng.gen_range(0, 16);
 

@@ -28,7 +28,7 @@ and implemented.
     - [x] ECDSA_SHA384_P384
     - [ ] ECDSA_SHA512_P521
     - [x] Ed25519
-  - [ ] ElGamal
+  - [x] ElGamal
   - [x] AES256
 - I2NP
   - [x] Message parsing
