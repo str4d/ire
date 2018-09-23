@@ -6,7 +6,7 @@
 use futures;
 use tokio_io::IoFuture;
 
-use super::types::CommSystem;
+use super::types::{CommSystem, InboundMessageHandler, NetworkDatabase, PeerManager};
 use data::{Hash, RouterAddress, RouterSecretKeys};
 use i2np::Message;
 
@@ -31,3 +31,33 @@ impl CommSystem for MockCommSystem {
         Ok(Box::new(futures::finished(())))
     }
 }
+
+pub(super) struct MockPeerManager;
+
+impl MockPeerManager {
+    pub(super) fn new() -> Self {
+        MockPeerManager {}
+    }
+}
+
+impl PeerManager for MockPeerManager {}
+
+pub(super) struct MockInboundMessageHandler;
+
+impl MockInboundMessageHandler {
+    pub(super) fn new() -> Self {
+        MockInboundMessageHandler {}
+    }
+}
+
+impl InboundMessageHandler for MockInboundMessageHandler {}
+
+pub(super) struct MockNetworkDatabase;
+
+impl MockNetworkDatabase {
+    pub(super) fn new() -> Self {
+        MockNetworkDatabase {}
+    }
+}
+
+impl NetworkDatabase for MockNetworkDatabase {}

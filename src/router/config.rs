@@ -25,3 +25,16 @@ impl Config {
         }
     }
 }
+
+impl Default for Config {
+    fn default() -> Self {
+        // TODO: Real defaults
+        Config {
+            router_keyfile: "router.keys.dat".to_owned(),
+            ri_file: "router.info".to_owned(),
+            ntcp_addr: "127.0.0.1:0".parse().unwrap(),
+            ntcp2_addr: "127.0.0.1:0".parse().unwrap(),
+            ntcp2_keyfile: "router.ntcp2.keys.dat".to_owned(),
+        }
+    }
+}

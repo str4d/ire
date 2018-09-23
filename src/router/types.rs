@@ -22,3 +22,9 @@ pub trait CommSystem {
     /// Returns an Err giving back the message if it cannot be sent.
     fn send(&self, hash: Hash, msg: Message) -> Result<IoFuture<()>, (Hash, Message)>;
 }
+
+pub trait PeerManager {}
+
+pub trait InboundMessageHandler {}
+
+pub trait NetworkDatabase {}
