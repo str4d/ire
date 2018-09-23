@@ -20,6 +20,7 @@ use std::fmt;
 
 use constants;
 
+pub(crate) mod dh;
 pub(crate) mod frame;
 pub(crate) mod math;
 
