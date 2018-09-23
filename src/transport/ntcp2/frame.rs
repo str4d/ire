@@ -1,6 +1,6 @@
 use cookie_factory::*;
 use nom::{be_u16, be_u32, be_u64, be_u8};
-use rand::{self, Rng};
+use rand::{OsRng, Rng};
 
 use data::frame::{gen_router_info, router_info};
 use data::RouterInfo;
@@ -142,7 +142,7 @@ named!(
 
 fn gen_padding(input: (&mut [u8], usize), size: u16) -> Result<(&mut [u8], usize), GenError> {
     let mut padding = vec![0u8; size as usize];
-    let mut rng = rand::thread_rng();
+    let mut rng = OsRng::new().expect("should be able to construct RNG");
     rng.fill(&mut padding[..]);
     do_gen!(input, gen_be_u16!(size) >> gen_slice!(padding))
 }

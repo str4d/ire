@@ -4,7 +4,7 @@
 
 use cookie_factory::GenError;
 use nom::{Err, IResult};
-use rand::{self, Rng};
+use rand::{OsRng, Rng};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fmt;
@@ -194,7 +194,7 @@ impl RouterIdentity {
         let padding = match signing_key.sig_type().pad_len(&EncType::ElGamal2048) {
             0 => None,
             sz => {
-                let mut rng = rand::thread_rng();
+                let mut rng = OsRng::new().expect("should be able to construct RNG");
                 let mut padding = Vec::new();
                 padding.resize(sz, 0);
                 rng.fill(&mut padding[..]);

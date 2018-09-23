@@ -1,5 +1,5 @@
 use num_bigint::{BigUint, RandBigInt};
-use rand;
+use rand::OsRng;
 use std::iter::repeat;
 
 use constants::{ELGAMAL_G, ELGAMAL_P};
@@ -13,7 +13,7 @@ pub struct DHSessionKeyBuilder {
 
 impl DHSessionKeyBuilder {
     pub fn new() -> Self {
-        let mut rng = rand::thread_rng();
+        let mut rng = OsRng::new().expect("should be able to construct RNG");
         let dh_priv = rng.gen_biguint(2048);
         let dh_pub = ELGAMAL_G.modpow(&dh_priv, &ELGAMAL_P);
         DHSessionKeyBuilder { dh_priv, dh_pub }

@@ -4,7 +4,7 @@ use aes::{self, block_cipher_trait::generic_array::GenericArray};
 use block_modes::{block_padding::ZeroPadding, BlockMode, BlockModeIv, Cbc};
 use nom::Err;
 use num_bigint::BigUint;
-use rand::{self, Rng};
+use rand::{OsRng, Rng};
 use signatory::{
     curve::{NistP256, NistP384, WeierstrassCurve},
     ecdsa::{EcdsaPublicKey, FixedSignature},
@@ -200,7 +200,7 @@ pub struct PrivateKey(pub [u8; 256]);
 
 impl PrivateKey {
     pub fn new() -> Self {
-        let mut rng = rand::thread_rng();
+        let mut rng = OsRng::new().expect("should be able to construct RNG");
         let mut keydata = [0u8; 256];
         rng.fill(&mut keydata);
         PrivateKey(keydata)
