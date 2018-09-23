@@ -519,7 +519,7 @@ impl RouterInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tests::ROUTER_INFO;
+    use tests::{RI_SIGTYPE_1, RI_SIGTYPE_2, ROUTER_INFO};
 
     #[test]
     fn hash_xor() {
@@ -618,13 +618,27 @@ mod tests {
         assert!(ri.verify().is_ok());
     }
 
-    #[test]
-    fn router_info_verify() {
-        match frame::router_info(ROUTER_INFO) {
+    fn router_info_verify(data: &[u8]) {
+        match frame::router_info(data) {
             Ok((_, ri)) => {
                 assert!(ri.verify().is_ok());
             }
-            _ => panic!("RouterInfo parsing failed"),
+            Err(e) => panic!("RouterInfo parsing failed: {}", e),
         }
+    }
+
+    #[test]
+    fn router_info_verify_sigtype_1() {
+        router_info_verify(RI_SIGTYPE_1)
+    }
+
+    #[test]
+    fn router_info_verify_sigtype_2() {
+        router_info_verify(RI_SIGTYPE_2)
+    }
+
+    #[test]
+    fn router_info_verify_sigtype_7() {
+        router_info_verify(ROUTER_INFO)
     }
 }
