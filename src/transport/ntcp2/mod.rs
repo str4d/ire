@@ -573,7 +573,11 @@ impl Stream for Engine {
     type Error = ();
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        while let Async::Ready(f) = self.session_engine.poll(Block::Message, Block::DateTime)? {
+        while let Async::Ready(f) =
+            self.session_engine
+                .poll(Block::Message, Block::DateTime, |hash| {
+                    error!("No open session for {}", hash); // TODO: Connect to peer
+                })? {
             match f {
                 Some((from, Block::Message(msg))) => return Ok(Some((from, msg)).into()),
                 Some((from, block)) => {
@@ -677,7 +681,6 @@ mod tests {
         let alice_framed = TestCodec {}.framed(alice_net);
 
         let (manager, mut engine) = session::new_manager();
-        let mut session = Session::new(&rid, alice_framed, manager.refs());
 
         // Run on a task context
         lazy(move || {
@@ -690,11 +693,18 @@ mod tests {
             assert!(bob_net.read_to_end(&mut received).is_err());
             assert!(received.is_empty());
 
-            // Pass it through the engine, still not received
-            engine.poll(Block::Message, |_| panic!()).unwrap();
+            // Pass it through the engine, session is requested, message queued
+            engine
+                .poll(Block::Message, |_| panic!(), |h| assert_eq!(*h, hash))
+                .unwrap();
+
+            // Still not received
             received.clear();
             assert!(bob_net.read_to_end(&mut received).is_err());
             assert!(received.is_empty());
+
+            // Create a session
+            let mut session = Session::new(&rid, alice_framed, manager.refs());
 
             // Pass it through the session, now it's on the wire
             session.poll().unwrap();
@@ -725,13 +735,18 @@ mod tests {
             assert!(alice_net.write_all(DUMMY_MSG_NTCP2_DATA).is_ok());
 
             // Check it has not yet been received
-            engine.poll(|_| panic!(), |_| panic!()).unwrap();
+            engine
+                .poll(|_| panic!(), |_| panic!(), |_| panic!())
+                .unwrap();
 
             // Pass it through the session
             session.poll().unwrap();
 
             // The engine should receive it now
-            match engine.poll(|_| panic!(), |_| panic!()).unwrap() {
+            match engine
+                .poll(|_| panic!(), |_| panic!(), |_| panic!())
+                .unwrap()
+            {
                 Async::Ready(Some((h, block))) => {
                     assert_eq!(h, hash);
                     match block {

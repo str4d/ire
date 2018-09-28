@@ -27,12 +27,14 @@ pub(super) type SessionRx<Frame> = mpsc::UnboundedReceiver<Frame>;
 
 struct Shared<F> {
     sessions: HashMap<Hash, SessionTx<F>>,
+    pending_sessions: HashMap<Hash, Vec<F>>,
 }
 
 impl<F> Shared<F> {
     fn new() -> Self {
         Shared {
             sessions: HashMap::new(),
+            pending_sessions: HashMap::new(),
         }
     }
 }
@@ -50,11 +52,26 @@ impl<F> SessionState<F> {
         self.0.lock().unwrap().sessions.contains_key(hash)
     }
 
-    fn get<G>(&self, hash: &Hash, func: G)
+    fn send<P>(&self, hash: &Hash, frame: F, connect_to_peer: P)
     where
-        G: FnOnce(Option<&SessionTx<F>>),
+        P: FnOnce(),
     {
-        func(self.0.lock().unwrap().sessions.get(hash))
+        let mut s = self.0.lock().unwrap();
+
+        // If we have an established session, use it.
+        if let Some(session) = s.sessions.get(hash) {
+            session.unbounded_send(frame).unwrap();
+            return;
+        }
+
+        // Cache the frame for sending once we have a session.
+        s.pending_sessions
+            .entry(hash.clone())
+            .or_insert_with(|| {
+                // No pending session, let's create one
+                connect_to_peer();
+                vec![]
+            }).push(frame);
     }
 }
 
@@ -72,7 +89,22 @@ pub(super) struct SessionContext<F> {
 impl<F> SessionContext<F> {
     pub(super) fn new(hash: Hash, state: SessionState<F>, tx: SessionTx<F>) -> Self {
         info!("Session established with {}", hash);
-        state.0.lock().unwrap().sessions.insert(hash.clone(), tx);
+
+        {
+            let mut s = state.0.lock().unwrap();
+
+            // If there were any pending messages waiting for the session to
+            // open, queue them now for sending.
+            if let Some(msgs) = s.pending_sessions.remove(&hash) {
+                for msg in msgs {
+                    tx.unbounded_send(msg).unwrap();
+                }
+            }
+
+            // Store the session for future messages
+            s.sessions.insert(hash.clone(), tx);
+        }
+
         SessionContext { hash, state }
     }
 }
@@ -156,36 +188,30 @@ impl<F> SessionManager<F> {
 }
 
 impl<F> SessionEngine<F> {
-    pub fn poll<P, Q>(
+    pub fn poll<P, Q, R>(
         &mut self,
         frame_message: P,
         frame_timestamp: Q,
+        connect_to_peer: R,
     ) -> Poll<Option<(Hash, F)>, ()>
     where
         P: Fn(Message) -> F,
         Q: Fn(u32) -> F,
+        R: Fn(&Hash),
     {
         // Write timestamps first
         while let Async::Ready(f) = self.outbound_ts.poll().unwrap() {
             if let Some((hash, ts)) = f {
-                self.state.get(&hash, |s| match s {
-                    Some(session) => {
-                        session.unbounded_send(frame_timestamp(ts)).unwrap();
-                    }
-                    None => error!("No open session for {}", hash), // TODO: Open session instead of dropping
-                });
+                self.state
+                    .send(&hash, frame_timestamp(ts), || connect_to_peer(&hash));
             }
         }
 
         // Write messages
         while let Async::Ready(f) = self.outbound_msg.poll().unwrap() {
             if let Some((hash, msg)) = f {
-                self.state.get(&hash, |s| match s {
-                    Some(session) => {
-                        session.unbounded_send(frame_message(msg)).unwrap();
-                    }
-                    None => error!("No open session for {}", hash), // TODO: Open session instead of dropping
-                });
+                self.state
+                    .send(&hash, frame_message(msg), || connect_to_peer(&hash));
             }
         }
 
