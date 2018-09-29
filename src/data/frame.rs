@@ -115,8 +115,8 @@ fn split_signing_key<'a>(
     base_data: &[u8; constants::KEYCERT_SIGKEY_BYTES],
     cert: &Certificate,
 ) -> IResult<&'a [u8], SigningPublicKey> {
-    let res = match cert {
-        &Certificate::Key(ref kc) => {
+    let res = match *cert {
+        Certificate::Key(ref kc) => {
             if kc.sig_type.extra_data_len(&kc.enc_type) > 0 {
                 let mut data = Vec::from(&base_data[..]);
                 data.extend(&kc.sig_data);
@@ -152,8 +152,8 @@ fn keycert_padding<'a>(
     base_data: &[u8; 128],
     cert: &Certificate,
 ) -> IResult<&'a [u8], Option<Vec<u8>>> {
-    let spk = match cert {
-        &Certificate::Key(ref kc) => {
+    let spk = match *cert {
+        Certificate::Key(ref kc) => {
             let pad_len = kc.sig_type.pad_len(&kc.enc_type);
             if pad_len > 0 {
                 Some(Vec::from(&base_data[0..pad_len]))
@@ -227,28 +227,28 @@ pub fn gen_certificate<'a>(
     cert: &Certificate,
 ) -> Result<(&'a mut [u8], usize), GenError> {
     #[cfg_attr(rustfmt, rustfmt_skip)]
-    match cert {
-        &Certificate::Null => gen_be_u8!(input, constants::NULL_CERT),
-        &Certificate::HashCash(ref payload) => do_gen!(
+    match *cert {
+        Certificate::Null => gen_be_u8!(input, constants::NULL_CERT),
+        Certificate::HashCash(ref payload) => do_gen!(
             input,
             gen_be_u8!(constants::HASH_CERT) >>
             gen_be_u16!(payload.len() as u16) >>
             gen_slice!(&payload)
         ),
-        &Certificate::Hidden => gen_be_u8!(input, constants::HIDDEN_CERT),
-        &Certificate::Signed(ref payload) => do_gen!(
+        Certificate::Hidden => gen_be_u8!(input, constants::HIDDEN_CERT),
+        Certificate::Signed(ref payload) => do_gen!(
             input,
             gen_be_u8!(constants::SIGNED_CERT) >>
             gen_be_u16!(payload.len() as u16) >>
             gen_slice!(&payload)
         ),
-        &Certificate::Multiple(ref payload) => do_gen!(
+        Certificate::Multiple(ref payload) => do_gen!(
             input,
             gen_be_u8!(constants::MULTI_CERT) >>
             gen_be_u16!(payload.len() as u16) >>
             gen_slice!(&payload)
         ),
-        &Certificate::Key(ref kc) => do_gen!(
+        Certificate::Key(ref kc) => do_gen!(
             input,
                    gen_be_u8!(constants::KEY_CERT) >>
             size:  gen_skip!(2) >>
@@ -501,9 +501,9 @@ pub fn gen_router_info<'a>(
     input: (&'a mut [u8], usize),
     ri: &RouterInfo,
 ) -> Result<(&'a mut [u8], usize), GenError> {
-    match &ri.signature {
-        &Some(ref s) => do_gen!(input, gen_router_info_minus_sig(&ri) >> gen_signature(s)),
-        &None => Err(GenError::CustomError(1)),
+    match ri.signature {
+        Some(ref s) => do_gen!(input, gen_router_info_minus_sig(&ri) >> gen_signature(s)),
+        None => Err(GenError::CustomError(1)),
     }
 }
 

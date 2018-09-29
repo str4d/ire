@@ -506,12 +506,12 @@ impl RouterInfo {
     }
 
     pub fn verify(&self) -> Result<(), crypto::Error> {
-        match &self.signature.as_ref() {
-            &Some(s) => {
+        match self.signature.as_ref() {
+            Some(s) => {
                 let sig_msg = self.signature_bytes();
                 self.router_id.signing_key.verify(&sig_msg, s)
             }
-            &None => Err(crypto::Error::NoSignature),
+            None => Err(crypto::Error::NoSignature),
         }
     }
 }

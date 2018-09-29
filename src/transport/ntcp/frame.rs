@@ -133,9 +133,9 @@ pub fn gen_frame<'a>(
     input: (&'a mut [u8], usize),
     frame: &Frame,
 ) -> Result<(&'a mut [u8], usize), GenError> {
-    match frame {
-        &Frame::Standard(ref msg) => gen_standard_frame(input, &msg),
-        &Frame::TimeSync(ts) => gen_timestamp_frame(input, ts),
+    match *frame {
+        Frame::Standard(ref msg) => gen_standard_frame(input, &msg),
+        Frame::TimeSync(ts) => gen_timestamp_frame(input, ts),
     }
 }
 

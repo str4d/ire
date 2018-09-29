@@ -180,32 +180,32 @@ pub enum MessagePayload {
 
 impl fmt::Debug for MessagePayload {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            &MessagePayload::DatabaseStore(ref ds) => {
+        match *self {
+            MessagePayload::DatabaseStore(ref ds) => {
                 format!("DatabaseStore (key: {:?})", ds.key).fmt(formatter)
             }
-            &MessagePayload::DatabaseLookup(ref dl) => {
+            MessagePayload::DatabaseLookup(ref dl) => {
                 format!("DatabaseLookup (key: {:?})", dl.key).fmt(formatter)
             }
-            &MessagePayload::DatabaseSearchReply(ref dsr) => {
+            MessagePayload::DatabaseSearchReply(ref dsr) => {
                 format!("DatabaseSearchReply (key: {:?})", dsr.key).fmt(formatter)
             }
-            &MessagePayload::DeliveryStatus(ref ds) => format!(
+            MessagePayload::DeliveryStatus(ref ds) => format!(
                 "DeliveryStatus (mid: {:?}, ts: {:?})",
                 ds.msg_id, ds.time_stamp
             ).fmt(formatter),
-            &MessagePayload::Garlic(_) => "Garlic".fmt(formatter),
-            &MessagePayload::TunnelData(ref td) => {
+            MessagePayload::Garlic(_) => "Garlic".fmt(formatter),
+            MessagePayload::TunnelData(ref td) => {
                 format!("TunnelData (tid: {:?})", td.tid).fmt(formatter)
             }
-            &MessagePayload::TunnelGateway(ref tg) => {
+            MessagePayload::TunnelGateway(ref tg) => {
                 format!("TunnelGateway (tid: {:?})", tg.tid).fmt(formatter)
             }
-            &MessagePayload::Data(_) => "Data".fmt(formatter),
-            &MessagePayload::TunnelBuild(_) => "TunnelBuild".fmt(formatter),
-            &MessagePayload::TunnelBuildReply(_) => "TunnelBuildReply".fmt(formatter),
-            &MessagePayload::VariableTunnelBuild(_) => "VariableTunnelBuild".fmt(formatter),
-            &MessagePayload::VariableTunnelBuildReply(_) => {
+            MessagePayload::Data(_) => "Data".fmt(formatter),
+            MessagePayload::TunnelBuild(_) => "TunnelBuild".fmt(formatter),
+            MessagePayload::TunnelBuildReply(_) => "TunnelBuildReply".fmt(formatter),
+            MessagePayload::VariableTunnelBuild(_) => "VariableTunnelBuild".fmt(formatter),
+            MessagePayload::VariableTunnelBuildReply(_) => {
                 "VariableTunnelBuildReply".fmt(formatter)
             }
         }

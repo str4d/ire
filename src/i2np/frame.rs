@@ -187,9 +187,9 @@ fn gen_database_store_data<'a>(
     input: (&'a mut [u8], usize),
     data: &DatabaseStoreData,
 ) -> Result<(&'a mut [u8], usize), GenError> {
-    match data {
-        &DatabaseStoreData::RI(ref ri) => gen_compressed_ri(input, &ri),
-        &DatabaseStoreData::LS(ref ls) => gen_lease_set(input, &ls),
+    match *data {
+        DatabaseStoreData::RI(ref ri) => gen_compressed_ri(input, &ri),
+        DatabaseStoreData::LS(ref ls) => gen_lease_set(input, &ls),
     }
 }
 
@@ -729,19 +729,19 @@ fn gen_message_type<'a>(
     input: (&'a mut [u8], usize),
     msg: &Message,
 ) -> Result<(&'a mut [u8], usize), GenError> {
-    let msg_type = match &msg.payload {
-        &MessagePayload::DatabaseStore(_) => 1,
-        &MessagePayload::DatabaseLookup(_) => 2,
-        &MessagePayload::DatabaseSearchReply(_) => 3,
-        &MessagePayload::DeliveryStatus(_) => 10,
-        &MessagePayload::Garlic(_) => 11,
-        &MessagePayload::TunnelData(_) => 18,
-        &MessagePayload::TunnelGateway(_) => 19,
-        &MessagePayload::Data(_) => 20,
-        &MessagePayload::TunnelBuild(_) => 21,
-        &MessagePayload::TunnelBuildReply(_) => 22,
-        &MessagePayload::VariableTunnelBuild(_) => 23,
-        &MessagePayload::VariableTunnelBuildReply(_) => 24,
+    let msg_type = match msg.payload {
+        MessagePayload::DatabaseStore(_) => 1,
+        MessagePayload::DatabaseLookup(_) => 2,
+        MessagePayload::DatabaseSearchReply(_) => 3,
+        MessagePayload::DeliveryStatus(_) => 10,
+        MessagePayload::Garlic(_) => 11,
+        MessagePayload::TunnelData(_) => 18,
+        MessagePayload::TunnelGateway(_) => 19,
+        MessagePayload::Data(_) => 20,
+        MessagePayload::TunnelBuild(_) => 21,
+        MessagePayload::TunnelBuildReply(_) => 22,
+        MessagePayload::VariableTunnelBuild(_) => 23,
+        MessagePayload::VariableTunnelBuildReply(_) => 24,
     };
     gen_be_u8!(input, msg_type)
 }
@@ -750,19 +750,19 @@ fn gen_payload<'a>(
     input: (&'a mut [u8], usize),
     payload: &MessagePayload,
 ) -> Result<(&'a mut [u8], usize), GenError> {
-    match payload {
-        &MessagePayload::DatabaseStore(ref ds) => gen_database_store(input, &ds),
-        &MessagePayload::DatabaseLookup(ref dl) => gen_database_lookup(input, &dl),
-        &MessagePayload::DatabaseSearchReply(ref dsr) => gen_database_search_reply(input, &dsr),
-        &MessagePayload::DeliveryStatus(ref ds) => gen_delivery_status(input, &ds),
-        &MessagePayload::Garlic(ref g) => gen_garlic(input, &g),
-        &MessagePayload::TunnelData(ref td) => gen_tunnel_data(input, &td),
-        &MessagePayload::TunnelGateway(ref tg) => gen_tunnel_gateway(input, &tg),
-        &MessagePayload::Data(ref d) => gen_data(input, &d),
-        &MessagePayload::TunnelBuild(tb) => gen_tunnel_build(input, &tb),
-        &MessagePayload::TunnelBuildReply(tbr) => gen_tunnel_build_reply(input, &tbr),
-        &MessagePayload::VariableTunnelBuild(ref vtb) => gen_variable_tunnel_build(input, &vtb),
-        &MessagePayload::VariableTunnelBuildReply(ref vtbr) => {
+    match *payload {
+        MessagePayload::DatabaseStore(ref ds) => gen_database_store(input, &ds),
+        MessagePayload::DatabaseLookup(ref dl) => gen_database_lookup(input, &dl),
+        MessagePayload::DatabaseSearchReply(ref dsr) => gen_database_search_reply(input, &dsr),
+        MessagePayload::DeliveryStatus(ref ds) => gen_delivery_status(input, &ds),
+        MessagePayload::Garlic(ref g) => gen_garlic(input, &g),
+        MessagePayload::TunnelData(ref td) => gen_tunnel_data(input, &td),
+        MessagePayload::TunnelGateway(ref tg) => gen_tunnel_gateway(input, &tg),
+        MessagePayload::Data(ref d) => gen_data(input, &d),
+        MessagePayload::TunnelBuild(tb) => gen_tunnel_build(input, &tb),
+        MessagePayload::TunnelBuildReply(tbr) => gen_tunnel_build_reply(input, &tbr),
+        MessagePayload::VariableTunnelBuild(ref vtb) => gen_variable_tunnel_build(input, &vtb),
+        MessagePayload::VariableTunnelBuildReply(ref vtbr) => {
             gen_variable_tunnel_build_reply(input, &vtbr)
         }
     }

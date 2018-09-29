@@ -188,16 +188,16 @@ fn gen_block<'a>(
         };
     }
 
-    match block {
-        &Block::DateTime(ts) => blockgen!(0, gen_datetime(ts)),
-        &Block::Options(ref options) => blockgen!(1, gen_options(options)),
-        &Block::RouterInfo(ref ri, ref flags) => blockgen!(2, gen_routerinfo(ri, flags)),
-        &Block::Message(ref message) => blockgen!(3, gen_message(message)),
-        &Block::Termination(valid_received, rsn, ref addl_data) => {
+    match *block {
+        Block::DateTime(ts) => blockgen!(0, gen_datetime(ts)),
+        Block::Options(ref options) => blockgen!(1, gen_options(options)),
+        Block::RouterInfo(ref ri, ref flags) => blockgen!(2, gen_routerinfo(ri, flags)),
+        Block::Message(ref message) => blockgen!(3, gen_message(message)),
+        Block::Termination(valid_received, rsn, ref addl_data) => {
             blockgen!(4, gen_termination(valid_received, rsn, addl_data))
         }
-        &Block::Padding(size) => blockgen!(254, gen_padding(size)),
-        &Block::Unknown(blk, ref data) => blockgen!(blk, gen_unknown(data)),
+        Block::Padding(size) => blockgen!(254, gen_padding(size)),
+        Block::Unknown(blk, ref data) => blockgen!(blk, gen_unknown(data)),
     }
 }
 
