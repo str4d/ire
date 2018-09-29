@@ -51,7 +51,7 @@ named!(pub session_created_enc<(Vec<u8>, Vec<u8>)>,
 
 pub fn gen_session_created_enc<'a>(
     input: (&'a mut [u8], usize),
-    dh_y: &Vec<u8>,
+    dh_y: &[u8],
     ct: &[u8; 48],
 ) -> Result<(&'a mut [u8], usize), GenError> {
     do_gen!(input, gen_slice!(dh_y) >> gen_slice!(ct))
@@ -98,8 +98,8 @@ pub fn gen_session_created_dec<'a>(
 
 pub fn gen_session_confirm_sig_msg<'a>(
     input: (&'a mut [u8], usize),
-    dh_x: &Vec<u8>,
-    dh_y: &Vec<u8>,
+    dh_x: &[u8],
+    dh_y: &[u8],
     ri: &RouterIdentity,
     ts_a: u32,
     ts_b: u32,

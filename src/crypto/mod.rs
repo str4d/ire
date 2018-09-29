@@ -334,7 +334,7 @@ impl SigningPrivateKey {
         }
     }
 
-    pub fn sign(&self, msg: &Vec<u8>) -> Result<Signature, Error> {
+    pub fn sign(&self, msg: &[u8]) -> Result<Signature, Error> {
         match *self {
             SigningPrivateKey::DsaSha1 => unimplemented!(),
             SigningPrivateKey::EcdsaSha256P256 => unimplemented!(),

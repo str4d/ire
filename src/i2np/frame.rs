@@ -512,10 +512,7 @@ named!(
     do_parse!(data: length_bytes!(be_u32) >> (MessagePayload::Data(Vec::from(data))))
 );
 
-fn gen_data<'a>(
-    input: (&'a mut [u8], usize),
-    d: &Vec<u8>,
-) -> Result<(&'a mut [u8], usize), GenError> {
+fn gen_data<'a>(input: (&'a mut [u8], usize), d: &[u8]) -> Result<(&'a mut [u8], usize), GenError> {
     do_gen!(input, gen_be_u32!(d.len()) >> gen_slice!(d))
 }
 
@@ -594,7 +591,7 @@ fn variable_tunnel_build<'a>(input: &'a [u8]) -> IResult<&'a [u8], MessagePayloa
 
 fn gen_variable_tunnel_build<'a>(
     input: (&'a mut [u8], usize),
-    tb: &Vec<[u8; 528]>,
+    tb: &[[u8; 528]],
 ) -> Result<(&'a mut [u8], usize), GenError> {
     // TODO: Fail if tb is too big
     let mut x = gen_be_u8!(input, tb.len() as u8)?;
@@ -623,7 +620,7 @@ fn variable_tunnel_build_reply<'a>(input: &'a [u8]) -> IResult<&'a [u8], Message
 
 fn gen_variable_tunnel_build_reply<'a>(
     input: (&'a mut [u8], usize),
-    tbr: &Vec<[u8; 528]>,
+    tbr: &[[u8; 528]],
 ) -> Result<(&'a mut [u8], usize), GenError> {
     // TODO: Fail if tbr is too big
     let mut x = gen_be_u8!(input, tbr.len() as u8)?;

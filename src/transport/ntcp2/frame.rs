@@ -33,7 +33,7 @@ named!(
 
 fn gen_options<'a>(
     input: (&'a mut [u8], usize),
-    options: &Vec<u8>,
+    options: &[u8],
 ) -> Result<(&'a mut [u8], usize), GenError> {
     do_gen!(input, gen_be_u16!(options.len()) >> gen_slice!(options))
 }
