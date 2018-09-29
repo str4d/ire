@@ -336,7 +336,7 @@ impl Decoder for OutboundHandshakeCodec {
                                         Err(Err::Incomplete(_)) => {
                                             return Err(io::Error::new(
                                                 io::ErrorKind::Other,
-                                                format!("incomplete parse error"),
+                                                "incomplete parse error".to_string(),
                                             ))
                                         }
                                         Err(Err::Error(e)) | Err(Err::Failure(e)) => {

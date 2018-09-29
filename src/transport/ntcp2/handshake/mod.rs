@@ -303,7 +303,7 @@ where
             Some(ra) => ra,
             None => match peer_ri.address(&NTCP_STYLE, filter) {
                 Some(ra) => ra,
-                None => return Err(format!("No valid NTCP2 addresses")),
+                None => return Err("No valid NTCP2 addresses".to_string()),
             },
         };
 
@@ -313,7 +313,7 @@ where
                 Ok(key) => key,
                 Err(e) => return Err(format!("Invalid static key in address: {}", e)),
             },
-            None => return Err(format!("No static key in address")),
+            None => return Err("No static key in address".to_string()),
         };
 
         let aesobfse_key = peer_ri.router_id.hash().0;
@@ -323,7 +323,7 @@ where
                 Ok(iv) => aesobfse_iv.copy_from_slice(&iv),
                 Err(e) => return Err(format!("Invalid IV in address: {}", e)),
             },
-            None => return Err(format!("No IV in address")),
+            None => return Err("No IV in address".to_string()),
         }
 
         let sc_padlen = {
@@ -347,7 +347,7 @@ where
                 }
                 GenError::InvalidOffset
                 | GenError::CustomError(_)
-                | GenError::NotYetImplemented => return Err(format!("could not generate")),
+                | GenError::NotYetImplemented => return Err("could not generate".to_string()),
             },
         };
         sc_buf.truncate(sc_len);
