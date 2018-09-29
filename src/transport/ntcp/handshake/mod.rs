@@ -516,7 +516,7 @@ fn gen_session_confirm_sig_msg(state: &SharedHandshakeState, own_ri: bool) -> Ve
                 GenError::BufferTooSmall(sz) => {
                     buf.extend(repeat(0).take(sz - base_len));
                 }
-                _ => panic!("Couldn't serialize Signature message (Own RI? {})"),
+                _ => panic!("Couldn't serialize Signature message (Own RI?): {:?}", e),
             },
         }
     }
@@ -666,7 +666,7 @@ where
                     {
                         return Err(io::Error::new(
                             io::ErrorKind::ConnectionRefused,
-                            "Invalid SessionConfirmA signature",
+                            format!("Invalid SessionConfirmA signature: {:?}", e),
                         ));
                     }
 
@@ -856,7 +856,7 @@ where
                     {
                         return Err(io::Error::new(
                             io::ErrorKind::ConnectionRefused,
-                            "Invalid SessionConfirmB signature",
+                            format!("Invalid SessionConfirmB signature: {:?}", e),
                         ));
                     }
 

@@ -809,7 +809,7 @@ mod tests {
             res.resize($expected.len(), 0);
             match $oven((&mut res, 0), &$value) {
                 Ok(_) => assert_eq!(&res, &$expected),
-                Err(_) => panic!(),
+                Err(e) => panic!("Unexpected error: {:?}", e),
             }
             match $monster(&res) {
                 Ok((_, m)) => assert_eq!(m, $value),

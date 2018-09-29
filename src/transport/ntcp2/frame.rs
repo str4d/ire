@@ -311,7 +311,7 @@ mod tests {
             res.resize($expected.len(), 0);
             match $oven((&mut res, 0), &$value) {
                 Ok(_) => assert_eq!(&res, &$expected),
-                Err(_) => panic!(),
+                Err(e) => panic!("Unexpected error: {:?}", e),
             }
             match $monster(&res) {
                 Ok((_, m)) => assert_eq!(m, $value),
@@ -346,7 +346,7 @@ mod tests {
     fn test_router_info() {
         let ri = match router_info(ROUTER_INFO) {
             Ok((_, ri)) => ri,
-            Err(_) => panic!(),
+            Err(e) => panic!("Unexpected error: {:?}", e),
         };
         let mut ri_block = vec![0x02, 0x02, 0x9f, 0x01];
         ri_block.extend_from_slice(ROUTER_INFO);
@@ -396,13 +396,13 @@ mod tests {
         res1.resize(13, 0);
         match gen_block((&mut res1, 0), &pad_block) {
             Ok(_) => (),
-            Err(_) => panic!(),
+            Err(e) => panic!("Unexpected error: {:?}", e),
         }
         let mut res2 = vec![];
         res2.resize(13, 0);
         match gen_block((&mut res2, 0), &pad_block) {
             Ok(_) => (),
-            Err(_) => panic!(),
+            Err(e) => panic!("Unexpected error: {:?}", e),
         }
         // Headers should be equal
         assert_eq!(&res1[..3], &res2[..3]);
@@ -430,7 +430,7 @@ mod tests {
                     0x00, 0x00, 0x00
                 ]
             ),
-            Err(_) => panic!(),
+            Err(e) => panic!("Unexpected error: {:?}", e),
         }
         match session_request(&res) {
             Ok((_, sr)) => assert_eq!(sr, (0x12, 0x3456, 0x789a, 0xbcdef123)),
@@ -450,7 +450,7 @@ mod tests {
                     0x00, 0x00, 0x00
                 ]
             ),
-            Err(_) => panic!(),
+            Err(e) => panic!("Unexpected error: {:?}", e),
         }
         match session_created(&res) {
             Ok((_, sr)) => assert_eq!(sr, (0x1234, 0x56789abc)),
