@@ -68,10 +68,7 @@ pub fn gen_mapping_pair<'a>(
 ) -> Result<(&'a mut [u8], usize), GenError> {
     do_gen!(
         input,
-        gen_i2p_string(pair.0)
-            >> gen_slice!("=".as_bytes())
-            >> gen_i2p_string(pair.1)
-            >> gen_slice!(";".as_bytes())
+        gen_i2p_string(pair.0) >> gen_slice!(b"=") >> gen_i2p_string(pair.1) >> gen_slice!(b";")
     )
 }
 pub fn gen_mapping<'a>(
