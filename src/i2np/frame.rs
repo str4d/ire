@@ -708,7 +708,7 @@ named!(pub message<Message>,
         (Message {
             id: hdr.1,
             expiration: hdr.2,
-            payload: payload,
+            payload,
         })
     )
 );
@@ -720,7 +720,7 @@ named!(pub ntcp2_message<Message>,
         (Message {
             id: hdr.1,
             expiration: hdr.2,
-            payload: payload,
+            payload,
         })
     )
 );

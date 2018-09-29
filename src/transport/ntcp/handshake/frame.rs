@@ -23,7 +23,7 @@ named!(pub session_request<HandshakeFrame>,
         hash: hash >>
         (HandshakeFrame::SessionRequest(SessionRequest {
             dh_x: Vec::from(dh_x),
-            hash: hash,
+            hash,
         }))
     )
 );

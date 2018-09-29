@@ -150,7 +150,7 @@ impl TunnelData {
     fn from(tid: TunnelId, data: &[u8; 1024]) -> Self {
         let mut x = [0u8; 1024];
         x.copy_from_slice(data);
-        TunnelData { tid: tid, data: x }
+        TunnelData { tid, data: x }
     }
 }
 

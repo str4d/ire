@@ -156,7 +156,7 @@ where
         let (tx, rx) = mpsc::unbounded();
         Session {
             _ctx: SessionContext::new(ri.hash(), session_refs.state, tx),
-            ri: ri,
+            ri,
             upstream,
             engine: session_refs.engine,
             outbound: rx,
