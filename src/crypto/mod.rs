@@ -58,8 +58,8 @@ impl SigType {
         }
     }
 
-    pub fn code(&self) -> u16 {
-        match *self {
+    pub fn code(self) -> u16 {
+        match self {
             SigType::DsaSha1 => constants::DSA_SHA1,
             SigType::EcdsaSha256P256 => constants::ECDSA_SHA256_P256,
             SigType::EcdsaSha384P384 => constants::ECDSA_SHA384_P384,
@@ -68,8 +68,8 @@ impl SigType {
         }
     }
 
-    pub fn pubkey_len(&self) -> u32 {
-        match *self {
+    pub fn pubkey_len(self) -> u32 {
+        match self {
             SigType::DsaSha1 => 128,
             SigType::EcdsaSha256P256 => <NistP256 as WeierstrassCurve>::UntaggedPointSize::to_u32(),
             SigType::EcdsaSha384P384 => <NistP384 as WeierstrassCurve>::UntaggedPointSize::to_u32(),
@@ -78,8 +78,8 @@ impl SigType {
         }
     }
 
-    pub fn privkey_len(&self) -> u32 {
-        match *self {
+    pub fn privkey_len(self) -> u32 {
+        match self {
             SigType::DsaSha1 => 20,
             SigType::EcdsaSha256P256 => <NistP256 as WeierstrassCurve>::ScalarSize::to_u32(),
             SigType::EcdsaSha384P384 => <NistP384 as WeierstrassCurve>::ScalarSize::to_u32(),
@@ -88,8 +88,8 @@ impl SigType {
         }
     }
 
-    pub fn sig_len(&self) -> u32 {
-        match *self {
+    pub fn sig_len(self) -> u32 {
+        match self {
             SigType::DsaSha1 => 40,
             SigType::EcdsaSha256P256 => {
                 <NistP256 as WeierstrassCurve>::FixedSignatureSize::to_u32()
@@ -103,16 +103,16 @@ impl SigType {
     }
 
     // Returns a number between 0 and 128
-    pub fn pad_len(&self, enc_type: &EncType) -> usize {
-        match *enc_type {
+    pub fn pad_len(self, enc_type: EncType) -> usize {
+        match enc_type {
             EncType::ElGamal2048 => {
                 constants::KEYCERT_SIGKEY_BYTES.saturating_sub(self.pubkey_len() as usize)
             }
         }
     }
 
-    pub fn extra_data_len(&self, enc_type: &EncType) -> usize {
-        match *enc_type {
+    pub fn extra_data_len(self, enc_type: EncType) -> usize {
+        match enc_type {
             EncType::ElGamal2048 => {
                 (self.pubkey_len() as usize).saturating_sub(constants::KEYCERT_SIGKEY_BYTES)
             }
@@ -121,7 +121,7 @@ impl SigType {
 }
 
 /// Various encryption algorithms present on the network.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum EncType {
     ElGamal2048,
 }
@@ -135,14 +135,14 @@ impl EncType {
         }
     }
 
-    pub fn code(&self) -> u16 {
-        match *self {
+    pub fn code(self) -> u16 {
+        match self {
             EncType::ElGamal2048 => constants::ELGAMAL2048,
         }
     }
 
-    pub fn extra_data_len(&self, sig_type: &SigType) -> usize {
-        match *self {
+    pub fn extra_data_len(self, sig_type: SigType) -> usize {
+        match self {
             EncType::ElGamal2048 => 0,
         }
     }
@@ -231,8 +231,8 @@ impl SigningPublicKey {
 }
 
 impl SigningPublicKey {
-    pub fn from_bytes(sig_type: &SigType, data: &[u8]) -> Result<Self, Error> {
-        match *sig_type {
+    pub fn from_bytes(sig_type: SigType, data: &[u8]) -> Result<Self, Error> {
+        match sig_type {
             SigType::DsaSha1 => unimplemented!(),
             SigType::EcdsaSha256P256 => Ok(SigningPublicKey::EcdsaSha256P256(
                 EcdsaPublicKey::from_untagged_point(GenericArray::from_slice(data)),
@@ -301,11 +301,11 @@ pub enum SigningPrivateKey {
 
 impl SigningPrivateKey {
     pub fn new() -> Self {
-        SigningPrivateKey::with_type(&SigType::Ed25519)
+        SigningPrivateKey::with_type(SigType::Ed25519)
     }
 
-    pub fn with_type(sig_type: &SigType) -> Self {
-        match *sig_type {
+    pub fn with_type(sig_type: SigType) -> Self {
+        match sig_type {
             SigType::DsaSha1 => unimplemented!(),
             SigType::EcdsaSha256P256 => unimplemented!(),
             SigType::EcdsaSha384P384 => unimplemented!(),
@@ -314,8 +314,8 @@ impl SigningPrivateKey {
         }
     }
 
-    pub fn from_bytes(sig_type: &SigType, data: &[u8]) -> Result<Self, Error> {
-        match *sig_type {
+    pub fn from_bytes(sig_type: SigType, data: &[u8]) -> Result<Self, Error> {
+        match sig_type {
             SigType::DsaSha1 => unimplemented!(),
             SigType::EcdsaSha256P256 => unimplemented!(),
             SigType::EcdsaSha384P384 => unimplemented!(),
@@ -373,8 +373,8 @@ pub enum Signature {
 }
 
 impl Signature {
-    pub fn from_bytes(sig_type: &SigType, data: &[u8]) -> Result<Self, Error> {
-        match *sig_type {
+    pub fn from_bytes(sig_type: SigType, data: &[u8]) -> Result<Self, Error> {
+        match sig_type {
             SigType::DsaSha1 => unimplemented!(),
             SigType::EcdsaSha256P256 => Ok(Signature::EcdsaSha256P256(FixedSignature::from_bytes(
                 data,
@@ -466,29 +466,29 @@ mod tests {
 
     #[test]
     fn test_sig_type_pad_len() {
-        assert_eq!(SigType::DsaSha1.pad_len(&EncType::ElGamal2048), 0);
-        assert_eq!(SigType::EcdsaSha256P256.pad_len(&EncType::ElGamal2048), 64);
-        assert_eq!(SigType::EcdsaSha384P384.pad_len(&EncType::ElGamal2048), 32);
-        assert_eq!(SigType::EcdsaSha512P521.pad_len(&EncType::ElGamal2048), 0);
-        assert_eq!(SigType::Ed25519.pad_len(&EncType::ElGamal2048), 96);
+        assert_eq!(SigType::DsaSha1.pad_len(EncType::ElGamal2048), 0);
+        assert_eq!(SigType::EcdsaSha256P256.pad_len(EncType::ElGamal2048), 64);
+        assert_eq!(SigType::EcdsaSha384P384.pad_len(EncType::ElGamal2048), 32);
+        assert_eq!(SigType::EcdsaSha512P521.pad_len(EncType::ElGamal2048), 0);
+        assert_eq!(SigType::Ed25519.pad_len(EncType::ElGamal2048), 96);
     }
 
     #[test]
     fn test_sig_type_extra_data_len() {
-        assert_eq!(SigType::DsaSha1.extra_data_len(&EncType::ElGamal2048), 0);
+        assert_eq!(SigType::DsaSha1.extra_data_len(EncType::ElGamal2048), 0);
         assert_eq!(
-            SigType::EcdsaSha256P256.extra_data_len(&EncType::ElGamal2048),
+            SigType::EcdsaSha256P256.extra_data_len(EncType::ElGamal2048),
             0
         );
         assert_eq!(
-            SigType::EcdsaSha384P384.extra_data_len(&EncType::ElGamal2048),
+            SigType::EcdsaSha384P384.extra_data_len(EncType::ElGamal2048),
             0
         );
         assert_eq!(
-            SigType::EcdsaSha512P521.extra_data_len(&EncType::ElGamal2048),
+            SigType::EcdsaSha512P521.extra_data_len(EncType::ElGamal2048),
             4
         );
-        assert_eq!(SigType::Ed25519.extra_data_len(&EncType::ElGamal2048), 0);
+        assert_eq!(SigType::Ed25519.extra_data_len(EncType::ElGamal2048), 0);
     }
 
     #[test]

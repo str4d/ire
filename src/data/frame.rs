@@ -114,16 +114,16 @@ fn split_signing_key<'a>(
 ) -> IResult<&'a [u8], SigningPublicKey> {
     let res = match *cert {
         Certificate::Key(ref kc) => {
-            if kc.sig_type.extra_data_len(&kc.enc_type) > 0 {
+            if kc.sig_type.extra_data_len(kc.enc_type) > 0 {
                 let mut data = Vec::from(&base_data[..]);
                 data.extend(&kc.sig_data);
-                SigningPublicKey::from_bytes(&kc.sig_type, &data)
+                SigningPublicKey::from_bytes(kc.sig_type, &data)
             } else {
-                let pad = kc.sig_type.pad_len(&kc.enc_type);
-                SigningPublicKey::from_bytes(&kc.sig_type, &base_data[pad..])
+                let pad = kc.sig_type.pad_len(kc.enc_type);
+                SigningPublicKey::from_bytes(kc.sig_type, &base_data[pad..])
             }
         }
-        _ => SigningPublicKey::from_bytes(&SigType::DsaSha1, &base_data[..]),
+        _ => SigningPublicKey::from_bytes(SigType::DsaSha1, &base_data[..]),
     };
     match res {
         Ok(spk) => Ok((input, spk)),
@@ -151,7 +151,7 @@ fn keycert_padding<'a>(
 ) -> IResult<&'a [u8], Option<Vec<u8>>> {
     let spk = match *cert {
         Certificate::Key(ref kc) => {
-            let pad_len = kc.sig_type.pad_len(&kc.enc_type);
+            let pad_len = kc.sig_type.pad_len(kc.enc_type);
             if pad_len > 0 {
                 Some(Vec::from(&base_data[0..pad_len]))
             } else {
@@ -169,8 +169,8 @@ named!(
     do_parse!(
         sig_type: sig_type >>
         enc_type: enc_type >>
-        sig_data: take!(sig_type.extra_data_len(&enc_type)) >>
-        enc_data: take!(enc_type.extra_data_len(&sig_type)) >>
+        sig_data: take!(sig_type.extra_data_len(enc_type)) >>
+        enc_data: take!(enc_type.extra_data_len(sig_type)) >>
         (KeyCertificate {
             sig_type,
             enc_type,
@@ -186,8 +186,8 @@ fn gen_key_certificate<'a>(
 ) -> Result<(&'a mut [u8], usize), GenError> {
     do_gen!(
         input,
-        gen_sig_type(&kc.sig_type)
-            >> gen_enc_type(&kc.enc_type)
+        gen_sig_type(kc.sig_type)
+            >> gen_enc_type(kc.enc_type)
             >> gen_slice!(&kc.sig_data)
             >> gen_slice!(&kc.enc_data)
     )
@@ -396,7 +396,7 @@ named!(pub lease_set<LeaseSet>,
         enc_key: public_key >>
         sig_key: call!(signing_key, dest.signing_key.sig_type()) >>
         leases:  length_count!(be_u8, lease) >>
-        sig:     call!(signature, &dest.signing_key.sig_type()) >>
+        sig:     call!(signature, dest.signing_key.sig_type()) >>
         (LeaseSet {
             sig_key,
             dest,
@@ -465,7 +465,7 @@ named!(pub router_info<RouterInfo>,
         addresses: length_count!(be_u8, router_address) >>
         peers:     length_count!(be_u8, hash) >>
         options:   mapping >>
-        signature: call!(signature, &router_id.signing_key.sig_type()) >>
+        signature: call!(signature, router_id.signing_key.sig_type()) >>
         (RouterInfo {
             router_id,
             published,

@@ -190,7 +190,7 @@ impl RouterIdentity {
             }),
             _ => panic!("Not implemented!"),
         };
-        let padding = match signing_key.sig_type().pad_len(&EncType::ElGamal2048) {
+        let padding = match signing_key.sig_type().pad_len(EncType::ElGamal2048) {
             0 => None,
             sz => {
                 let mut rng = OsRng::new().expect("should be able to construct RNG");
