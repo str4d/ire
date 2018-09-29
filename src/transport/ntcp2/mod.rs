@@ -551,10 +551,7 @@ impl Stream for Engine {
     type Error = ();
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        while let Async::Ready(f) = self
-            .session_engine
-            .poll(|msg| Block::Message(msg), |ts| Block::DateTime(ts))?
-        {
+        while let Async::Ready(f) = self.session_engine.poll(Block::Message, Block::DateTime)? {
             match f {
                 Some((from, Block::Message(msg))) => return Ok(Some((from, msg)).into()),
                 Some((from, block)) => {
@@ -672,9 +669,7 @@ mod tests {
             assert!(received.is_empty());
 
             // Pass it through the engine, still not received
-            engine
-                .poll(|msg| Block::Message(msg), |_| panic!())
-                .unwrap();
+            engine.poll(Block::Message, |_| panic!()).unwrap();
             received.clear();
             assert!(bob_net.read_to_end(&mut received).is_err());
             assert!(received.is_empty());
