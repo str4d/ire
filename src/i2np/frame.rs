@@ -67,7 +67,7 @@ pub fn build_request_record<'a>(
 
 fn validate_build_response_record<'a>(
     input: &'a [u8],
-    hash: Hash,
+    hash: &Hash,
     padding: &[u8],
     reply: u8,
 ) -> IResult<&'a [u8], ()> {
@@ -87,7 +87,7 @@ named!(pub build_response_record<BuildResponseRecord>,
         hash:    hash >>
         padding: take!(495) >>
         reply:   be_u8 >>
-                 call!(validate_build_response_record, hash, padding, reply) >>
+                 call!(validate_build_response_record, &hash, padding, reply) >>
         (BuildResponseRecord { reply })
     )
 );

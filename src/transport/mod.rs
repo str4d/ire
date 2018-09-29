@@ -131,7 +131,7 @@ impl CommSystem for Manager {
                 e
             });
 
-        let listener2 = self.ntcp2.listen(rsk.rid).map_err(|e| {
+        let listener2 = self.ntcp2.listen(&rsk.rid).map_err(|e| {
             error!("NTCP2 listener error: {}", e);
             e
         });

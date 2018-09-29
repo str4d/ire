@@ -283,7 +283,7 @@ where
     pub fn new<F>(
         conn: F,
         static_key: &[u8],
-        own_ri: RouterInfo,
+        own_ri: &RouterInfo,
         peer_ri: RouterInfo,
     ) -> Result<OBHandshake<T>, String>
     where
@@ -333,7 +333,7 @@ where
         };
 
         let mut sc_buf = vec![0u8; NTCP2_MTU - 16];
-        let sc_len = match frame::gen_session_confirmed((&mut sc_buf, 0), &own_ri, sc_padlen)
+        let sc_len = match frame::gen_session_confirmed((&mut sc_buf, 0), own_ri, sc_padlen)
             .map(|tup| tup.1)
         {
             Ok(sz) => sz,
@@ -594,7 +594,7 @@ mod tests {
         let mut alice = OBHandshake::new(
             |_| Box::new(done(Ok(alice_net))),
             &bob_static_public_key,
-            alice_ri,
+            &alice_ri,
             bob_ri,
         ).unwrap();
         let mut bob = IBHandshake::new(

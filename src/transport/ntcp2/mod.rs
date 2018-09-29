@@ -257,7 +257,7 @@ where
     C: Decoder<Item = Frame, Error = io::Error>,
     C: Encoder<Item = Frame, Error = io::Error>,
 {
-    fn new(ri: RouterIdentity, upstream: Framed<T, C>, session_refs: SessionRefs<Block>) -> Self {
+    fn new(ri: &RouterIdentity, upstream: Framed<T, C>, session_refs: SessionRefs<Block>) -> Self {
         let (tx, rx) = mpsc::unbounded();
         Session {
             ctx: SessionContext::new(ri.hash(), session_refs.state, tx),
@@ -472,7 +472,7 @@ impl Manager {
         ra
     }
 
-    pub fn listen(&self, own_rid: RouterIdentity) -> impl Future<Item = (), Error = io::Error> {
+    pub fn listen(&self, own_rid: &RouterIdentity) -> impl Future<Item = (), Error = io::Error> {
         info!("Listening on {}", self.addr);
 
         // Bind to the address
@@ -492,7 +492,7 @@ impl Manager {
             let conn = handshake::IBHandshake::new(conn, &static_key, &aesobfse_key, &aesobfse_iv);
 
             // Once connected:
-            let process_conn = conn.and_then(|(ri, conn)| Session::new(ri, conn, session_refs));
+            let process_conn = conn.and_then(|(ri, conn)| Session::new(&ri, conn, session_refs));
 
             spawn(process_conn.map_err(|e| error!("Error while listening: {:?}", e)));
             Ok(())
@@ -501,14 +501,14 @@ impl Manager {
 
     pub fn connect(
         &self,
-        own_ri: RouterInfo,
+        own_ri: &RouterInfo,
         peer_ri: RouterInfo,
     ) -> io::Result<impl Future<Item = (), Error = io::Error>> {
         // Connect to the peer
         let transport = match handshake::OBHandshake::new(
             |sa| Box::new(TcpStream::connect(sa)),
             &self.static_private_key,
-            own_ri,
+            &own_ri,
             peer_ri,
         ) {
             Ok(t) => t,
@@ -522,7 +522,7 @@ impl Manager {
         // Once connected:
         let session_refs = self.session_manager.refs();
         Ok(timed.and_then(|(ri, conn)| {
-            let session = Session::new(ri, conn, session_refs);
+            let session = Session::new(&ri, conn, session_refs);
             spawn(session.map_err(|_| ()));
             Ok(())
         }))
@@ -655,7 +655,7 @@ mod tests {
         let alice_framed = TestCodec {}.framed(alice_net);
 
         let (manager, mut engine) = session::new_manager();
-        let mut session = Session::new(rid, alice_framed, manager.refs());
+        let mut session = Session::new(&rid, alice_framed, manager.refs());
 
         // Run on a task context
         lazy(move || {
@@ -695,7 +695,7 @@ mod tests {
         let bob_framed = TestCodec {}.framed(bob_net);
 
         let (manager, mut engine) = session::new_manager();
-        let mut session = Session::new(rid, bob_framed, manager.refs());
+        let mut session = Session::new(&rid, bob_framed, manager.refs());
 
         // Run on a task context
         lazy(move || {
