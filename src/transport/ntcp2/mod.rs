@@ -144,7 +144,7 @@ impl Decoder for Codec {
             }
 
             // Update masker state
-            let mut masker = self.dec_len_masker.clone();
+            let mut masker = self.dec_len_masker;
             masker.write_u64(self.dec_len_iv);
             self.dec_len_iv = masker.finish();
 
@@ -201,7 +201,7 @@ impl Encoder for Codec {
                 buf.extend(repeat(0).take(2 + msg_len));
 
                 // Update masker state
-                let mut masker = self.enc_len_masker.clone();
+                let mut masker = self.enc_len_masker;
                 masker.write_u64(self.enc_len_iv);
                 self.enc_len_iv = masker.finish();
 
@@ -479,7 +479,7 @@ impl Manager {
         let listener = TcpListener::bind(&self.addr).unwrap();
         let static_key = self.static_private_key.clone();
         let aesobfse_key = own_rid.hash().0;
-        let aesobfse_iv = self.aesobfse_iv.clone();
+        let aesobfse_iv = self.aesobfse_iv;
 
         // Give each incoming connection the references it needs
         let session_refs = self.session_manager.refs();
