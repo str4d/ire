@@ -447,9 +447,9 @@ impl Manager {
 
     pub fn to_file(&self, path: &str) -> io::Result<()> {
         let mut data = Vec::with_capacity(96);
-        data.write(&self.static_private_key)?;
-        data.write(&self.static_public_key)?;
-        data.write(&self.aesobfse_iv)?;
+        data.write_all(&self.static_private_key)?;
+        data.write_all(&self.static_public_key)?;
+        data.write_all(&self.aesobfse_iv)?;
         let mut keys = File::create(path)?;
         keys.write(&data).map(|_| ())
     }
