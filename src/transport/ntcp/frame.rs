@@ -17,10 +17,10 @@ pub fn padding(input: &[u8], content_len: usize) -> IResult<&[u8], &[u8]> {
     take!(input, padding_len(content_len))
 }
 
-pub fn gen_padding<'a>(
-    input: (&'a mut [u8], usize),
+pub fn gen_padding(
+    input: (&mut [u8], usize),
     content_len: usize,
-) -> Result<(&'a mut [u8], usize), GenError> {
+) -> Result<(&mut [u8], usize), GenError> {
     let pad_len = padding_len(content_len);
     // TODO: Fill this with random padding
     gen_skip!(input, pad_len)
@@ -58,11 +58,11 @@ named!(
     ))
 );
 
-fn gen_adler<'a>(
-    input: (&'a mut [u8], usize),
+fn gen_adler(
+    input: (&mut [u8], usize),
     start: usize,
     end: usize,
-) -> Result<(&'a mut [u8], usize), GenError> {
+) -> Result<(&mut [u8], usize), GenError> {
     let cs = adler(&input.0[start..end]);
     gen_slice!(input, cs)
 }
@@ -94,10 +94,10 @@ fn gen_standard_frame<'a>(
 // +-----+-----------+---------+-------+
 //  short    long      octets    octets
 
-fn gen_timestamp_frame<'a>(
-    input: (&'a mut [u8], usize),
+fn gen_timestamp_frame(
+    input: (&mut [u8], usize),
     timestamp: u32,
-) -> Result<(&'a mut [u8], usize), GenError> {
+) -> Result<(&mut [u8], usize), GenError> {
     #[cfg_attr(rustfmt, rustfmt_skip)]
     do_gen!(
         input,

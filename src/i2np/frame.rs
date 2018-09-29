@@ -652,11 +652,11 @@ fn validate_checksum<'a>(input: &'a [u8], cs: u8, buf: &[u8]) -> IResult<&'a [u8
     }
 }
 
-fn gen_checksum<'a>(
-    input: (&'a mut [u8], usize),
+fn gen_checksum(
+    input: (&mut [u8], usize),
     start: usize,
     end: usize,
-) -> Result<(&'a mut [u8], usize), GenError> {
+) -> Result<(&mut [u8], usize), GenError> {
     gen_be_u8!(input, checksum(&input.0[start..end]))
 }
 

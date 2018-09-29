@@ -17,10 +17,10 @@ named!(pub sig_type<SigType>,
     )
 );
 
-pub fn gen_sig_type<'a>(
-    input: (&'a mut [u8], usize),
+pub fn gen_sig_type(
+    input: (&mut [u8], usize),
     sig_type: SigType,
-) -> Result<(&'a mut [u8], usize), GenError> {
+) -> Result<(&mut [u8], usize), GenError> {
     gen_be_u16!(input, sig_type.code())
 }
 
@@ -30,10 +30,10 @@ named!(pub enc_type<EncType>,
     )
 );
 
-pub fn gen_enc_type<'a>(
-    input: (&'a mut [u8], usize),
+pub fn gen_enc_type(
+    input: (&mut [u8], usize),
     enc_type: EncType,
-) -> Result<(&'a mut [u8], usize), GenError> {
+) -> Result<(&mut [u8], usize), GenError> {
     gen_be_u16!(input, enc_type.code())
 }
 
