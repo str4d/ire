@@ -371,13 +371,13 @@ fn gen_garlic_clove_delivery_instructions<'a>(
     input: (&'a mut [u8], usize),
     gcdi: &GarlicCloveDeliveryInstructions,
 ) -> Result<(&'a mut [u8], usize), GenError> {
-    let mut flags: u8 = 0;
+    let mut flags: u8 = 0b0000_0000;
     if gcdi.encrypted {
-        flags |= 0b10000000;
+        flags |= 0b1000_0000;
     }
-    flags |= (gcdi.delivery_type << 5) & 0b1100000;
+    flags |= (gcdi.delivery_type << 5) & 0b0110_0000;
     if gcdi.delay_set {
-        flags |= 0b10000;
+        flags |= 0b0001_0000;
     }
     #[cfg_attr(rustfmt, rustfmt_skip)]
     do_gen!(
@@ -863,10 +863,10 @@ mod tests {
 
         eval!(
             Message {
-                id: 0x12345678,
+                id: 0x1234_5678,
                 expiration: I2PDate::from_system_time(UNIX_EPOCH),
                 payload: MessagePayload::DeliveryStatus(DeliveryStatus {
-                    msg_id: 0x7b3fbba9,
+                    msg_id: 0x7b3f_bba9,
                     time_stamp: I2PDate::from_system_time(UNIX_EPOCH)
                 }),
             },
@@ -896,10 +896,10 @@ mod tests {
 
         eval!(
             Message {
-                id: 0x12345678,
+                id: 0x1234_5678,
                 expiration: I2PDate::from_system_time(UNIX_EPOCH),
                 payload: MessagePayload::DeliveryStatus(DeliveryStatus {
-                    msg_id: 0x7b3fbba9,
+                    msg_id: 0x7b3f_bba9,
                     time_stamp: I2PDate::from_system_time(UNIX_EPOCH)
                 }),
             },

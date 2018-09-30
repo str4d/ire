@@ -521,7 +521,7 @@ mod tests {
                 println!("parsed: {:?}", ri);
                 assert_eq!(ri.router_id.signing_key.sig_type(), SigType::Ed25519);
                 assert_eq!(ri.router_id.certificate.code(), constants::KEY_CERT);
-                assert_eq!(ri.published, I2PDate(1505588133655));
+                assert_eq!(ri.published, I2PDate(1_505_588_133_655));
                 assert_eq!(ri.addresses.len(), 2);
                 assert_eq!(ri.peers.len(), 0);
                 assert_eq!(

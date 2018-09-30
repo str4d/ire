@@ -254,7 +254,7 @@ impl Message {
         // TODO Random id, correct expiration
         Message {
             id: 0,
-            expiration: I2PDate(0x123456787c0),
+            expiration: I2PDate(0x123_4567_87c0),
             payload,
         }
     }
@@ -262,7 +262,7 @@ impl Message {
     pub fn dummy_data() -> Self {
         Message {
             id: 0,
-            expiration: I2PDate(0x123456787c0),
+            expiration: I2PDate(0x123_4567_87c0),
             payload: MessagePayload::Data(vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]),
         }
     }

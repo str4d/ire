@@ -362,7 +362,7 @@ mod tests {
         eval_block!(
             Block::Message(Message {
                 id: 0,
-                expiration: I2PDate::from_system_time(UNIX_EPOCH + Duration::new(1524874654, 0)),
+                expiration: I2PDate::from_system_time(UNIX_EPOCH + Duration::new(1_524_874_654, 0)),
                 payload: MessagePayload::Data(vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]),
             }),
             [
@@ -422,7 +422,7 @@ mod tests {
     fn test_session_request() {
         let mut res = vec![];
         res.resize(16, 0);
-        match gen_session_request((&mut res, 0), 0x12, 0x3456, 0x789a, 0xbcdef123) {
+        match gen_session_request((&mut res, 0), 0x12, 0x3456, 0x789a, 0xbcde_f123) {
             Ok(_) => assert_eq!(
                 &res,
                 &[
@@ -433,7 +433,7 @@ mod tests {
             Err(e) => panic!("Unexpected error: {:?}", e),
         }
         match session_request(&res) {
-            Ok((_, sr)) => assert_eq!(sr, (0x12, 0x3456, 0x789a, 0xbcdef123)),
+            Ok((_, sr)) => assert_eq!(sr, (0x12, 0x3456, 0x789a, 0xbcde_f123)),
             Err(e) => panic!("Unexpected error: {:?}", e),
         }
     }
@@ -442,7 +442,7 @@ mod tests {
     fn test_session_created() {
         let mut res = vec![];
         res.resize(16, 0);
-        match gen_session_created((&mut res, 0), 0x1234, 0x56789abc) {
+        match gen_session_created((&mut res, 0), 0x1234, 0x5678_9abc) {
             Ok(_) => assert_eq!(
                 &res,
                 &[
@@ -453,7 +453,7 @@ mod tests {
             Err(e) => panic!("Unexpected error: {:?}", e),
         }
         match session_created(&res) {
-            Ok((_, sr)) => assert_eq!(sr, (0x1234, 0x56789abc)),
+            Ok((_, sr)) => assert_eq!(sr, (0x1234, 0x5678_9abc)),
             Err(e) => panic!("Unexpected error: {:?}", e),
         }
     }

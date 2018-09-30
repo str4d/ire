@@ -251,7 +251,7 @@ mod tests {
     #[test]
     fn gen_timestamp_frame_valid() {
         let mut buf = vec![0u8; 16];
-        match gen_timestamp_frame((&mut buf[..], 0), 12345678).map(|tup| tup.1) {
+        match gen_timestamp_frame((&mut buf[..], 0), 12_345_678).map(|tup| tup.1) {
             Ok(sz) => {
                 assert_eq!(sz, 16);
                 assert_eq!(&buf[0..2], &[0x00, 0x00]);
@@ -266,7 +266,7 @@ mod tests {
     #[test]
     fn gen_timestamp_frame_small_buffer() {
         let mut buf = vec![0u8; 12];
-        match gen_timestamp_frame((&mut buf[..], 0), 12345678).map(|tup| tup.1) {
+        match gen_timestamp_frame((&mut buf[..], 0), 12_345_678).map(|tup| tup.1) {
             Ok(sz) => {
                 panic!("Returned {:?} bytes", sz);
             }
