@@ -407,7 +407,7 @@ mod tests {
         // Headers should be equal
         assert_eq!(&res1[..3], &res2[..3]);
         // Padding should not be equal
-        assert!(&res1[..] != &res2[..]);
+        assert!(res1 != res2);
     }
 
     #[test]

@@ -34,8 +34,8 @@ pub fn gen_padding(
 fn adler(input: &[u8]) -> [u8; 4] {
     let mut s1: u32 = 1;
     let mut s2: u32 = 0;
-    for i in 0..input.len() {
-        s1 += u32::from(input[i]);
+    for x in input {
+        s1 += u32::from(*x);
         s1 %= 65521;
         s2 += s1;
         s2 %= 65521;

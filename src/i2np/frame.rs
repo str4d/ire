@@ -837,7 +837,7 @@ mod tests {
         let res = gen_checksum((&mut b[..], 0), 1, 8);
         assert!(res.is_ok());
         let (o, n) = res.unwrap();
-        assert_eq!(o.as_ref(), &a[..]);
+        assert_eq!(o, &a[..]);
         assert_eq!(n, 1);
     }
 
