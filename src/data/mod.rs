@@ -425,18 +425,12 @@ impl RouterInfo {
     where
         F: Fn(&RouterAddress) -> bool,
     {
-        let addrs: Vec<&RouterAddress> = self
-            .addresses
+        self.addresses
             .iter()
             .filter(|a| a.transport_style == *style)
             .filter(|a| a.addr().unwrap().is_ipv4())
-            .filter(|a| filter(a))
-            .collect();
-        if addrs.len() > 0 {
-            Some(addrs[0].clone())
-        } else {
-            None
-        }
+            .find(|a| filter(a))
+            .map(|a| (*a).clone())
     }
 
     pub fn from_file(path: &str) -> io::Result<Self> {
