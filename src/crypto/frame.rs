@@ -17,10 +17,10 @@ named!(pub sig_type<SigType>,
     )
 );
 
-pub fn gen_sig_type<'a>(
-    input: (&'a mut [u8], usize),
-    sig_type: &SigType,
-) -> Result<(&'a mut [u8], usize), GenError> {
+pub fn gen_sig_type(
+    input: (&mut [u8], usize),
+    sig_type: SigType,
+) -> Result<(&mut [u8], usize), GenError> {
     gen_be_u16!(input, sig_type.code())
 }
 
@@ -30,10 +30,10 @@ named!(pub enc_type<EncType>,
     )
 );
 
-pub fn gen_enc_type<'a>(
-    input: (&'a mut [u8], usize),
-    enc_type: &EncType,
-) -> Result<(&'a mut [u8], usize), GenError> {
+pub fn gen_enc_type(
+    input: (&mut [u8], usize),
+    enc_type: EncType,
+) -> Result<(&mut [u8], usize), GenError> {
     gen_be_u16!(input, enc_type.code())
 }
 
@@ -83,7 +83,7 @@ pub fn gen_private_key<'a>(
 pub fn signing_key<'a>(input: &'a [u8], sig_type: SigType) -> IResult<&'a [u8], SigningPublicKey> {
     match do_parse!(
         input,
-        sig_key: take!(sig_type.pubkey_len()) >> (SigningPublicKey::from_bytes(&sig_type, sig_key))
+        sig_key: take!(sig_type.pubkey_len()) >> (SigningPublicKey::from_bytes(sig_type, sig_key))
     )? {
         (i, Ok(value)) => Ok((i, value)),
         (_, Err(_)) => Err(Err::Error(error_position!(input, ErrorKind::Custom(1)))),
@@ -105,8 +105,7 @@ pub fn signing_private_key<'a>(
 ) -> IResult<&'a [u8], SigningPrivateKey> {
     match do_parse!(
         input,
-        sig_key: take!(sig_type.pubkey_len())
-            >> (SigningPrivateKey::from_bytes(&sig_type, sig_key))
+        sig_key: take!(sig_type.pubkey_len()) >> (SigningPrivateKey::from_bytes(sig_type, sig_key))
     )? {
         (i, Ok(value)) => Ok((i, value)),
         (_, Err(_)) => Err(Err::Error(error_position!(input, ErrorKind::Custom(1)))),
@@ -122,7 +121,7 @@ pub fn gen_signing_private_key<'a>(
 
 // Signature
 
-pub fn signature<'a>(input: &'a [u8], sig_type: &SigType) -> IResult<&'a [u8], Signature> {
+pub fn signature<'a>(input: &'a [u8], sig_type: SigType) -> IResult<&'a [u8], Signature> {
     match do_parse!(
         input,
         sig: take!(sig_type.sig_len()) >> (Signature::from_bytes(sig_type, sig))

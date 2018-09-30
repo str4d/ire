@@ -26,7 +26,9 @@ use crypto::{Aes256, SigningPrivateKey};
 use data::{Hash, I2PString, RouterAddress, RouterIdentity, RouterInfo};
 use i2np::Message;
 
+#[allow(needless_pass_by_value)]
 mod frame;
+
 mod handshake;
 
 lazy_static! {
@@ -49,9 +51,9 @@ use std::fmt;
 
 impl fmt::Debug for Frame {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            &Frame::Standard(_) => "Standard message".fmt(formatter),
-            &Frame::TimeSync(ts) => format!("Timesync ({})", ts).fmt(formatter),
+        match *self {
+            Frame::Standard(_) => "Standard message".fmt(formatter),
+            Frame::TimeSync(ts) => format!("Timesync ({})", ts).fmt(formatter),
         }
     }
 }
@@ -156,7 +158,7 @@ where
         let (tx, rx) = mpsc::unbounded();
         Session {
             _ctx: SessionContext::new(ri.hash(), session_refs.state, tx),
-            ri: ri,
+            ri,
             upstream,
             engine: session_refs.engine,
             outbound: rx,
@@ -328,10 +330,7 @@ impl Stream for Engine {
     type Error = ();
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        while let Async::Ready(f) = self
-            .session_engine
-            .poll(|msg| Frame::Standard(msg), |ts| Frame::TimeSync(ts))?
-        {
+        while let Async::Ready(f) = self.session_engine.poll(Frame::Standard, Frame::TimeSync)? {
             match f {
                 Some((from, Frame::Standard(msg))) => return Ok(Some((from, msg)).into()),
                 Some((from, frame)) => {
@@ -418,7 +417,7 @@ mod tests {
         static ref DUMMY_MSG: Message = Message::dummy_data();
     }
 
-    const DUMMY_MSG_NTCP_DATA: &'static [u8] = &[
+    const DUMMY_MSG_NTCP_DATA: &[u8] = &[
         0x00, 0x1e, 0x14, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x23, 0x45, 0x67, 0x87, 0xc0,
         0x00, 0x0e, 0x2c, 0x00, 0x00, 0x00, 0x0a, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
         0x08, 0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x53,
@@ -449,9 +448,7 @@ mod tests {
             assert!(received.is_empty());
 
             // Pass it through the engine, still not received
-            engine
-                .poll(|msg| Frame::Standard(msg), |_| panic!())
-                .unwrap();
+            engine.poll(Frame::Standard, |_| panic!()).unwrap();
             received.clear();
             assert!(bob_net.read_to_end(&mut received).is_err());
             assert!(received.is_empty());

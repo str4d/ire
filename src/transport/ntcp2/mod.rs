@@ -57,7 +57,9 @@ use constants::I2P_BASE64;
 use data::{Hash, I2PString, RouterAddress, RouterIdentity, RouterInfo};
 use i2np::{DatabaseStore, Message, MessagePayload};
 
+#[allow(needless_pass_by_value)]
 mod frame;
+
 mod handshake;
 
 lazy_static! {
@@ -101,20 +103,20 @@ pub enum Block {
 
 impl fmt::Debug for Block {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            &Block::DateTime(ts) => format!("DateTime ({})", ts).fmt(formatter),
-            &Block::Options(_) => "Options".fmt(formatter),
-            &Block::RouterInfo(ref ri, ref flags) => format!(
+        match *self {
+            Block::DateTime(ts) => format!("DateTime ({})", ts).fmt(formatter),
+            Block::Options(_) => "Options".fmt(formatter),
+            Block::RouterInfo(ref ri, ref flags) => format!(
                 "RouterInfo ({}, flood: {})",
                 ri.router_id.hash(),
                 flags.flood
             ).fmt(formatter),
-            &Block::Message(_) => "I2NP message".fmt(formatter),
-            &Block::Termination(_, rsn, _) => {
+            Block::Message(_) => "I2NP message".fmt(formatter),
+            Block::Termination(_, rsn, _) => {
                 format!("Termination (reason: {})", rsn).fmt(formatter)
             }
-            &Block::Padding(size) => format!("Padding ({} bytes)", size).fmt(formatter),
-            &Block::Unknown(blk, ref data) => {
+            Block::Padding(size) => format!("Padding ({} bytes)", size).fmt(formatter),
+            Block::Unknown(blk, ref data) => {
                 format!("Unknown (type: {}, {} bytes)", blk, data.len()).fmt(formatter)
             }
         }
@@ -138,13 +140,13 @@ impl Decoder for Codec {
     type Error = io::Error;
 
     fn decode(&mut self, buf: &mut BytesMut) -> io::Result<Option<Frame>> {
-        if let None = self.next_len {
+        if self.next_len.is_none() {
             if buf.len() < 2 {
                 return Ok(None);
             }
 
             // Update masker state
-            let mut masker = self.dec_len_masker.clone();
+            let mut masker = self.dec_len_masker;
             masker.write_u64(self.dec_len_iv);
             self.dec_len_iv = masker.finish();
 
@@ -201,7 +203,7 @@ impl Encoder for Codec {
                 buf.extend(repeat(0).take(2 + msg_len));
 
                 // Update masker state
-                let mut masker = self.enc_len_masker.clone();
+                let mut masker = self.enc_len_masker;
                 masker.write_u64(self.enc_len_iv);
                 self.enc_len_iv = masker.finish();
 
@@ -257,7 +259,7 @@ where
     C: Decoder<Item = Frame, Error = io::Error>,
     C: Encoder<Item = Frame, Error = io::Error>,
 {
-    fn new(ri: RouterIdentity, upstream: Framed<T, C>, session_refs: SessionRefs<Block>) -> Self {
+    fn new(ri: &RouterIdentity, upstream: Framed<T, C>, session_refs: SessionRefs<Block>) -> Self {
         let (tx, rx) = mpsc::unbounded();
         Session {
             ctx: SessionContext::new(ri.hash(), session_refs.state, tx),
@@ -447,9 +449,9 @@ impl Manager {
 
     pub fn to_file(&self, path: &str) -> io::Result<()> {
         let mut data = Vec::with_capacity(96);
-        data.write(&self.static_private_key)?;
-        data.write(&self.static_public_key)?;
-        data.write(&self.aesobfse_iv)?;
+        data.write_all(&self.static_private_key)?;
+        data.write_all(&self.static_public_key)?;
+        data.write_all(&self.aesobfse_iv)?;
         let mut keys = File::create(path)?;
         keys.write(&data).map(|_| ())
     }
@@ -472,14 +474,14 @@ impl Manager {
         ra
     }
 
-    pub fn listen(&self, own_rid: RouterIdentity) -> impl Future<Item = (), Error = io::Error> {
+    pub fn listen(&self, own_rid: &RouterIdentity) -> impl Future<Item = (), Error = io::Error> {
         info!("Listening on {}", self.addr);
 
         // Bind to the address
         let listener = TcpListener::bind(&self.addr).unwrap();
         let static_key = self.static_private_key.clone();
         let aesobfse_key = own_rid.hash().0;
-        let aesobfse_iv = self.aesobfse_iv.clone();
+        let aesobfse_iv = self.aesobfse_iv;
 
         // Give each incoming connection the references it needs
         let session_refs = self.session_manager.refs();
@@ -492,7 +494,7 @@ impl Manager {
             let conn = handshake::IBHandshake::new(conn, &static_key, &aesobfse_key, &aesobfse_iv);
 
             // Once connected:
-            let process_conn = conn.and_then(|(ri, conn)| Session::new(ri, conn, session_refs));
+            let process_conn = conn.and_then(|(ri, conn)| Session::new(&ri, conn, session_refs));
 
             spawn(process_conn.map_err(|e| error!("Error while listening: {:?}", e)));
             Ok(())
@@ -501,14 +503,14 @@ impl Manager {
 
     pub fn connect(
         &self,
-        own_ri: RouterInfo,
+        own_ri: &RouterInfo,
         peer_ri: RouterInfo,
     ) -> io::Result<impl Future<Item = (), Error = io::Error>> {
         // Connect to the peer
         let transport = match handshake::OBHandshake::new(
             |sa| Box::new(TcpStream::connect(sa)),
             &self.static_private_key,
-            own_ri,
+            &own_ri,
             peer_ri,
         ) {
             Ok(t) => t,
@@ -522,7 +524,7 @@ impl Manager {
         // Once connected:
         let session_refs = self.session_manager.refs();
         Ok(timed.and_then(|(ri, conn)| {
-            let session = Session::new(ri, conn, session_refs);
+            let session = Session::new(&ri, conn, session_refs);
             spawn(session.map_err(|_| ()));
             Ok(())
         }))
@@ -551,10 +553,7 @@ impl Stream for Engine {
     type Error = ();
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        while let Async::Ready(f) = self
-            .session_engine
-            .poll(|msg| Block::Message(msg), |ts| Block::DateTime(ts))?
-        {
+        while let Async::Ready(f) = self.session_engine.poll(Block::Message, Block::DateTime)? {
             match f {
                 Some((from, Block::Message(msg))) => return Ok(Some((from, msg)).into()),
                 Some((from, block)) => {
@@ -643,7 +642,7 @@ mod tests {
         static ref DUMMY_MSG: Message = Message::dummy_data();
     }
 
-    const DUMMY_MSG_NTCP2_DATA: &'static [u8] = &[
+    const DUMMY_MSG_NTCP2_DATA: &[u8] = &[
         0x03, 0x00, 0x17, 0x14, 0x00, 0x00, 0x00, 0x00, 0x4a, 0x90, 0xbe, 0x58, 0x00, 0x00, 0x00,
         0x0a, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09,
     ];
@@ -658,7 +657,7 @@ mod tests {
         let alice_framed = TestCodec {}.framed(alice_net);
 
         let (manager, mut engine) = session::new_manager();
-        let mut session = Session::new(rid, alice_framed, manager.refs());
+        let mut session = Session::new(&rid, alice_framed, manager.refs());
 
         // Run on a task context
         lazy(move || {
@@ -672,9 +671,7 @@ mod tests {
             assert!(received.is_empty());
 
             // Pass it through the engine, still not received
-            engine
-                .poll(|msg| Block::Message(msg), |_| panic!())
-                .unwrap();
+            engine.poll(Block::Message, |_| panic!()).unwrap();
             received.clear();
             assert!(bob_net.read_to_end(&mut received).is_err());
             assert!(received.is_empty());
@@ -700,7 +697,7 @@ mod tests {
         let bob_framed = TestCodec {}.framed(bob_net);
 
         let (manager, mut engine) = session::new_manager();
-        let mut session = Session::new(rid, bob_framed, manager.refs());
+        let mut session = Session::new(&rid, bob_framed, manager.refs());
 
         // Run on a task context
         lazy(move || {

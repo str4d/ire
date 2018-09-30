@@ -20,6 +20,7 @@ use crypto::{
     SigningPublicKey,
 };
 
+#[allow(needless_pass_by_value)]
 pub(crate) mod frame;
 
 //
@@ -64,8 +65,10 @@ pub struct I2PDate(pub(crate) u64);
 
 impl I2PDate {
     pub fn from_system_time(t: SystemTime) -> Self {
-        let d = t.duration_since(UNIX_EPOCH).unwrap_or(Duration::new(0, 0));
-        I2PDate(d.as_secs() * 1_000 + (d.subsec_nanos() / 1_000_000) as u64)
+        let d = t
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_else(|_| Duration::new(0, 0));
+        I2PDate(d.as_secs() * 1_000 + u64::from(d.subsec_millis()))
     }
 }
 
@@ -190,7 +193,7 @@ impl RouterIdentity {
             }),
             _ => panic!("Not implemented!"),
         };
-        let padding = match signing_key.sig_type().pad_len(&EncType::ElGamal2048) {
+        let padding = match signing_key.sig_type().pad_len(EncType::ElGamal2048) {
             0 => None,
             sz => {
                 let mut rng = OsRng::new().expect("should be able to construct RNG");
@@ -423,18 +426,12 @@ impl RouterInfo {
     where
         F: Fn(&RouterAddress) -> bool,
     {
-        let addrs: Vec<&RouterAddress> = self
-            .addresses
+        self.addresses
             .iter()
             .filter(|a| a.transport_style == *style)
             .filter(|a| a.addr().unwrap().is_ipv4())
-            .filter(|a| filter(a))
-            .collect();
-        if addrs.len() > 0 {
-            Some(addrs[0].clone())
-        } else {
-            None
-        }
+            .find(|a| filter(a))
+            .map(|a| (*a).clone())
     }
 
     pub fn from_file(path: &str) -> io::Result<Self> {
@@ -506,12 +503,12 @@ impl RouterInfo {
     }
 
     pub fn verify(&self) -> Result<(), crypto::Error> {
-        match &self.signature.as_ref() {
-            &Some(s) => {
+        match self.signature.as_ref() {
+            Some(s) => {
                 let sig_msg = self.signature_bytes();
                 self.router_id.signing_key.verify(&sig_msg, s)
             }
-            &None => Err(crypto::Error::NoSignature),
+            None => Err(crypto::Error::NoSignature),
         }
     }
 }

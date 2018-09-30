@@ -17,10 +17,10 @@ pub fn padding(input: &[u8], content_len: usize) -> IResult<&[u8], &[u8]> {
     take!(input, padding_len(content_len))
 }
 
-pub fn gen_padding<'a>(
-    input: (&'a mut [u8], usize),
+pub fn gen_padding(
+    input: (&mut [u8], usize),
     content_len: usize,
-) -> Result<(&'a mut [u8], usize), GenError> {
+) -> Result<(&mut [u8], usize), GenError> {
     let pad_len = padding_len(content_len);
     // TODO: Fill this with random padding
     gen_skip!(input, pad_len)
@@ -34,8 +34,8 @@ pub fn gen_padding<'a>(
 fn adler(input: &[u8]) -> [u8; 4] {
     let mut s1: u32 = 1;
     let mut s2: u32 = 0;
-    for i in 0..input.len() {
-        s1 += input[i] as u32;
+    for x in input {
+        s1 += u32::from(*x);
         s1 %= 65521;
         s2 += s1;
         s2 %= 65521;
@@ -58,11 +58,11 @@ named!(
     ))
 );
 
-fn gen_adler<'a>(
-    input: (&'a mut [u8], usize),
+fn gen_adler(
+    input: (&mut [u8], usize),
     start: usize,
     end: usize,
-) -> Result<(&'a mut [u8], usize), GenError> {
+) -> Result<(&mut [u8], usize), GenError> {
     let cs = adler(&input.0[start..end]);
     gen_slice!(input, cs)
 }
@@ -94,10 +94,10 @@ fn gen_standard_frame<'a>(
 // +-----+-----------+---------+-------+
 //  short    long      octets    octets
 
-fn gen_timestamp_frame<'a>(
-    input: (&'a mut [u8], usize),
+fn gen_timestamp_frame(
+    input: (&mut [u8], usize),
     timestamp: u32,
-) -> Result<(&'a mut [u8], usize), GenError> {
+) -> Result<(&mut [u8], usize), GenError> {
     #[cfg_attr(rustfmt, rustfmt_skip)]
     do_gen!(
         input,
@@ -133,9 +133,9 @@ pub fn gen_frame<'a>(
     input: (&'a mut [u8], usize),
     frame: &Frame,
 ) -> Result<(&'a mut [u8], usize), GenError> {
-    match frame {
-        &Frame::Standard(ref msg) => gen_standard_frame(input, &msg),
-        &Frame::TimeSync(ts) => gen_timestamp_frame(input, ts),
+    match *frame {
+        Frame::Standard(ref msg) => gen_standard_frame(input, &msg),
+        Frame::TimeSync(ts) => gen_timestamp_frame(input, ts),
     }
 }
 
@@ -251,7 +251,7 @@ mod tests {
     #[test]
     fn gen_timestamp_frame_valid() {
         let mut buf = vec![0u8; 16];
-        match gen_timestamp_frame((&mut buf[..], 0), 12345678).map(|tup| tup.1) {
+        match gen_timestamp_frame((&mut buf[..], 0), 12_345_678).map(|tup| tup.1) {
             Ok(sz) => {
                 assert_eq!(sz, 16);
                 assert_eq!(&buf[0..2], &[0x00, 0x00]);
@@ -266,7 +266,7 @@ mod tests {
     #[test]
     fn gen_timestamp_frame_small_buffer() {
         let mut buf = vec![0u8; 12];
-        match gen_timestamp_frame((&mut buf[..], 0), 12345678).map(|tup| tup.1) {
+        match gen_timestamp_frame((&mut buf[..], 0), 12_345_678).map(|tup| tup.1) {
             Ok(sz) => {
                 panic!("Returned {:?} bytes", sz);
             }

@@ -34,7 +34,7 @@ pub fn gen_i2p_date<'a>(
     gen_be_u64!(input, date.0)
 }
 named!(pub short_expiry<I2PDate>, do_parse!(
-    seconds: be_u32 >> (I2PDate((seconds as u64) * 1_000))
+    seconds: be_u32 >> (I2PDate(u64::from(seconds) * 1_000))
 ));
 pub fn gen_short_expiry<'a>(
     input: (&'a mut [u8], usize),
@@ -68,10 +68,7 @@ pub fn gen_mapping_pair<'a>(
 ) -> Result<(&'a mut [u8], usize), GenError> {
     do_gen!(
         input,
-        gen_i2p_string(pair.0)
-            >> gen_slice!("=".as_bytes())
-            >> gen_i2p_string(pair.1)
-            >> gen_slice!(";".as_bytes())
+        gen_i2p_string(pair.0) >> gen_slice!(b"=") >> gen_i2p_string(pair.1) >> gen_slice!(b";")
     )
 }
 pub fn gen_mapping<'a>(
@@ -115,18 +112,18 @@ fn split_signing_key<'a>(
     base_data: &[u8; constants::KEYCERT_SIGKEY_BYTES],
     cert: &Certificate,
 ) -> IResult<&'a [u8], SigningPublicKey> {
-    let res = match cert {
-        &Certificate::Key(ref kc) => {
-            if kc.sig_type.extra_data_len(&kc.enc_type) > 0 {
+    let res = match *cert {
+        Certificate::Key(ref kc) => {
+            if kc.sig_type.extra_data_len(kc.enc_type) > 0 {
                 let mut data = Vec::from(&base_data[..]);
                 data.extend(&kc.sig_data);
-                SigningPublicKey::from_bytes(&kc.sig_type, &data)
+                SigningPublicKey::from_bytes(kc.sig_type, &data)
             } else {
-                let pad = kc.sig_type.pad_len(&kc.enc_type);
-                SigningPublicKey::from_bytes(&kc.sig_type, &base_data[pad..])
+                let pad = kc.sig_type.pad_len(kc.enc_type);
+                SigningPublicKey::from_bytes(kc.sig_type, &base_data[pad..])
             }
         }
-        _ => SigningPublicKey::from_bytes(&SigType::DsaSha1, &base_data[..]),
+        _ => SigningPublicKey::from_bytes(SigType::DsaSha1, &base_data[..]),
     };
     match res {
         Ok(spk) => Ok((input, spk)),
@@ -152,9 +149,9 @@ fn keycert_padding<'a>(
     base_data: &[u8; 128],
     cert: &Certificate,
 ) -> IResult<&'a [u8], Option<Vec<u8>>> {
-    let spk = match cert {
-        &Certificate::Key(ref kc) => {
-            let pad_len = kc.sig_type.pad_len(&kc.enc_type);
+    let spk = match *cert {
+        Certificate::Key(ref kc) => {
+            let pad_len = kc.sig_type.pad_len(kc.enc_type);
             if pad_len > 0 {
                 Some(Vec::from(&base_data[0..pad_len]))
             } else {
@@ -172,8 +169,8 @@ named!(
     do_parse!(
         sig_type: sig_type >>
         enc_type: enc_type >>
-        sig_data: take!(sig_type.extra_data_len(&enc_type)) >>
-        enc_data: take!(enc_type.extra_data_len(&sig_type)) >>
+        sig_data: take!(sig_type.extra_data_len(enc_type)) >>
+        enc_data: take!(enc_type.extra_data_len(sig_type)) >>
         (KeyCertificate {
             sig_type,
             enc_type,
@@ -189,8 +186,8 @@ fn gen_key_certificate<'a>(
 ) -> Result<(&'a mut [u8], usize), GenError> {
     do_gen!(
         input,
-        gen_sig_type(&kc.sig_type)
-            >> gen_enc_type(&kc.enc_type)
+        gen_sig_type(kc.sig_type)
+            >> gen_enc_type(kc.enc_type)
             >> gen_slice!(&kc.sig_data)
             >> gen_slice!(&kc.enc_data)
     )
@@ -215,7 +212,7 @@ named!(pub certificate<Certificate>,
             (Certificate::Multiple(Vec::from(payload)))
         ) |
         constants::KEY_CERT => do_parse!(
-            len:  be_u16 >>
+            _len:  be_u16 >>
             cert: key_certificate >>
             (Certificate::Key(cert))
         )
@@ -227,28 +224,28 @@ pub fn gen_certificate<'a>(
     cert: &Certificate,
 ) -> Result<(&'a mut [u8], usize), GenError> {
     #[cfg_attr(rustfmt, rustfmt_skip)]
-    match cert {
-        &Certificate::Null => gen_be_u8!(input, constants::NULL_CERT),
-        &Certificate::HashCash(ref payload) => do_gen!(
+    match *cert {
+        Certificate::Null => gen_be_u8!(input, constants::NULL_CERT),
+        Certificate::HashCash(ref payload) => do_gen!(
             input,
             gen_be_u8!(constants::HASH_CERT) >>
             gen_be_u16!(payload.len() as u16) >>
             gen_slice!(&payload)
         ),
-        &Certificate::Hidden => gen_be_u8!(input, constants::HIDDEN_CERT),
-        &Certificate::Signed(ref payload) => do_gen!(
+        Certificate::Hidden => gen_be_u8!(input, constants::HIDDEN_CERT),
+        Certificate::Signed(ref payload) => do_gen!(
             input,
             gen_be_u8!(constants::SIGNED_CERT) >>
             gen_be_u16!(payload.len() as u16) >>
             gen_slice!(&payload)
         ),
-        &Certificate::Multiple(ref payload) => do_gen!(
+        Certificate::Multiple(ref payload) => do_gen!(
             input,
             gen_be_u8!(constants::MULTI_CERT) >>
             gen_be_u16!(payload.len() as u16) >>
             gen_slice!(&payload)
         ),
-        &Certificate::Key(ref kc) => do_gen!(
+        Certificate::Key(ref kc) => do_gen!(
             input,
                    gen_be_u8!(constants::KEY_CERT) >>
             size:  gen_skip!(2) >>
@@ -399,7 +396,7 @@ named!(pub lease_set<LeaseSet>,
         enc_key: public_key >>
         sig_key: call!(signing_key, dest.signing_key.sig_type()) >>
         leases:  length_count!(be_u8, lease) >>
-        sig:     call!(signature, &dest.signing_key.sig_type()) >>
+        sig:     call!(signature, dest.signing_key.sig_type()) >>
         (LeaseSet {
             sig_key,
             dest,
@@ -468,7 +465,7 @@ named!(pub router_info<RouterInfo>,
         addresses: length_count!(be_u8, router_address) >>
         peers:     length_count!(be_u8, hash) >>
         options:   mapping >>
-        signature: call!(signature, &router_id.signing_key.sig_type()) >>
+        signature: call!(signature, router_id.signing_key.sig_type()) >>
         (RouterInfo {
             router_id,
             published,
@@ -501,9 +498,9 @@ pub fn gen_router_info<'a>(
     input: (&'a mut [u8], usize),
     ri: &RouterInfo,
 ) -> Result<(&'a mut [u8], usize), GenError> {
-    match &ri.signature {
-        &Some(ref s) => do_gen!(input, gen_router_info_minus_sig(&ri) >> gen_signature(s)),
-        &None => Err(GenError::CustomError(1)),
+    match ri.signature {
+        Some(ref s) => do_gen!(input, gen_router_info_minus_sig(&ri) >> gen_signature(s)),
+        None => Err(GenError::CustomError(1)),
     }
 }
 
@@ -524,7 +521,7 @@ mod tests {
                 println!("parsed: {:?}", ri);
                 assert_eq!(ri.router_id.signing_key.sig_type(), SigType::Ed25519);
                 assert_eq!(ri.router_id.certificate.code(), constants::KEY_CERT);
-                assert_eq!(ri.published, I2PDate(1505588133655));
+                assert_eq!(ri.published, I2PDate(1_505_588_133_655));
                 assert_eq!(ri.addresses.len(), 2);
                 assert_eq!(ri.peers.len(), 0);
                 assert_eq!(

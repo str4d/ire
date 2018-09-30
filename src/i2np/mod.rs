@@ -16,6 +16,8 @@ use std::iter::repeat;
 use crypto::SessionKey;
 use data::{Certificate, Hash, I2PDate, LeaseSet, RouterInfo, SessionTag, TunnelId};
 
+#[allow(double_parens)]
+#[allow(needless_pass_by_value)]
 pub(crate) mod frame;
 
 //
@@ -150,7 +152,7 @@ impl TunnelData {
     fn from(tid: TunnelId, data: &[u8; 1024]) -> Self {
         let mut x = [0u8; 1024];
         x.copy_from_slice(data);
-        TunnelData { tid: tid, data: x }
+        TunnelData { tid, data: x }
     }
 }
 
@@ -180,32 +182,32 @@ pub enum MessagePayload {
 
 impl fmt::Debug for MessagePayload {
     fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        match self {
-            &MessagePayload::DatabaseStore(ref ds) => {
+        match *self {
+            MessagePayload::DatabaseStore(ref ds) => {
                 format!("DatabaseStore (key: {:?})", ds.key).fmt(formatter)
             }
-            &MessagePayload::DatabaseLookup(ref dl) => {
+            MessagePayload::DatabaseLookup(ref dl) => {
                 format!("DatabaseLookup (key: {:?})", dl.key).fmt(formatter)
             }
-            &MessagePayload::DatabaseSearchReply(ref dsr) => {
+            MessagePayload::DatabaseSearchReply(ref dsr) => {
                 format!("DatabaseSearchReply (key: {:?})", dsr.key).fmt(formatter)
             }
-            &MessagePayload::DeliveryStatus(ref ds) => format!(
+            MessagePayload::DeliveryStatus(ref ds) => format!(
                 "DeliveryStatus (mid: {:?}, ts: {:?})",
                 ds.msg_id, ds.time_stamp
             ).fmt(formatter),
-            &MessagePayload::Garlic(_) => "Garlic".fmt(formatter),
-            &MessagePayload::TunnelData(ref td) => {
+            MessagePayload::Garlic(_) => "Garlic".fmt(formatter),
+            MessagePayload::TunnelData(ref td) => {
                 format!("TunnelData (tid: {:?})", td.tid).fmt(formatter)
             }
-            &MessagePayload::TunnelGateway(ref tg) => {
+            MessagePayload::TunnelGateway(ref tg) => {
                 format!("TunnelGateway (tid: {:?})", tg.tid).fmt(formatter)
             }
-            &MessagePayload::Data(_) => "Data".fmt(formatter),
-            &MessagePayload::TunnelBuild(_) => "TunnelBuild".fmt(formatter),
-            &MessagePayload::TunnelBuildReply(_) => "TunnelBuildReply".fmt(formatter),
-            &MessagePayload::VariableTunnelBuild(_) => "VariableTunnelBuild".fmt(formatter),
-            &MessagePayload::VariableTunnelBuildReply(_) => {
+            MessagePayload::Data(_) => "Data".fmt(formatter),
+            MessagePayload::TunnelBuild(_) => "TunnelBuild".fmt(formatter),
+            MessagePayload::TunnelBuildReply(_) => "TunnelBuildReply".fmt(formatter),
+            MessagePayload::VariableTunnelBuild(_) => "VariableTunnelBuild".fmt(formatter),
+            MessagePayload::VariableTunnelBuildReply(_) => {
                 "VariableTunnelBuildReply".fmt(formatter)
             }
         }
@@ -254,7 +256,7 @@ impl Message {
         // TODO Random id, correct expiration
         Message {
             id: 0,
-            expiration: I2PDate(0x123456787c0),
+            expiration: I2PDate(0x123_4567_87c0),
             payload,
         }
     }
@@ -262,7 +264,7 @@ impl Message {
     pub fn dummy_data() -> Self {
         Message {
             id: 0,
-            expiration: I2PDate(0x123456787c0),
+            expiration: I2PDate(0x123_4567_87c0),
             payload: MessagePayload::Data(vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]),
         }
     }

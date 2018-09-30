@@ -33,7 +33,7 @@ named!(
 
 fn gen_options<'a>(
     input: (&'a mut [u8], usize),
-    options: &Vec<u8>,
+    options: &[u8],
 ) -> Result<(&'a mut [u8], usize), GenError> {
     do_gen!(input, gen_be_u16!(options.len()) >> gen_slice!(options))
 }
@@ -188,16 +188,16 @@ fn gen_block<'a>(
         };
     }
 
-    match block {
-        &Block::DateTime(ts) => blockgen!(0, gen_datetime(ts)),
-        &Block::Options(ref options) => blockgen!(1, gen_options(options)),
-        &Block::RouterInfo(ref ri, ref flags) => blockgen!(2, gen_routerinfo(ri, flags)),
-        &Block::Message(ref message) => blockgen!(3, gen_message(message)),
-        &Block::Termination(valid_received, rsn, ref addl_data) => {
+    match *block {
+        Block::DateTime(ts) => blockgen!(0, gen_datetime(ts)),
+        Block::Options(ref options) => blockgen!(1, gen_options(options)),
+        Block::RouterInfo(ref ri, ref flags) => blockgen!(2, gen_routerinfo(ri, flags)),
+        Block::Message(ref message) => blockgen!(3, gen_message(message)),
+        Block::Termination(valid_received, rsn, ref addl_data) => {
             blockgen!(4, gen_termination(valid_received, rsn, addl_data))
         }
-        &Block::Padding(size) => blockgen!(254, gen_padding(size)),
-        &Block::Unknown(blk, ref data) => blockgen!(blk, gen_unknown(data)),
+        Block::Padding(size) => blockgen!(254, gen_padding(size)),
+        Block::Unknown(blk, ref data) => blockgen!(blk, gen_unknown(data)),
     }
 }
 
@@ -311,7 +311,7 @@ mod tests {
             res.resize($expected.len(), 0);
             match $oven((&mut res, 0), &$value) {
                 Ok(_) => assert_eq!(&res, &$expected),
-                Err(_) => panic!(),
+                Err(e) => panic!("Unexpected error: {:?}", e),
             }
             match $monster(&res) {
                 Ok((_, m)) => assert_eq!(m, $value),
@@ -346,7 +346,7 @@ mod tests {
     fn test_router_info() {
         let ri = match router_info(ROUTER_INFO) {
             Ok((_, ri)) => ri,
-            Err(_) => panic!(),
+            Err(e) => panic!("Unexpected error: {:?}", e),
         };
         let mut ri_block = vec![0x02, 0x02, 0x9f, 0x01];
         ri_block.extend_from_slice(ROUTER_INFO);
@@ -362,7 +362,7 @@ mod tests {
         eval_block!(
             Block::Message(Message {
                 id: 0,
-                expiration: I2PDate::from_system_time(UNIX_EPOCH + Duration::new(1524874654, 0)),
+                expiration: I2PDate::from_system_time(UNIX_EPOCH + Duration::new(1_524_874_654, 0)),
                 payload: MessagePayload::Data(vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]),
             }),
             [
@@ -396,18 +396,18 @@ mod tests {
         res1.resize(13, 0);
         match gen_block((&mut res1, 0), &pad_block) {
             Ok(_) => (),
-            Err(_) => panic!(),
+            Err(e) => panic!("Unexpected error: {:?}", e),
         }
         let mut res2 = vec![];
         res2.resize(13, 0);
         match gen_block((&mut res2, 0), &pad_block) {
             Ok(_) => (),
-            Err(_) => panic!(),
+            Err(e) => panic!("Unexpected error: {:?}", e),
         }
         // Headers should be equal
         assert_eq!(&res1[..3], &res2[..3]);
         // Padding should not be equal
-        assert!(&res1[..] != &res2[..]);
+        assert!(res1 != res2);
     }
 
     #[test]
@@ -422,7 +422,7 @@ mod tests {
     fn test_session_request() {
         let mut res = vec![];
         res.resize(16, 0);
-        match gen_session_request((&mut res, 0), 0x12, 0x3456, 0x789a, 0xbcdef123) {
+        match gen_session_request((&mut res, 0), 0x12, 0x3456, 0x789a, 0xbcde_f123) {
             Ok(_) => assert_eq!(
                 &res,
                 &[
@@ -430,10 +430,10 @@ mod tests {
                     0x00, 0x00, 0x00
                 ]
             ),
-            Err(_) => panic!(),
+            Err(e) => panic!("Unexpected error: {:?}", e),
         }
         match session_request(&res) {
-            Ok((_, sr)) => assert_eq!(sr, (0x12, 0x3456, 0x789a, 0xbcdef123)),
+            Ok((_, sr)) => assert_eq!(sr, (0x12, 0x3456, 0x789a, 0xbcde_f123)),
             Err(e) => panic!("Unexpected error: {:?}", e),
         }
     }
@@ -442,7 +442,7 @@ mod tests {
     fn test_session_created() {
         let mut res = vec![];
         res.resize(16, 0);
-        match gen_session_created((&mut res, 0), 0x1234, 0x56789abc) {
+        match gen_session_created((&mut res, 0), 0x1234, 0x5678_9abc) {
             Ok(_) => assert_eq!(
                 &res,
                 &[
@@ -450,10 +450,10 @@ mod tests {
                     0x00, 0x00, 0x00
                 ]
             ),
-            Err(_) => panic!(),
+            Err(e) => panic!("Unexpected error: {:?}", e),
         }
         match session_created(&res) {
-            Ok((_, sr)) => assert_eq!(sr, (0x1234, 0x56789abc)),
+            Ok((_, sr)) => assert_eq!(sr, (0x1234, 0x5678_9abc)),
             Err(e) => panic!("Unexpected error: {:?}", e),
         }
     }

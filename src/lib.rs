@@ -1,3 +1,4 @@
+#![allow(unknown_lints)]
 #![cfg_attr(all(test, feature = "nightly"), feature(test))]
 
 //! An I2P router implementation in Rust.

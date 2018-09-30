@@ -14,6 +14,8 @@ use crypto::{Aes256, Signature, SigningPrivateKey, AES_BLOCK_SIZE};
 use data::{Hash, RouterIdentity};
 use transport::DHSessionKeyBuilder;
 
+#[allow(double_parens)]
+#[allow(needless_pass_by_value)]
 mod frame;
 
 macro_rules! try_poll {
@@ -336,7 +338,7 @@ impl Decoder for OutboundHandshakeCodec {
                                         Err(Err::Incomplete(_)) => {
                                             return Err(io::Error::new(
                                                 io::ErrorKind::Other,
-                                                format!("incomplete parse error"),
+                                                "incomplete parse error".to_string(),
                                             ))
                                         }
                                         Err(Err::Error(e)) | Err(Err::Failure(e)) => {
@@ -516,7 +518,7 @@ fn gen_session_confirm_sig_msg(state: &SharedHandshakeState, own_ri: bool) -> Ve
                 GenError::BufferTooSmall(sz) => {
                     buf.extend(repeat(0).take(sz - base_len));
                 }
-                _ => panic!("Couldn't serialize Signature message (Own RI? {})"),
+                _ => panic!("Couldn't serialize Signature message (Own RI?): {:?}", e),
             },
         }
     }
@@ -537,6 +539,7 @@ struct SharedHandshakeState {
 // Inbound handshake protocol
 //
 
+#[allow(enum_variant_names)]
 enum IBHandshakeState<T>
 where
     T: AsyncWrite,
@@ -666,7 +669,7 @@ where
                     {
                         return Err(io::Error::new(
                             io::ErrorKind::ConnectionRefused,
-                            "Invalid SessionConfirmA signature",
+                            format!("Invalid SessionConfirmA signature: {:?}", e),
                         ));
                     }
 
@@ -703,6 +706,7 @@ where
 // Outbound handshake protocol
 //
 
+#[allow(enum_variant_names)]
 enum OBHandshakeState<T>
 where
     T: AsyncWrite,
@@ -856,7 +860,7 @@ where
                     {
                         return Err(io::Error::new(
                             io::ErrorKind::ConnectionRefused,
-                            "Invalid SessionConfirmB signature",
+                            format!("Invalid SessionConfirmB signature: {:?}", e),
                         ));
                     }
 

@@ -67,7 +67,7 @@ pub fn build_request_record<'a>(
 
 fn validate_build_response_record<'a>(
     input: &'a [u8],
-    hash: Hash,
+    hash: &Hash,
     padding: &[u8],
     reply: u8,
 ) -> IResult<&'a [u8], ()> {
@@ -87,7 +87,7 @@ named!(pub build_response_record<BuildResponseRecord>,
         hash:    hash >>
         padding: take!(495) >>
         reply:   be_u8 >>
-                 call!(validate_build_response_record, hash, padding, reply) >>
+                 call!(validate_build_response_record, &hash, padding, reply) >>
         (BuildResponseRecord { reply })
     )
 );
@@ -187,9 +187,9 @@ fn gen_database_store_data<'a>(
     input: (&'a mut [u8], usize),
     data: &DatabaseStoreData,
 ) -> Result<(&'a mut [u8], usize), GenError> {
-    match data {
-        &DatabaseStoreData::RI(ref ri) => gen_compressed_ri(input, &ri),
-        &DatabaseStoreData::LS(ref ls) => gen_lease_set(input, &ls),
+    match *data {
+        DatabaseStoreData::RI(ref ri) => gen_compressed_ri(input, &ri),
+        DatabaseStoreData::LS(ref ls) => gen_lease_set(input, &ls),
     }
 }
 
@@ -371,13 +371,13 @@ fn gen_garlic_clove_delivery_instructions<'a>(
     input: (&'a mut [u8], usize),
     gcdi: &GarlicCloveDeliveryInstructions,
 ) -> Result<(&'a mut [u8], usize), GenError> {
-    let mut flags: u8 = 0;
+    let mut flags: u8 = 0b0000_0000;
     if gcdi.encrypted {
-        flags |= 0b10000000;
+        flags |= 0b1000_0000;
     }
-    flags |= (gcdi.delivery_type << 5) & 0b1100000;
+    flags |= (gcdi.delivery_type << 5) & 0b0110_0000;
     if gcdi.delay_set {
-        flags |= 0b10000;
+        flags |= 0b0001_0000;
     }
     #[cfg_attr(rustfmt, rustfmt_skip)]
     do_gen!(
@@ -512,10 +512,7 @@ named!(
     do_parse!(data: length_bytes!(be_u32) >> (MessagePayload::Data(Vec::from(data))))
 );
 
-fn gen_data<'a>(
-    input: (&'a mut [u8], usize),
-    d: &Vec<u8>,
-) -> Result<(&'a mut [u8], usize), GenError> {
+fn gen_data<'a>(input: (&'a mut [u8], usize), d: &[u8]) -> Result<(&'a mut [u8], usize), GenError> {
     do_gen!(input, gen_be_u32!(d.len()) >> gen_slice!(d))
 }
 
@@ -594,7 +591,7 @@ fn variable_tunnel_build<'a>(input: &'a [u8]) -> IResult<&'a [u8], MessagePayloa
 
 fn gen_variable_tunnel_build<'a>(
     input: (&'a mut [u8], usize),
-    tb: &Vec<[u8; 528]>,
+    tb: &[[u8; 528]],
 ) -> Result<(&'a mut [u8], usize), GenError> {
     // TODO: Fail if tb is too big
     let mut x = gen_be_u8!(input, tb.len() as u8)?;
@@ -623,7 +620,7 @@ fn variable_tunnel_build_reply<'a>(input: &'a [u8]) -> IResult<&'a [u8], Message
 
 fn gen_variable_tunnel_build_reply<'a>(
     input: (&'a mut [u8], usize),
-    tbr: &Vec<[u8; 528]>,
+    tbr: &[[u8; 528]],
 ) -> Result<(&'a mut [u8], usize), GenError> {
     // TODO: Fail if tbr is too big
     let mut x = gen_be_u8!(input, tbr.len() as u8)?;
@@ -652,11 +649,11 @@ fn validate_checksum<'a>(input: &'a [u8], cs: u8, buf: &[u8]) -> IResult<&'a [u8
     }
 }
 
-fn gen_checksum<'a>(
-    input: (&'a mut [u8], usize),
+fn gen_checksum(
+    input: (&mut [u8], usize),
     start: usize,
     end: usize,
-) -> Result<(&'a mut [u8], usize), GenError> {
+) -> Result<(&mut [u8], usize), GenError> {
     gen_be_u8!(input, checksum(&input.0[start..end]))
 }
 
@@ -708,7 +705,7 @@ named!(pub message<Message>,
         (Message {
             id: hdr.1,
             expiration: hdr.2,
-            payload: payload,
+            payload,
         })
     )
 );
@@ -720,7 +717,7 @@ named!(pub ntcp2_message<Message>,
         (Message {
             id: hdr.1,
             expiration: hdr.2,
-            payload: payload,
+            payload,
         })
     )
 );
@@ -729,19 +726,19 @@ fn gen_message_type<'a>(
     input: (&'a mut [u8], usize),
     msg: &Message,
 ) -> Result<(&'a mut [u8], usize), GenError> {
-    let msg_type = match &msg.payload {
-        &MessagePayload::DatabaseStore(_) => 1,
-        &MessagePayload::DatabaseLookup(_) => 2,
-        &MessagePayload::DatabaseSearchReply(_) => 3,
-        &MessagePayload::DeliveryStatus(_) => 10,
-        &MessagePayload::Garlic(_) => 11,
-        &MessagePayload::TunnelData(_) => 18,
-        &MessagePayload::TunnelGateway(_) => 19,
-        &MessagePayload::Data(_) => 20,
-        &MessagePayload::TunnelBuild(_) => 21,
-        &MessagePayload::TunnelBuildReply(_) => 22,
-        &MessagePayload::VariableTunnelBuild(_) => 23,
-        &MessagePayload::VariableTunnelBuildReply(_) => 24,
+    let msg_type = match msg.payload {
+        MessagePayload::DatabaseStore(_) => 1,
+        MessagePayload::DatabaseLookup(_) => 2,
+        MessagePayload::DatabaseSearchReply(_) => 3,
+        MessagePayload::DeliveryStatus(_) => 10,
+        MessagePayload::Garlic(_) => 11,
+        MessagePayload::TunnelData(_) => 18,
+        MessagePayload::TunnelGateway(_) => 19,
+        MessagePayload::Data(_) => 20,
+        MessagePayload::TunnelBuild(_) => 21,
+        MessagePayload::TunnelBuildReply(_) => 22,
+        MessagePayload::VariableTunnelBuild(_) => 23,
+        MessagePayload::VariableTunnelBuildReply(_) => 24,
     };
     gen_be_u8!(input, msg_type)
 }
@@ -750,19 +747,19 @@ fn gen_payload<'a>(
     input: (&'a mut [u8], usize),
     payload: &MessagePayload,
 ) -> Result<(&'a mut [u8], usize), GenError> {
-    match payload {
-        &MessagePayload::DatabaseStore(ref ds) => gen_database_store(input, &ds),
-        &MessagePayload::DatabaseLookup(ref dl) => gen_database_lookup(input, &dl),
-        &MessagePayload::DatabaseSearchReply(ref dsr) => gen_database_search_reply(input, &dsr),
-        &MessagePayload::DeliveryStatus(ref ds) => gen_delivery_status(input, &ds),
-        &MessagePayload::Garlic(ref g) => gen_garlic(input, &g),
-        &MessagePayload::TunnelData(ref td) => gen_tunnel_data(input, &td),
-        &MessagePayload::TunnelGateway(ref tg) => gen_tunnel_gateway(input, &tg),
-        &MessagePayload::Data(ref d) => gen_data(input, &d),
-        &MessagePayload::TunnelBuild(tb) => gen_tunnel_build(input, &tb),
-        &MessagePayload::TunnelBuildReply(tbr) => gen_tunnel_build_reply(input, &tbr),
-        &MessagePayload::VariableTunnelBuild(ref vtb) => gen_variable_tunnel_build(input, &vtb),
-        &MessagePayload::VariableTunnelBuildReply(ref vtbr) => {
+    match *payload {
+        MessagePayload::DatabaseStore(ref ds) => gen_database_store(input, &ds),
+        MessagePayload::DatabaseLookup(ref dl) => gen_database_lookup(input, &dl),
+        MessagePayload::DatabaseSearchReply(ref dsr) => gen_database_search_reply(input, &dsr),
+        MessagePayload::DeliveryStatus(ref ds) => gen_delivery_status(input, &ds),
+        MessagePayload::Garlic(ref g) => gen_garlic(input, &g),
+        MessagePayload::TunnelData(ref td) => gen_tunnel_data(input, &td),
+        MessagePayload::TunnelGateway(ref tg) => gen_tunnel_gateway(input, &tg),
+        MessagePayload::Data(ref d) => gen_data(input, &d),
+        MessagePayload::TunnelBuild(tb) => gen_tunnel_build(input, &tb),
+        MessagePayload::TunnelBuildReply(tbr) => gen_tunnel_build_reply(input, &tbr),
+        MessagePayload::VariableTunnelBuild(ref vtb) => gen_variable_tunnel_build(input, &vtb),
+        MessagePayload::VariableTunnelBuildReply(ref vtbr) => {
             gen_variable_tunnel_build_reply(input, &vtbr)
         }
     }
@@ -809,7 +806,7 @@ mod tests {
             res.resize($expected.len(), 0);
             match $oven((&mut res, 0), &$value) {
                 Ok(_) => assert_eq!(&res, &$expected),
-                Err(_) => panic!(),
+                Err(e) => panic!("Unexpected error: {:?}", e),
             }
             match $monster(&res) {
                 Ok((_, m)) => assert_eq!(m, $value),
@@ -840,7 +837,7 @@ mod tests {
         let res = gen_checksum((&mut b[..], 0), 1, 8);
         assert!(res.is_ok());
         let (o, n) = res.unwrap();
-        assert_eq!(o.as_ref(), &a[..]);
+        assert_eq!(o, &a[..]);
         assert_eq!(n, 1);
     }
 
@@ -866,10 +863,10 @@ mod tests {
 
         eval!(
             Message {
-                id: 0x12345678,
+                id: 0x1234_5678,
                 expiration: I2PDate::from_system_time(UNIX_EPOCH),
                 payload: MessagePayload::DeliveryStatus(DeliveryStatus {
-                    msg_id: 0x7b3fbba9,
+                    msg_id: 0x7b3f_bba9,
                     time_stamp: I2PDate::from_system_time(UNIX_EPOCH)
                 }),
             },
@@ -899,10 +896,10 @@ mod tests {
 
         eval!(
             Message {
-                id: 0x12345678,
+                id: 0x1234_5678,
                 expiration: I2PDate::from_system_time(UNIX_EPOCH),
                 payload: MessagePayload::DeliveryStatus(DeliveryStatus {
-                    msg_id: 0x7b3fbba9,
+                    msg_id: 0x7b3f_bba9,
                     time_stamp: I2PDate::from_system_time(UNIX_EPOCH)
                 }),
             },

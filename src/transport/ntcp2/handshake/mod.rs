@@ -51,6 +51,7 @@ macro_rules! io_err {
 // Establishment handshake
 //
 
+#[allow(enum_variant_names)]
 enum IBHandshakeState<T> {
     SessionRequest(ReadExact<T, Vec<u8>>),
     SessionRequestPadding(ReadExact<T, Vec<u8>>),
@@ -283,7 +284,7 @@ where
     pub fn new<F>(
         conn: F,
         static_key: &[u8],
-        own_ri: RouterInfo,
+        own_ri: &RouterInfo,
         peer_ri: RouterInfo,
     ) -> Result<OBHandshake<T>, String>
     where
@@ -303,7 +304,7 @@ where
             Some(ra) => ra,
             None => match peer_ri.address(&NTCP_STYLE, filter) {
                 Some(ra) => ra,
-                None => return Err(format!("No valid NTCP2 addresses")),
+                None => return Err("No valid NTCP2 addresses".to_string()),
             },
         };
 
@@ -313,7 +314,7 @@ where
                 Ok(key) => key,
                 Err(e) => return Err(format!("Invalid static key in address: {}", e)),
             },
-            None => return Err(format!("No static key in address")),
+            None => return Err("No static key in address".to_string()),
         };
 
         let aesobfse_key = peer_ri.router_id.hash().0;
@@ -323,7 +324,7 @@ where
                 Ok(iv) => aesobfse_iv.copy_from_slice(&iv),
                 Err(e) => return Err(format!("Invalid IV in address: {}", e)),
             },
-            None => return Err(format!("No IV in address")),
+            None => return Err("No IV in address".to_string()),
         }
 
         let sc_padlen = {
@@ -333,7 +334,7 @@ where
         };
 
         let mut sc_buf = vec![0u8; NTCP2_MTU - 16];
-        let sc_len = match frame::gen_session_confirmed((&mut sc_buf, 0), &own_ri, sc_padlen)
+        let sc_len = match frame::gen_session_confirmed((&mut sc_buf, 0), own_ri, sc_padlen)
             .map(|tup| tup.1)
         {
             Ok(sz) => sz,
@@ -347,7 +348,7 @@ where
                 }
                 GenError::InvalidOffset
                 | GenError::CustomError(_)
-                | GenError::NotYetImplemented => return Err(format!("could not generate")),
+                | GenError::NotYetImplemented => return Err("could not generate".to_string()),
             },
         };
         sc_buf.truncate(sc_len);
@@ -594,7 +595,7 @@ mod tests {
         let mut alice = OBHandshake::new(
             |_| Box::new(done(Ok(alice_net))),
             &bob_static_public_key,
-            alice_ri,
+            &alice_ri,
             bob_ri,
         ).unwrap();
         let mut bob = IBHandshake::new(
