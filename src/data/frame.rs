@@ -34,7 +34,7 @@ pub fn gen_i2p_date<'a>(
     gen_be_u64!(input, date.0)
 }
 named!(pub short_expiry<I2PDate>, do_parse!(
-    seconds: be_u32 >> (I2PDate((seconds as u64) * 1_000))
+    seconds: be_u32 >> (I2PDate(u64::from(seconds) * 1_000))
 ));
 pub fn gen_short_expiry<'a>(
     input: (&'a mut [u8], usize),
