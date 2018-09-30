@@ -273,14 +273,14 @@ impl SigningPublicKey {
         match (self, signature) {
             (&SigningPublicKey::DsaSha1, &Signature::DsaSha1) => unimplemented!(),
             (&SigningPublicKey::EcdsaSha256P256(ref pk), &Signature::EcdsaSha256P256(ref s)) => {
-                Ok(verify_sha256(&P256Verifier::from(pk), message, s)?)
+                verify_sha256(&P256Verifier::from(pk), message, s).map_err(|e| e.into())
             }
             (&SigningPublicKey::EcdsaSha384P384(ref pk), &Signature::EcdsaSha384P384(ref s)) => {
-                Ok(verify_sha384(&P384Verifier::from(pk), message, s)?)
+                verify_sha384(&P384Verifier::from(pk), message, s).map_err(|e| e.into())
             }
             (&SigningPublicKey::EcdsaSha512P521, &Signature::EcdsaSha512P521) => unimplemented!(),
             (&SigningPublicKey::Ed25519(ref pk), &Signature::Ed25519(ref s)) => {
-                Ok(verify(&Ed25519Verifier::from(pk), message, s)?)
+                verify(&Ed25519Verifier::from(pk), message, s).map_err(|e| e.into())
             }
             _ => {
                 println!("Signature type doesn't match key type");
