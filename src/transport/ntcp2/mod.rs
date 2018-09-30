@@ -57,7 +57,9 @@ use constants::I2P_BASE64;
 use data::{Hash, I2PString, RouterAddress, RouterIdentity, RouterInfo};
 use i2np::{DatabaseStore, Message, MessagePayload};
 
+#[allow(needless_pass_by_value)]
 mod frame;
+
 mod handshake;
 
 lazy_static! {

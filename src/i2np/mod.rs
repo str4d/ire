@@ -16,6 +16,8 @@ use std::iter::repeat;
 use crypto::SessionKey;
 use data::{Certificate, Hash, I2PDate, LeaseSet, RouterInfo, SessionTag, TunnelId};
 
+#[allow(double_parens)]
+#[allow(needless_pass_by_value)]
 pub(crate) mod frame;
 
 //

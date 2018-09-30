@@ -20,6 +20,7 @@ use crypto::{
     SigningPublicKey,
 };
 
+#[allow(needless_pass_by_value)]
 pub(crate) mod frame;
 
 //

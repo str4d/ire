@@ -18,9 +18,11 @@ use std::fmt;
 
 use constants;
 
+#[allow(needless_pass_by_value)]
+pub(crate) mod frame;
+
 pub(crate) mod dh;
 pub(crate) mod elgamal;
-pub(crate) mod frame;
 pub(crate) mod math;
 
 pub(crate) const AES_BLOCK_SIZE: usize = 16;

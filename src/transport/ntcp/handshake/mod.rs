@@ -14,6 +14,8 @@ use crypto::{Aes256, Signature, SigningPrivateKey, AES_BLOCK_SIZE};
 use data::{Hash, RouterIdentity};
 use transport::DHSessionKeyBuilder;
 
+#[allow(double_parens)]
+#[allow(needless_pass_by_value)]
 mod frame;
 
 macro_rules! try_poll {
@@ -537,6 +539,7 @@ struct SharedHandshakeState {
 // Inbound handshake protocol
 //
 
+#[allow(enum_variant_names)]
 enum IBHandshakeState<T>
 where
     T: AsyncWrite,
@@ -703,6 +706,7 @@ where
 // Outbound handshake protocol
 //
 
+#[allow(enum_variant_names)]
 enum OBHandshakeState<T>
 where
     T: AsyncWrite,
