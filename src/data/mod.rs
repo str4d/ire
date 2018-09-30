@@ -64,7 +64,9 @@ pub struct I2PDate(pub(crate) u64);
 
 impl I2PDate {
     pub fn from_system_time(t: SystemTime) -> Self {
-        let d = t.duration_since(UNIX_EPOCH).unwrap_or(Duration::new(0, 0));
+        let d = t
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_else(|_| Duration::new(0, 0));
         I2PDate(d.as_secs() * 1_000 + u64::from(d.subsec_millis()))
     }
 }
