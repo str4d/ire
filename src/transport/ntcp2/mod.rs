@@ -138,7 +138,7 @@ impl Decoder for Codec {
     type Error = io::Error;
 
     fn decode(&mut self, buf: &mut BytesMut) -> io::Result<Option<Frame>> {
-        if let None = self.next_len {
+        if self.next_len.is_none() {
             if buf.len() < 2 {
                 return Ok(None);
             }
