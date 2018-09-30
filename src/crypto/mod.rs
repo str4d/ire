@@ -141,7 +141,7 @@ impl EncType {
         }
     }
 
-    pub fn extra_data_len(self, sig_type: SigType) -> usize {
+    pub fn extra_data_len(self, _sig_type: SigType) -> usize {
         match self {
             EncType::ElGamal2048 => 0,
         }

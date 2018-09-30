@@ -212,7 +212,7 @@ named!(pub certificate<Certificate>,
             (Certificate::Multiple(Vec::from(payload)))
         ) |
         constants::KEY_CERT => do_parse!(
-            len:  be_u16 >>
+            _len:  be_u16 >>
             cert: key_certificate >>
             (Certificate::Key(cert))
         )
