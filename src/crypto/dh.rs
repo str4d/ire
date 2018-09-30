@@ -190,7 +190,7 @@ mod tests {
             },
         ];
 
-        for tv in test_vectors.iter() {
+        for tv in test_vectors {
             let dh_priv = BigUint::from_str_radix(tv.dh_priv, 16).unwrap();
             let dh_pub = BigUint::from_bytes_be(&tv.dh_pub[..]);
             let builder = DHSessionKeyBuilder { dh_priv, dh_pub };

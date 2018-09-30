@@ -688,7 +688,7 @@ mod tests {
             },
         ];
 
-        for tv in test_vectors.iter() {
+        for tv in test_vectors {
             let mut aes = Aes256::new(&tv.key, &tv.iv, &tv.iv);
             let mut blocks = tv.plaintext.clone();
             aes.encrypt_blocks(&mut blocks);
