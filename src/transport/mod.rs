@@ -9,7 +9,7 @@ use tokio_io::IoFuture;
 use crypto::dh::DHSessionKeyBuilder;
 use data::{Hash, RouterAddress, RouterSecretKeys};
 use i2np::Message;
-use router::types::CommSystem;
+use router::types::{CommSystem, OutboundMessageHandler};
 
 pub mod ntcp;
 pub mod ntcp2;
@@ -115,6 +115,25 @@ impl Manager {
     }
 }
 
+impl OutboundMessageHandler for Manager {
+    /// Send an I2NP message to a peer over one of our transports.
+    ///
+    /// Returns an Err giving back the message if it cannot be sent over any of
+    /// our transports.
+    fn send(&self, hash: Hash, msg: Message) -> Result<IoFuture<()>, (Hash, Message)> {
+        match once(self.ntcp.bid(&hash, msg.size()))
+            .chain(once(self.ntcp2.bid(&hash, msg.ntcp2_size())))
+            .filter_map(|b| b)
+            .min_by_key(|b| b.bid)
+        {
+            Some(bid) => Ok(Box::new(bid.send((hash, msg)).map(|_| ()).map_err(|_| {
+                io::Error::new(io::ErrorKind::Other, "Error in transport::Engine")
+            }))),
+            None => Err((hash, msg)),
+        }
+    }
+}
+
 impl CommSystem for Manager {
     fn addresses(&self) -> Vec<RouterAddress> {
         vec![self.ntcp.address(), self.ntcp2.address()]
@@ -142,23 +161,6 @@ impl CommSystem for Manager {
                 .join3(listener, listener2)
                 .map(|_| ()),
         )
-    }
-
-    /// Send an I2NP message to a peer over one of our transports.
-    ///
-    /// Returns an Err giving back the message if it cannot be sent over any of
-    /// our transports.
-    fn send(&self, hash: Hash, msg: Message) -> Result<IoFuture<()>, (Hash, Message)> {
-        match once(self.ntcp.bid(&hash, msg.size()))
-            .chain(once(self.ntcp2.bid(&hash, msg.ntcp2_size())))
-            .filter_map(|b| b)
-            .min_by_key(|b| b.bid)
-        {
-            Some(bid) => Ok(Box::new(bid.send((hash, msg)).map(|_| ()).map_err(|_| {
-                io::Error::new(io::ErrorKind::Other, "Error in transport::Engine")
-            }))),
-            None => Err((hash, msg)),
-        }
     }
 }
 
