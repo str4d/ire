@@ -5,13 +5,13 @@ use super::{mock, types::CommSystem, Config, Inner, Router};
 use data::{RouterInfo, RouterSecretKeys};
 use transport;
 
-pub struct Builder {
+pub struct Builder<'a> {
     keys: Option<RouterSecretKeys>,
     ri_file: Option<String>,
-    comms: Option<Box<CommSystem>>,
+    comms: Option<Box<Fn() -> Box<CommSystem> + 'a>>,
 }
 
-impl Builder {
+impl<'a> Builder<'a> {
     /// Create a blank Builder.
     pub fn new() -> Self {
         Builder {
@@ -23,14 +23,20 @@ impl Builder {
 
     /// Create a Builder from the given Config.
     pub fn from_config(cfg: Config) -> io::Result<Self> {
+        let ntcp_addr = cfg.ntcp_addr;
+        let ntcp2_addr = cfg.ntcp2_addr;
+        let ntcp2_keyfile = cfg.ntcp2_keyfile;
+
         Ok(Builder::new()
             .router_keys(RouterSecretKeys::from_file(&cfg.router_keyfile)?)
             .router_info_file(cfg.ri_file)
-            .comm_system(Box::new(transport::Manager::new(
-                cfg.ntcp_addr,
-                cfg.ntcp2_addr,
-                &cfg.ntcp2_keyfile,
-            ))))
+            .comm_system(move || {
+                Box::new(transport::Manager::new(
+                    ntcp_addr,
+                    ntcp2_addr,
+                    &ntcp2_keyfile,
+                ))
+            }))
     }
 
     pub fn router_keys(mut self, keys: RouterSecretKeys) -> Self {
@@ -43,8 +49,11 @@ impl Builder {
         self
     }
 
-    pub fn comm_system(mut self, comms: Box<CommSystem>) -> Self {
-        self.comms = Some(comms);
+    pub fn comm_system<CS>(mut self, comms: CS) -> Self
+    where
+        CS: Fn() -> Box<CommSystem> + 'a,
+    {
+        self.comms = Some(Box::new(comms));
         self
     }
 
@@ -61,7 +70,7 @@ impl Builder {
         };
 
         let comms = match self.comms {
-            Some(comms) => comms,
+            Some(comms) => comms(),
             None => Box::new(mock::MockCommSystem::new()),
         };
 
