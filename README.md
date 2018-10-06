@@ -33,6 +33,13 @@ and implemented.
 - I2NP
   - [x] Message parsing
   - [ ] Message handling
+- NetDB
+  - [ ] Local storage
+  - [ ] Persistence to disk
+  - [ ] Reseeding
+  - [ ] Lookups
+  - [ ] Publishing
+  - [ ] Floodfill
 - Transports
   - [x] Transport manager
   - [ ] NTCP
