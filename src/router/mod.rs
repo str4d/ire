@@ -2,7 +2,8 @@ use futures::Future;
 use std::io;
 use std::sync::{Arc, Mutex};
 
-use data::RouterSecretKeys;
+use data::{Hash, RouterSecretKeys};
+use i2np::{DatabaseStoreData, Message, MessagePayload};
 
 mod builder;
 mod config;
@@ -12,6 +13,40 @@ pub mod types;
 pub use self::builder::Builder;
 pub use self::config::Config;
 
+pub struct MessageHandler {
+    netdb: Arc<Mutex<types::NetworkDatabase>>,
+}
+
+impl MessageHandler {
+    pub fn new(netdb: Arc<Mutex<types::NetworkDatabase>>) -> Self {
+        MessageHandler { netdb }
+    }
+}
+
+impl types::InboundMessageHandler for MessageHandler {
+    fn handle(&self, from: Hash, msg: Message) {
+        match msg.payload {
+            MessagePayload::DatabaseStore(ds) => match ds.data {
+                DatabaseStoreData::RI(ri) => {
+                    self.netdb
+                        .lock()
+                        .unwrap()
+                        .store_router_info(ds.key, ri)
+                        .expect("Failed to store RouterInfo");
+                }
+                DatabaseStoreData::LS(ls) => {
+                    self.netdb
+                        .lock()
+                        .unwrap()
+                        .store_lease_set(ds.key, ls)
+                        .expect("Failed to store LeaseSet");
+                }
+            },
+            _ => debug!("Received message from {}: {:?}", from, msg),
+        }
+    }
+}
+
 /// An I2P router.
 pub struct Router {
     inner: Arc<Mutex<Inner>>,
@@ -19,6 +54,7 @@ pub struct Router {
 
 struct Inner {
     keys: RouterSecretKeys,
+    netdb: Arc<Mutex<types::NetworkDatabase>>,
     comms: Box<types::CommSystem>,
 }
 

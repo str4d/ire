@@ -56,7 +56,8 @@ pub struct ReplyPath {
     tid: TunnelId,
     gateway: Hash,
 }
-enum DatabaseStoreData {
+
+pub enum DatabaseStoreData {
     RI(RouterInfo),
     LS(LeaseSet),
 }
@@ -64,10 +65,10 @@ enum DatabaseStoreData {
 /// An unsolicited database store, or the response to a successful DatabaseLookup
 /// message.
 pub struct DatabaseStore {
-    key: Hash,
+    pub key: Hash,
     ds_type: u8,
     reply: Option<ReplyPath>,
-    data: DatabaseStoreData,
+    pub data: DatabaseStoreData,
 }
 
 impl DatabaseStore {
