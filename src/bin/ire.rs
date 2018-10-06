@@ -144,7 +144,7 @@ fn cli_client(args: &ArgMatches) -> i32 {
             let (ntcp2, engine) = transport::ntcp2::Manager::new("127.0.0.1:0".parse().unwrap());
             let handle = ntcp2.handle();
             let conn = ntcp2
-                .connect(ri, peer_ri)
+                .connect(&ri, peer_ri)
                 .unwrap()
                 .and_then(move |_| {
                     info!("Connection established!");
