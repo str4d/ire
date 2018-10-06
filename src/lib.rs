@@ -49,6 +49,7 @@ mod constants;
 pub mod crypto;
 pub mod data;
 pub mod i2np;
+mod netdb;
 pub mod router;
 pub mod transport;
 

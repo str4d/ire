@@ -104,7 +104,7 @@ impl SessionTag {
 /// Defines an identifier that is unique to each router in a tunnel. A TunnelId
 /// is generally greater than zero; do not use a value of zero except in
 /// special cases.
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct TunnelId(pub u32);
 
 /// A key certificate provides a mechanism to indicate the type of the PublicKey
@@ -306,6 +306,7 @@ impl RouterSecretKeys {
 
 /// A Destination defines a particular endpoint to which messages can be
 /// directed for secure delivery.
+#[derive(Clone)]
 pub struct Destination {
     public_key: PublicKey,
     padding: Option<Vec<u8>>,
@@ -315,6 +316,7 @@ pub struct Destination {
 
 /// Defines the authorization for a particular tunnel to receive messages
 /// targeting a Destination.
+#[derive(Clone)]
 pub struct Lease {
     tunnel_gw: Hash,
     tid: TunnelId,
@@ -329,8 +331,9 @@ pub struct Lease {
 /// The LeaseSet is one of the two structures stored in the network database
 /// (the other being RouterInfo), and is keyed under the SHA-256 of the contained
 /// Destination.
+#[derive(Clone)]
 pub struct LeaseSet {
-    dest: Destination,
+    pub dest: Destination,
     enc_key: PublicKey,
     sig_key: SigningPublicKey,
     leases: Vec<Lease>,
