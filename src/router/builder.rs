@@ -3,10 +3,11 @@ use std::sync::{Arc, Mutex};
 
 use super::{
     mock,
-    types::{CommSystem, InboundMessageHandler},
+    types::{CommSystem, InboundMessageHandler, NetworkDatabase},
     Config, Inner, MessageHandler, Router,
 };
 use data::{RouterInfo, RouterSecretKeys};
+use netdb::LocalNetworkDatabase;
 use transport;
 
 type CS<'a> = Box<Fn(Arc<InboundMessageHandler>) -> Box<CommSystem> + 'a>;
@@ -14,6 +15,7 @@ type CS<'a> = Box<Fn(Arc<InboundMessageHandler>) -> Box<CommSystem> + 'a>;
 pub struct Builder<'a> {
     keys: Option<RouterSecretKeys>,
     ri_file: Option<String>,
+    netdb: Option<Arc<Mutex<NetworkDatabase>>>,
     comms: Option<CS<'a>>,
 }
 
@@ -23,6 +25,7 @@ impl<'a> Builder<'a> {
         Builder {
             keys: None,
             ri_file: None,
+            netdb: None,
             comms: None,
         }
     }
@@ -56,6 +59,11 @@ impl<'a> Builder<'a> {
         self
     }
 
+    pub fn network_database(mut self, netdb: Arc<Mutex<NetworkDatabase>>) -> Self {
+        self.netdb = Some(netdb);
+        self
+    }
+
     pub fn comm_system<CS>(mut self, comms: CS) -> Self
     where
         CS: Fn(Arc<InboundMessageHandler>) -> Box<CommSystem> + 'a,
@@ -76,7 +84,12 @@ impl<'a> Builder<'a> {
             None => panic!("Must set location to store router.info"),
         };
 
-        let msg_handler = Arc::new(MessageHandler::new());
+        let netdb = match self.netdb {
+            Some(netdb) => netdb,
+            None => Arc::new(Mutex::new(LocalNetworkDatabase::new())),
+        };
+
+        let msg_handler = Arc::new(MessageHandler::new(netdb.clone()));
 
         let comms = match self.comms {
             Some(comms) => comms(msg_handler),
@@ -89,7 +102,7 @@ impl<'a> Builder<'a> {
         ri.to_file(&ri_file)?;
 
         Ok(Router {
-            inner: Arc::new(Mutex::new(Inner { keys, comms })),
+            inner: Arc::new(Mutex::new(Inner { keys, netdb, comms })),
         })
     }
 }

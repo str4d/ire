@@ -31,7 +31,7 @@ pub trait CommSystem: OutboundMessageHandler {
 }
 
 /// Defines the mechanism for interacting with I2P's network database.
-pub trait NetworkDatabase {
+pub trait NetworkDatabase: Send + Sync {
     /// Finds the RouterInfo stored at the given key.
     fn lookup_router_info(
         &mut self,

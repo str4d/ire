@@ -34,7 +34,7 @@ and implemented.
   - [x] Message parsing
   - [ ] Message handling
 - NetDB
-  - [ ] Local storage
+  - [x] Local storage
   - [ ] Persistence to disk
   - [ ] Reseeding
   - [ ] Lookups
