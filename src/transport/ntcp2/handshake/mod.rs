@@ -96,7 +96,7 @@ where
     T: AsyncRead + AsyncWrite,
     T: Send + 'static,
 {
-    type Item = (RouterIdentity, Framed<T, Codec>);
+    type Item = (RouterInfo, Framed<T, Codec>);
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
@@ -251,7 +251,7 @@ where
                         next_len: None,
                     };
 
-                    return Ok(Async::Ready((ri_a.router_id, codec.framed(conn))));
+                    return Ok(Async::Ready((ri_a, codec.framed(conn))));
                 }
             };
             self.noise = Some(noise);

@@ -494,7 +494,27 @@ impl Manager {
             let conn = handshake::IBHandshake::new(conn, &static_key, &aesobfse_key, &aesobfse_iv);
 
             // Once connected:
-            let process_conn = conn.and_then(|(ri, conn)| Session::new(&ri, conn, session_refs));
+            let process_conn = conn.and_then(|(ri, conn)| {
+                let peer_hash = ri.router_id.hash();
+                let session = Session::new(&ri.router_id, conn, session_refs);
+
+                // Treat RouterInfo from handshake as a DatabaseStore
+                debug!(
+                    "Converting RouterInfo block from {} into DatabaseStore message",
+                    peer_hash
+                );
+                // TODO: Fake-store if we are a FF and flood flag is set
+                let fake_ds = Message::from_payload(MessagePayload::DatabaseStore(
+                    DatabaseStore::from_ri(ri, None),
+                ));
+                session
+                    .engine
+                    .unbounded_send((peer_hash, Block::Message(fake_ds)))
+                    .unwrap();
+
+                // Start the session
+                session
+            });
 
             spawn(process_conn.map_err(|e| error!("Error while listening: {:?}", e)));
             Ok(())
