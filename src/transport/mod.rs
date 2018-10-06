@@ -1,6 +1,6 @@
 //! Transports used for point-to-point communication between I2P routers.
 
-use futures::{sync::mpsc, Async, Future, Poll, Sink, StartSend, Stream};
+use futures::{stream::Select, sync::mpsc, Async, Future, Poll, Sink, StartSend, Stream};
 use std::io;
 use std::iter::once;
 use std::net::SocketAddr;
@@ -14,7 +14,6 @@ use router::types::{CommSystem, OutboundMessageHandler};
 pub mod ntcp;
 pub mod ntcp2;
 mod session;
-mod util;
 
 /// Shorthand for the transmit half of a Transport-bound message channel.
 type MessageTx = mpsc::UnboundedSender<(Hash, Message)>;
@@ -82,9 +81,7 @@ pub struct Manager {
 }
 
 pub struct Engine {
-    ntcp: ntcp::Engine,
-    ntcp2: ntcp2::Engine,
-    select_flag: bool,
+    engines: Select<ntcp::Engine, ntcp2::Engine>,
 }
 
 trait Transport {
@@ -107,9 +104,7 @@ impl Manager {
             ntcp: ntcp_manager,
             ntcp2: ntcp2_manager,
             engine: Some(Engine {
-                ntcp: ntcp_engine,
-                ntcp2: ntcp2_engine,
-                select_flag: false,
+                engines: ntcp_engine.select(ntcp2_engine),
             }),
         }
     }
@@ -169,12 +164,7 @@ impl Future for Engine {
     type Error = ();
 
     fn poll(&mut self) -> Poll<(), ()> {
-        let mut select = util::Select {
-            stream1: &mut self.ntcp,
-            stream2: &mut self.ntcp2,
-            flag: &mut self.select_flag,
-        };
-        while let Async::Ready(f) = select.poll()? {
+        while let Async::Ready(f) = self.engines.poll()? {
             if let Some((from, msg)) = f {
                 // TODO: Do something
                 debug!("Received message from {}: {:?}", from, msg);
