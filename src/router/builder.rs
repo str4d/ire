@@ -1,14 +1,20 @@
 use std::io;
 use std::sync::{Arc, Mutex};
 
-use super::{mock, types::CommSystem, Config, Inner, Router};
+use super::{
+    mock,
+    types::{CommSystem, InboundMessageHandler},
+    Config, Inner, MessageHandler, Router,
+};
 use data::{RouterInfo, RouterSecretKeys};
 use transport;
+
+type CS<'a> = Box<Fn(Arc<InboundMessageHandler>) -> Box<CommSystem> + 'a>;
 
 pub struct Builder<'a> {
     keys: Option<RouterSecretKeys>,
     ri_file: Option<String>,
-    comms: Option<Box<Fn() -> Box<CommSystem> + 'a>>,
+    comms: Option<CS<'a>>,
 }
 
 impl<'a> Builder<'a> {
@@ -30,8 +36,9 @@ impl<'a> Builder<'a> {
         Ok(Builder::new()
             .router_keys(RouterSecretKeys::from_file(&cfg.router_keyfile)?)
             .router_info_file(cfg.ri_file)
-            .comm_system(move || {
+            .comm_system(move |msg_handler| {
                 Box::new(transport::Manager::new(
+                    msg_handler,
                     ntcp_addr,
                     ntcp2_addr,
                     &ntcp2_keyfile,
@@ -51,7 +58,7 @@ impl<'a> Builder<'a> {
 
     pub fn comm_system<CS>(mut self, comms: CS) -> Self
     where
-        CS: Fn() -> Box<CommSystem> + 'a,
+        CS: Fn(Arc<InboundMessageHandler>) -> Box<CommSystem> + 'a,
     {
         self.comms = Some(Box::new(comms));
         self
@@ -69,8 +76,10 @@ impl<'a> Builder<'a> {
             None => panic!("Must set location to store router.info"),
         };
 
+        let msg_handler = Arc::new(MessageHandler::new());
+
         let comms = match self.comms {
-            Some(comms) => comms(),
+            Some(comms) => comms(msg_handler),
             None => Box::new(mock::MockCommSystem::new()),
         };
 

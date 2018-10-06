@@ -4,12 +4,13 @@ use futures::{stream::Select, sync::mpsc, Async, Future, Poll, Sink, StartSend, 
 use std::io;
 use std::iter::once;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use tokio_io::IoFuture;
 
 use crypto::dh::DHSessionKeyBuilder;
 use data::{Hash, RouterAddress, RouterSecretKeys};
 use i2np::Message;
-use router::types::{CommSystem, OutboundMessageHandler};
+use router::types::{CommSystem, InboundMessageHandler, OutboundMessageHandler};
 
 pub mod ntcp;
 pub mod ntcp2;
@@ -82,6 +83,7 @@ pub struct Manager {
 
 pub struct Engine {
     engines: Select<ntcp::Engine, ntcp2::Engine>,
+    msg_handler: Arc<InboundMessageHandler>,
 }
 
 trait Transport {
@@ -89,7 +91,12 @@ trait Transport {
 }
 
 impl Manager {
-    pub fn new(ntcp_addr: SocketAddr, ntcp2_addr: SocketAddr, ntcp2_keyfile: &str) -> Self {
+    pub fn new(
+        msg_handler: Arc<InboundMessageHandler>,
+        ntcp_addr: SocketAddr,
+        ntcp2_addr: SocketAddr,
+        ntcp2_keyfile: &str,
+    ) -> Self {
         let (ntcp_manager, ntcp_engine) = ntcp::Manager::new(ntcp_addr);
         let (ntcp2_manager, ntcp2_engine) =
             match ntcp2::Manager::from_file(ntcp2_addr, ntcp2_keyfile) {
@@ -105,6 +112,7 @@ impl Manager {
             ntcp2: ntcp2_manager,
             engine: Some(Engine {
                 engines: ntcp_engine.select(ntcp2_engine),
+                msg_handler,
             }),
         }
     }
@@ -166,8 +174,7 @@ impl Future for Engine {
     fn poll(&mut self) -> Poll<(), ()> {
         while let Async::Ready(f) = self.engines.poll()? {
             if let Some((from, msg)) = f {
-                // TODO: Do something
-                debug!("Received message from {}: {:?}", from, msg);
+                self.msg_handler.handle(from, msg);
             }
         }
         Ok(Async::NotReady)
@@ -377,7 +384,18 @@ mod tests {
         let ntcp2_addr = "127.0.0.2:0".parse().unwrap();
         let ntcp2_keyfile = dir.path().join("test.ntcp2.keys.dat");
 
-        let manager = Manager::new(ntcp_addr, ntcp2_addr, ntcp2_keyfile.to_str().unwrap());
+        struct MockMessageHandler;
+
+        impl InboundMessageHandler for MockMessageHandler {
+            fn handle(&self, from: Hash, msg: Message) {}
+        }
+
+        let manager = Manager::new(
+            Arc::new(MockMessageHandler {}),
+            ntcp_addr,
+            ntcp2_addr,
+            ntcp2_keyfile.to_str().unwrap(),
+        );
         let addrs = manager.addresses();
 
         assert_eq!(addrs[0].addr(), Some(ntcp_addr));

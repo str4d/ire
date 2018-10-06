@@ -2,7 +2,8 @@ use futures::Future;
 use std::io;
 use std::sync::{Arc, Mutex};
 
-use data::RouterSecretKeys;
+use data::{Hash, RouterSecretKeys};
+use i2np::Message;
 
 mod builder;
 mod config;
@@ -11,6 +12,22 @@ pub mod types;
 
 pub use self::builder::Builder;
 pub use self::config::Config;
+
+pub struct MessageHandler;
+
+impl MessageHandler {
+    pub fn new() -> Self {
+        MessageHandler {}
+    }
+}
+
+impl types::InboundMessageHandler for MessageHandler {
+    fn handle(&self, from: Hash, msg: Message) {
+        match msg.payload {
+            _ => debug!("Received message from {}: {:?}", from, msg),
+        }
+    }
+}
 
 /// An I2P router.
 pub struct Router {

@@ -6,6 +6,10 @@ use tokio_io::IoFuture;
 use data::{Hash, LeaseSet, RouterAddress, RouterInfo, RouterSecretKeys};
 use i2np::Message;
 
+pub trait InboundMessageHandler: Send + Sync {
+    fn handle(&self, from: Hash, msg: Message);
+}
+
 pub trait OutboundMessageHandler {
     /// Send an I2NP message to a peer.
     ///
