@@ -26,6 +26,7 @@ extern crate itertools;
 extern crate num_bigint;
 extern crate num_traits;
 extern crate rand;
+extern crate sha1;
 extern crate sha2;
 extern crate signatory;
 extern crate signatory_dalek;

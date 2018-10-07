@@ -22,6 +22,7 @@ use constants;
 pub(crate) mod frame;
 
 pub(crate) mod dh;
+mod dsa;
 pub(crate) mod elgamal;
 pub(crate) mod math;
 
@@ -32,6 +33,7 @@ pub(crate) const AES_BLOCK_SIZE: usize = 16;
 pub enum Error {
     NoSignature,
     TypeMismatch,
+    Dsa,
     Signatory(SignatoryError),
 }
 
@@ -213,7 +215,7 @@ impl fmt::Debug for PrivateKey {
 /// The public component of a signature keypair.
 #[derive(Clone, Debug, PartialEq)]
 pub enum SigningPublicKey {
-    DsaSha1,
+    DsaSha1(dsa::DsaPublicKey),
     EcdsaSha256P256(EcdsaPublicKey<NistP256>),
     EcdsaSha384P384(EcdsaPublicKey<NistP384>),
     EcdsaSha512P521,
@@ -223,7 +225,7 @@ pub enum SigningPublicKey {
 impl SigningPublicKey {
     pub fn sig_type(&self) -> SigType {
         match *self {
-            SigningPublicKey::DsaSha1 => SigType::DsaSha1,
+            SigningPublicKey::DsaSha1(_) => SigType::DsaSha1,
             SigningPublicKey::EcdsaSha256P256(_) => SigType::EcdsaSha256P256,
             SigningPublicKey::EcdsaSha384P384(_) => SigType::EcdsaSha384P384,
             SigningPublicKey::EcdsaSha512P521 => SigType::EcdsaSha512P521,
@@ -235,7 +237,9 @@ impl SigningPublicKey {
 impl SigningPublicKey {
     pub fn from_bytes(sig_type: SigType, data: &[u8]) -> Result<Self, Error> {
         match sig_type {
-            SigType::DsaSha1 => unimplemented!(),
+            SigType::DsaSha1 => Ok(SigningPublicKey::DsaSha1(dsa::DsaPublicKey::from_bytes(
+                data,
+            )?)),
             SigType::EcdsaSha256P256 => Ok(SigningPublicKey::EcdsaSha256P256(
                 EcdsaPublicKey::from_untagged_point(GenericArray::from_slice(data)),
             )),
@@ -263,7 +267,7 @@ impl SigningPublicKey {
 
     pub fn as_bytes(&self) -> &[u8] {
         match *self {
-            SigningPublicKey::DsaSha1 => unimplemented!(),
+            SigningPublicKey::DsaSha1(ref pk) => pk.as_bytes(),
             SigningPublicKey::EcdsaSha256P256(ref pk) => &pk.as_bytes()[1..],
             SigningPublicKey::EcdsaSha384P384(ref pk) => &pk.as_bytes()[1..],
             SigningPublicKey::EcdsaSha512P521 => unimplemented!(),
@@ -273,7 +277,13 @@ impl SigningPublicKey {
 
     pub fn verify(&self, message: &[u8], signature: &Signature) -> Result<(), Error> {
         match (self, signature) {
-            (&SigningPublicKey::DsaSha1, &Signature::DsaSha1) => unimplemented!(),
+            (&SigningPublicKey::DsaSha1(ref pk), &Signature::DsaSha1(ref s)) => {
+                if pk.verify(message, s) {
+                    Ok(())
+                } else {
+                    Err(Error::Dsa)
+                }
+            }
             (&SigningPublicKey::EcdsaSha256P256(ref pk), &Signature::EcdsaSha256P256(ref s)) => {
                 verify_sha256(&P256Verifier::from(pk), message, s).map_err(|e| e.into())
             }
@@ -367,7 +377,7 @@ impl Clone for SigningPrivateKey {
 /// A signature over some data.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Signature {
-    DsaSha1,
+    DsaSha1(dsa::DsaSignature),
     EcdsaSha256P256(FixedSignature<NistP256>),
     EcdsaSha384P384(FixedSignature<NistP384>),
     EcdsaSha512P521,
@@ -377,7 +387,7 @@ pub enum Signature {
 impl Signature {
     pub fn from_bytes(sig_type: SigType, data: &[u8]) -> Result<Self, Error> {
         match sig_type {
-            SigType::DsaSha1 => unimplemented!(),
+            SigType::DsaSha1 => Ok(Signature::DsaSha1(dsa::DsaSignature::from_bytes(data)?)),
             SigType::EcdsaSha256P256 => Ok(Signature::EcdsaSha256P256(FixedSignature::from_bytes(
                 data,
             )?)),
@@ -391,7 +401,7 @@ impl Signature {
 
     pub fn to_bytes(&self) -> Vec<u8> {
         match *self {
-            Signature::DsaSha1 => unimplemented!(),
+            Signature::DsaSha1(ref s) => s.to_bytes(),
             Signature::EcdsaSha256P256(ref s) => Vec::from(s.as_ref()),
             Signature::EcdsaSha384P384(ref s) => Vec::from(s.as_ref()),
             Signature::EcdsaSha512P521 => unimplemented!(),

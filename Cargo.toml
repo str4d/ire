@@ -30,6 +30,7 @@ nom = "4.0"
 num-bigint = { version = "0.2", features = ["rand"] }
 num-traits = "0.2"
 rand = "0.5"
+sha1 = "0.6"
 sha2 = "0.7"
 signatory = { version = "0.9.0-alpha3", features = ["ecdsa", "ed25519"] }
 signatory-dalek = "0.9.0-alpha3"
