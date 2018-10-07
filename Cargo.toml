@@ -30,6 +30,7 @@ nom = "4.0"
 num-bigint = { version = "0.2", features = ["rand"] }
 num-traits = "0.2"
 rand = "0.5"
+ring = "0.13"
 sha1 = "0.6"
 sha2 = "0.7"
 signatory = { version = "0.9.0-alpha3", features = ["ecdsa", "ed25519"] }
@@ -42,10 +43,14 @@ tokio-executor = "0.1"
 tokio-io = "0.1"
 tokio-tcp = "0.1"
 tokio-timer = "0.2"
+untrusted = "0.6"
 
 [dev-dependencies]
 pretty_assertions = "0.5"
 tempfile = "3"
+
+[patch.crates-io]
+ring = { git = "https://github.com/str4d/ring.git", branch = "i2p-rsa-raw" }
 
 [features]
 cli = ["clap", "env_logger", "tokio"]

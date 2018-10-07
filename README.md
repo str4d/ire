@@ -27,6 +27,9 @@ and implemented.
     - [x] ECDSA_SHA256_P256
     - [x] ECDSA_SHA384_P384
     - [ ] ECDSA_SHA512_P521
+    - [x] RSA_SHA256_2048
+    - [x] RSA_SHA384_3072
+    - [x] RSA_SHA512_4096
     - [x] Ed25519
   - [x] ElGamal
   - [x] AES256

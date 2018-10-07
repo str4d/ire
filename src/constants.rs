@@ -18,6 +18,9 @@ pub const DSA_SHA1: u16 = 0;
 pub const ECDSA_SHA256_P256: u16 = 1;
 pub const ECDSA_SHA384_P384: u16 = 2;
 pub const ECDSA_SHA512_P521: u16 = 3;
+pub const RSA_SHA256_2048: u16 = 4;
+pub const RSA_SHA384_3072: u16 = 5;
+pub const RSA_SHA512_4096: u16 = 6;
 pub const ED25519: u16 = 7;
 
 // Enc types

@@ -26,6 +26,7 @@ extern crate itertools;
 extern crate num_bigint;
 extern crate num_traits;
 extern crate rand;
+extern crate ring;
 extern crate sha1;
 extern crate sha2;
 extern crate signatory;
@@ -37,6 +38,7 @@ extern crate tokio_executor;
 extern crate tokio_io;
 extern crate tokio_tcp;
 extern crate tokio_timer;
+extern crate untrusted;
 
 #[cfg(test)]
 #[macro_use]
