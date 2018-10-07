@@ -39,6 +39,7 @@ extern crate tokio_io;
 extern crate tokio_tcp;
 extern crate tokio_timer;
 extern crate untrusted;
+extern crate zip;
 
 #[cfg(test)]
 #[macro_use]
@@ -51,6 +52,7 @@ extern crate test;
 mod constants;
 pub mod crypto;
 pub mod data;
+mod file;
 pub mod i2np;
 mod netdb;
 pub mod router;
