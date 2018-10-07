@@ -56,7 +56,7 @@ pub mod crypto;
 pub mod data;
 mod file;
 pub mod i2np;
-mod netdb;
+pub mod netdb;
 pub mod router;
 pub mod transport;
 
