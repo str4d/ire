@@ -79,6 +79,8 @@ named!(pub su3_file<Su3File>, do_parse!(
         version: String::from(version),
         signer: String::from(signer),
         content,
+        sig_type,
+        msg_len: 40 + version_len as usize + signer_len as usize + content_len as usize,
         sig,
     })
 ));

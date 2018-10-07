@@ -23,6 +23,7 @@ extern crate data_encoding;
 extern crate flate2;
 extern crate i2p_snow;
 extern crate itertools;
+extern crate native_tls;
 extern crate num_bigint;
 extern crate num_traits;
 extern crate rand;
@@ -38,6 +39,7 @@ extern crate tokio_executor;
 extern crate tokio_io;
 extern crate tokio_tcp;
 extern crate tokio_timer;
+extern crate tokio_tls;
 extern crate untrusted;
 extern crate zip;
 
