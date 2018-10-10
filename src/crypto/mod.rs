@@ -3,6 +3,7 @@
 use aes::{self, block_cipher_trait::generic_array::GenericArray};
 use block_modes::{block_padding::ZeroPadding, BlockMode, BlockModeIv, Cbc};
 use nom::Err;
+use ring::{self, signature as ring_signature};
 use signatory::{
     curve::{NistP256, NistP384, WeierstrassCurve},
     ecdsa::{EcdsaPublicKey, FixedSignature},
@@ -15,6 +16,7 @@ use signatory::{
 use signatory_dalek::{Ed25519Signer, Ed25519Verifier};
 use signatory_ring::ecdsa::{P256Verifier, P384Verifier};
 use std::fmt;
+use untrusted;
 
 use constants;
 
@@ -22,6 +24,7 @@ use constants;
 pub(crate) mod frame;
 
 pub(crate) mod dh;
+mod dsa;
 pub(crate) mod elgamal;
 pub(crate) mod math;
 
@@ -32,7 +35,15 @@ pub(crate) const AES_BLOCK_SIZE: usize = 16;
 pub enum Error {
     NoSignature,
     TypeMismatch,
+    Dsa,
+    Ring(ring::error::Unspecified),
     Signatory(SignatoryError),
+}
+
+impl From<ring::error::Unspecified> for Error {
+    fn from(e: ring::error::Unspecified) -> Self {
+        Error::Ring(e)
+    }
 }
 
 impl From<SignatoryError> for Error {
@@ -48,6 +59,9 @@ pub enum SigType {
     EcdsaSha256P256,
     EcdsaSha384P384,
     EcdsaSha512P521,
+    Rsa2048Sha256,
+    Rsa3072Sha384,
+    Rsa4096Sha512,
     Ed25519,
 }
 
@@ -66,6 +80,9 @@ impl SigType {
             SigType::EcdsaSha256P256 => constants::ECDSA_SHA256_P256,
             SigType::EcdsaSha384P384 => constants::ECDSA_SHA384_P384,
             SigType::EcdsaSha512P521 => constants::ECDSA_SHA512_P521,
+            SigType::Rsa2048Sha256 => constants::RSA_SHA256_2048,
+            SigType::Rsa3072Sha384 => constants::RSA_SHA384_3072,
+            SigType::Rsa4096Sha512 => constants::RSA_SHA512_4096,
             SigType::Ed25519 => constants::ED25519,
         }
     }
@@ -76,6 +93,9 @@ impl SigType {
             SigType::EcdsaSha256P256 => <NistP256 as WeierstrassCurve>::UntaggedPointSize::to_u32(),
             SigType::EcdsaSha384P384 => <NistP384 as WeierstrassCurve>::UntaggedPointSize::to_u32(),
             SigType::EcdsaSha512P521 => 132,
+            SigType::Rsa2048Sha256 => 256,
+            SigType::Rsa3072Sha384 => 384,
+            SigType::Rsa4096Sha512 => 512,
             SigType::Ed25519 => ed25519::PUBLIC_KEY_SIZE as u32,
         }
     }
@@ -86,6 +106,9 @@ impl SigType {
             SigType::EcdsaSha256P256 => <NistP256 as WeierstrassCurve>::ScalarSize::to_u32(),
             SigType::EcdsaSha384P384 => <NistP384 as WeierstrassCurve>::ScalarSize::to_u32(),
             SigType::EcdsaSha512P521 => 66,
+            SigType::Rsa2048Sha256 => 512,
+            SigType::Rsa3072Sha384 => 768,
+            SigType::Rsa4096Sha512 => 1024,
             SigType::Ed25519 => ed25519::SEED_SIZE as u32,
         }
     }
@@ -100,6 +123,9 @@ impl SigType {
                 <NistP384 as WeierstrassCurve>::FixedSignatureSize::to_u32()
             }
             SigType::EcdsaSha512P521 => 132,
+            SigType::Rsa2048Sha256 => 256,
+            SigType::Rsa3072Sha384 => 384,
+            SigType::Rsa4096Sha512 => 512,
             SigType::Ed25519 => ed25519::SIGNATURE_SIZE as u32,
         }
     }
@@ -213,7 +239,7 @@ impl fmt::Debug for PrivateKey {
 /// The public component of a signature keypair.
 #[derive(Clone, Debug, PartialEq)]
 pub enum SigningPublicKey {
-    DsaSha1,
+    DsaSha1(dsa::DsaPublicKey),
     EcdsaSha256P256(EcdsaPublicKey<NistP256>),
     EcdsaSha384P384(EcdsaPublicKey<NistP384>),
     EcdsaSha512P521,
@@ -223,7 +249,7 @@ pub enum SigningPublicKey {
 impl SigningPublicKey {
     pub fn sig_type(&self) -> SigType {
         match *self {
-            SigningPublicKey::DsaSha1 => SigType::DsaSha1,
+            SigningPublicKey::DsaSha1(_) => SigType::DsaSha1,
             SigningPublicKey::EcdsaSha256P256(_) => SigType::EcdsaSha256P256,
             SigningPublicKey::EcdsaSha384P384(_) => SigType::EcdsaSha384P384,
             SigningPublicKey::EcdsaSha512P521 => SigType::EcdsaSha512P521,
@@ -235,7 +261,9 @@ impl SigningPublicKey {
 impl SigningPublicKey {
     pub fn from_bytes(sig_type: SigType, data: &[u8]) -> Result<Self, Error> {
         match sig_type {
-            SigType::DsaSha1 => unimplemented!(),
+            SigType::DsaSha1 => Ok(SigningPublicKey::DsaSha1(dsa::DsaPublicKey::from_bytes(
+                data,
+            )?)),
             SigType::EcdsaSha256P256 => Ok(SigningPublicKey::EcdsaSha256P256(
                 EcdsaPublicKey::from_untagged_point(GenericArray::from_slice(data)),
             )),
@@ -243,6 +271,9 @@ impl SigningPublicKey {
                 EcdsaPublicKey::from_untagged_point(GenericArray::from_slice(data)),
             )),
             SigType::EcdsaSha512P521 => unimplemented!(),
+            SigType::Rsa2048Sha256 | SigType::Rsa3072Sha384 | SigType::Rsa4096Sha512 => {
+                panic!("Online verifying not supported")
+            }
             SigType::Ed25519 => Ok(SigningPublicKey::Ed25519(Ed25519PublicKey::from_bytes(
                 data,
             )?)),
@@ -263,7 +294,7 @@ impl SigningPublicKey {
 
     pub fn as_bytes(&self) -> &[u8] {
         match *self {
-            SigningPublicKey::DsaSha1 => unimplemented!(),
+            SigningPublicKey::DsaSha1(ref pk) => pk.as_bytes(),
             SigningPublicKey::EcdsaSha256P256(ref pk) => &pk.as_bytes()[1..],
             SigningPublicKey::EcdsaSha384P384(ref pk) => &pk.as_bytes()[1..],
             SigningPublicKey::EcdsaSha512P521 => unimplemented!(),
@@ -273,7 +304,13 @@ impl SigningPublicKey {
 
     pub fn verify(&self, message: &[u8], signature: &Signature) -> Result<(), Error> {
         match (self, signature) {
-            (&SigningPublicKey::DsaSha1, &Signature::DsaSha1) => unimplemented!(),
+            (&SigningPublicKey::DsaSha1(ref pk), &Signature::DsaSha1(ref s)) => {
+                if pk.verify(message, s) {
+                    Ok(())
+                } else {
+                    Err(Error::Dsa)
+                }
+            }
             (&SigningPublicKey::EcdsaSha256P256(ref pk), &Signature::EcdsaSha256P256(ref s)) => {
                 verify_sha256(&P256Verifier::from(pk), message, s).map_err(|e| e.into())
             }
@@ -312,6 +349,9 @@ impl SigningPrivateKey {
             SigType::EcdsaSha256P256 => unimplemented!(),
             SigType::EcdsaSha384P384 => unimplemented!(),
             SigType::EcdsaSha512P521 => unimplemented!(),
+            SigType::Rsa2048Sha256 | SigType::Rsa3072Sha384 | SigType::Rsa4096Sha512 => {
+                panic!("Online signing not supported")
+            }
             SigType::Ed25519 => SigningPrivateKey::Ed25519(Ed25519Seed::generate()),
         }
     }
@@ -322,6 +362,9 @@ impl SigningPrivateKey {
             SigType::EcdsaSha256P256 => unimplemented!(),
             SigType::EcdsaSha384P384 => unimplemented!(),
             SigType::EcdsaSha512P521 => unimplemented!(),
+            SigType::Rsa2048Sha256 | SigType::Rsa3072Sha384 | SigType::Rsa4096Sha512 => {
+                panic!("Online signing not supported")
+            }
             SigType::Ed25519 => Ok(SigningPrivateKey::Ed25519(Ed25519Seed::from_bytes(data)?)),
         }
     }
@@ -364,38 +407,118 @@ impl Clone for SigningPrivateKey {
     }
 }
 
+/// The public component of an offline signature keypair.
+#[derive(Clone, Debug, PartialEq)]
+pub enum OfflineSigningPublicKey {
+    Rsa2048Sha256(Vec<u8>),
+    Rsa3072Sha384(Vec<u8>),
+    Rsa4096Sha512(Vec<u8>),
+}
+
+impl OfflineSigningPublicKey {
+    pub fn from_bytes(sig_type: SigType, data: &[u8]) -> Result<Self, Error> {
+        match sig_type {
+            SigType::Rsa2048Sha256 | SigType::Rsa3072Sha384 | SigType::Rsa4096Sha512 => {
+                // Ring requires the binary RSAPublicKey format
+                let mut pub_key_der = Vec::with_capacity(data.len());
+                pub_key_der.extend_from_slice(data);
+                Ok(match sig_type {
+                    SigType::Rsa2048Sha256 => OfflineSigningPublicKey::Rsa2048Sha256(pub_key_der),
+                    SigType::Rsa3072Sha384 => OfflineSigningPublicKey::Rsa3072Sha384(pub_key_der),
+                    SigType::Rsa4096Sha512 => OfflineSigningPublicKey::Rsa4096Sha512(pub_key_der),
+                    _ => unreachable!(),
+                })
+            }
+            _ => panic!("Invalid offline SigType"),
+        }
+    }
+
+    pub fn verify(&self, message: &[u8], signature: &Signature) -> Result<(), Error> {
+        match (self, signature) {
+            (&OfflineSigningPublicKey::Rsa2048Sha256(ref pk), &Signature::Rsa2048Sha256(ref s)) => {
+                Ok(ring_signature::verify(
+                    &ring_signature::RSA_PKCS1_2048_8192_SHA256_RAW,
+                    untrusted::Input::from(pk),
+                    untrusted::Input::from(message),
+                    untrusted::Input::from(s),
+                )?)
+            }
+            (&OfflineSigningPublicKey::Rsa3072Sha384(ref pk), &Signature::Rsa3072Sha384(ref s)) => {
+                Ok(ring_signature::verify(
+                    &ring_signature::RSA_PKCS1_3072_8192_SHA384_RAW,
+                    untrusted::Input::from(pk),
+                    untrusted::Input::from(message),
+                    untrusted::Input::from(s),
+                )?)
+            }
+            (&OfflineSigningPublicKey::Rsa4096Sha512(ref pk), &Signature::Rsa4096Sha512(ref s)) => {
+                Ok(ring_signature::verify(
+                    &ring_signature::RSA_PKCS1_4096_8192_SHA512_RAW,
+                    untrusted::Input::from(pk),
+                    untrusted::Input::from(message),
+                    untrusted::Input::from(s),
+                )?)
+            }
+            _ => {
+                println!("Signature type doesn't match key type");
+                Err(Error::TypeMismatch)
+            }
+        }
+    }
+}
+
 /// A signature over some data.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Signature {
-    DsaSha1,
+    DsaSha1(dsa::DsaSignature),
     EcdsaSha256P256(FixedSignature<NistP256>),
     EcdsaSha384P384(FixedSignature<NistP384>),
     EcdsaSha512P521,
+    Rsa2048Sha256(Vec<u8>),
+    Rsa3072Sha384(Vec<u8>),
+    Rsa4096Sha512(Vec<u8>),
     Ed25519(Ed25519Signature),
+    Unsupported(Vec<u8>),
 }
 
 impl Signature {
     pub fn from_bytes(sig_type: SigType, data: &[u8]) -> Result<Self, Error> {
         match sig_type {
-            SigType::DsaSha1 => unimplemented!(),
+            SigType::DsaSha1 => Ok(Signature::DsaSha1(dsa::DsaSignature::from_bytes(data)?)),
             SigType::EcdsaSha256P256 => Ok(Signature::EcdsaSha256P256(FixedSignature::from_bytes(
                 data,
             )?)),
             SigType::EcdsaSha384P384 => Ok(Signature::EcdsaSha384P384(FixedSignature::from_bytes(
                 data,
             )?)),
-            SigType::EcdsaSha512P521 => unimplemented!(),
             SigType::Ed25519 => Ok(Signature::Ed25519(Ed25519Signature::from_bytes(data)?)),
+            SigType::EcdsaSha512P521
+            | SigType::Rsa2048Sha256
+            | SigType::Rsa3072Sha384
+            | SigType::Rsa4096Sha512 => {
+                let mut sig = Vec::with_capacity(sig_type.sig_len() as usize);
+                sig.extend_from_slice(&data[..sig_type.sig_len() as usize]);
+                Ok(match sig_type {
+                    SigType::Rsa2048Sha256 => Signature::Rsa2048Sha256(sig),
+                    SigType::Rsa3072Sha384 => Signature::Rsa3072Sha384(sig),
+                    SigType::Rsa4096Sha512 => Signature::Rsa4096Sha512(sig),
+                    _ => Signature::Unsupported(sig),
+                })
+            }
         }
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
         match *self {
-            Signature::DsaSha1 => unimplemented!(),
+            Signature::DsaSha1(ref s) => s.to_bytes(),
             Signature::EcdsaSha256P256(ref s) => Vec::from(s.as_ref()),
             Signature::EcdsaSha384P384(ref s) => Vec::from(s.as_ref()),
             Signature::EcdsaSha512P521 => unimplemented!(),
+            Signature::Rsa2048Sha256(ref s) => s.clone(),
+            Signature::Rsa3072Sha384(ref s) => s.clone(),
+            Signature::Rsa4096Sha512(ref s) => s.clone(),
             Signature::Ed25519(ref s) => Vec::from(&s.as_bytes()[..]),
+            Signature::Unsupported(ref s) => s.clone(),
         }
     }
 }

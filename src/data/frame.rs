@@ -197,12 +197,18 @@ fn gen_key_certificate<'a>(
 
 named!(pub certificate<Certificate>,
     switch!(be_u8,
-        constants::NULL_CERT => value!(Certificate::Null) |
+        constants::NULL_CERT => do_parse!(
+            tag!(b"\x00\x00") >>
+            (Certificate::Null)
+        ) |
         constants::HASH_CERT => do_parse!(
             payload: length_bytes!(be_u16) >>
             (Certificate::HashCash(Vec::from(payload)))
         ) |
-        constants::HIDDEN_CERT => value!(Certificate::Hidden) |
+        constants::HIDDEN_CERT => do_parse!(
+            tag!(b"\x00\x00") >>
+            (Certificate::Hidden)
+        ) |
         constants::SIGNED_CERT => do_parse!(
             payload: length_bytes!(be_u16) >>
             (Certificate::Signed(Vec::from(payload)))
@@ -225,14 +231,22 @@ pub fn gen_certificate<'a>(
 ) -> Result<(&'a mut [u8], usize), GenError> {
     #[cfg_attr(rustfmt, rustfmt_skip)]
     match *cert {
-        Certificate::Null => gen_be_u8!(input, constants::NULL_CERT),
+        Certificate::Null => do_gen!(
+            input,
+            gen_be_u8!(constants::NULL_CERT) >>
+            gen_be_u16!(0)
+        ),
         Certificate::HashCash(ref payload) => do_gen!(
             input,
             gen_be_u8!(constants::HASH_CERT) >>
             gen_be_u16!(payload.len() as u16) >>
             gen_slice!(&payload)
         ),
-        Certificate::Hidden => gen_be_u8!(input, constants::HIDDEN_CERT),
+        Certificate::Hidden => do_gen!(
+            input,
+            gen_be_u8!(constants::HIDDEN_CERT) >>
+            gen_be_u16!(0)
+        ),
         Certificate::Signed(ref payload) => do_gen!(
             input,
             gen_be_u8!(constants::SIGNED_CERT) >>

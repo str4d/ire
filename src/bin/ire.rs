@@ -11,6 +11,7 @@ use clap::{App, Arg, ArgMatches, SubCommand};
 use futures::{Future, Stream};
 use ire::{
     data, i2np,
+    netdb::reseed::HttpsReseeder,
     router::{Builder, Config},
     transport,
 };
@@ -73,7 +74,7 @@ fn inner_main() -> i32 {
                                 .possible_values(&["NTCP", "NTCP2"])
                                 .required(true),
                         ),
-                ),
+                ).subcommand(SubCommand::with_name("reseed")),
         ).get_matches();
 
     match matches.subcommand() {
@@ -81,6 +82,7 @@ fn inner_main() -> i32 {
             ("gen", Some(matches)) => cli_gen(matches),
             ("router", Some(matches)) => cli_router(matches),
             ("client", Some(matches)) => cli_client(matches),
+            ("reseed", Some(_)) => cli_reseed(),
             (&_, _) => panic!("Invalid matches for cli subcommand"),
         },
         _ => 1,
@@ -166,5 +168,14 @@ fn cli_client(args: &ArgMatches) -> i32 {
         Some(_) => panic!("Unknown transport specified"),
         None => panic!("No transport specified"),
     };
+    0
+}
+
+fn cli_reseed() -> i32 {
+    let reseeder = HttpsReseeder::new().and_then(|ri| {
+        println!("Received {} RouterInfos", ri.len());
+        Ok(())
+    });
+    tokio::run(reseeder);
     0
 }

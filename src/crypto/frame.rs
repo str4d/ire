@@ -13,6 +13,9 @@ named!(pub sig_type<SigType>,
         constants::ECDSA_SHA256_P256 => value!(SigType::EcdsaSha256P256) |
         constants::ECDSA_SHA384_P384 => value!(SigType::EcdsaSha384P384) |
         constants::ECDSA_SHA512_P521 => value!(SigType::EcdsaSha512P521) |
+        constants::RSA_SHA256_2048 => value!(SigType::Rsa2048Sha256) |
+        constants::RSA_SHA384_3072 => value!(SigType::Rsa3072Sha384) |
+        constants::RSA_SHA512_4096 => value!(SigType::Rsa4096Sha512) |
         constants::ED25519 => value!(SigType::Ed25519)
     )
 );

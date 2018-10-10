@@ -6,6 +6,8 @@ use std::collections::HashMap;
 use data::{Hash, LeaseSet, RouterInfo};
 use router::types::NetworkDatabase;
 
+pub mod reseed;
+
 /// A NetworkDatabase that never publishes data to the network.
 pub struct LocalNetworkDatabase {
     ri_ds: HashMap<Hash, RouterInfo>,

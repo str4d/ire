@@ -23,9 +23,12 @@ extern crate data_encoding;
 extern crate flate2;
 extern crate i2p_snow;
 extern crate itertools;
+extern crate native_tls;
 extern crate num_bigint;
 extern crate num_traits;
 extern crate rand;
+extern crate ring;
+extern crate sha1;
 extern crate sha2;
 extern crate signatory;
 extern crate signatory_dalek;
@@ -36,6 +39,9 @@ extern crate tokio_executor;
 extern crate tokio_io;
 extern crate tokio_tcp;
 extern crate tokio_timer;
+extern crate tokio_tls;
+extern crate untrusted;
+extern crate zip;
 
 #[cfg(test)]
 #[macro_use]
@@ -48,8 +54,9 @@ extern crate test;
 mod constants;
 pub mod crypto;
 pub mod data;
+mod file;
 pub mod i2np;
-mod netdb;
+pub mod netdb;
 pub mod router;
 pub mod transport;
 
