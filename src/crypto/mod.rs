@@ -1,17 +1,17 @@
 //! Cryptographic types and operations.
 
-use aes::{self, block_cipher_trait::generic_array::GenericArray};
+use aes::{self, block_cipher_trait::generic_array::GenericArray as AesGenericArray};
 use block_modes::{block_padding::ZeroPadding, BlockMode, BlockModeIv, Cbc};
 use nom::Err;
 use ring::{self, signature as ring_signature};
 use signatory::{
     curve::{NistP256, NistP384, WeierstrassCurve},
-    ecdsa::{EcdsaPublicKey, FixedSignature},
+    ecdsa::FixedSignature,
     ed25519,
     error::Error as SignatoryError,
-    generic_array::typenum::Unsigned,
-    public_key, sign, verify, verify_sha256, verify_sha384, Ed25519PublicKey, Ed25519Seed,
-    Ed25519Signature, Signature as SignatorySignature,
+    generic_array::{typenum::Unsigned, GenericArray as SignatoryGenericArray},
+    public_key, sign, verify, verify_sha256, verify_sha384, EcdsaPublicKey, Ed25519PublicKey,
+    Ed25519Seed, Ed25519Signature, Signature as SignatorySignature,
 };
 use signatory_dalek::{Ed25519Signer, Ed25519Verifier};
 use signatory_ring::ecdsa::{P256Verifier, P384Verifier};
@@ -265,10 +265,10 @@ impl SigningPublicKey {
                 data,
             )?)),
             SigType::EcdsaSha256P256 => Ok(SigningPublicKey::EcdsaSha256P256(
-                EcdsaPublicKey::from_untagged_point(GenericArray::from_slice(data)),
+                EcdsaPublicKey::from_untagged_point(SignatoryGenericArray::from_slice(data)),
             )),
             SigType::EcdsaSha384P384 => Ok(SigningPublicKey::EcdsaSha384P384(
-                EcdsaPublicKey::from_untagged_point(GenericArray::from_slice(data)),
+                EcdsaPublicKey::from_untagged_point(SignatoryGenericArray::from_slice(data)),
             )),
             SigType::EcdsaSha512P521 => unimplemented!(),
             SigType::Rsa2048Sha256 | SigType::Rsa3072Sha384 | SigType::Rsa4096Sha512 => {
@@ -549,10 +549,10 @@ impl Aes256 {
         iv_enc: &[u8; AES_BLOCK_SIZE],
         iv_dec: &[u8; AES_BLOCK_SIZE],
     ) -> Self {
-        let key = GenericArray::from_slice(&key.0);
+        let key = AesGenericArray::from_slice(&key.0);
         Aes256 {
-            cbc_enc: Cbc::new_fixkey(key, GenericArray::from_slice(iv_enc)),
-            cbc_dec: Cbc::new_fixkey(key, GenericArray::from_slice(iv_dec)),
+            cbc_enc: Cbc::new_fixkey(key, AesGenericArray::from_slice(iv_enc)),
+            cbc_dec: Cbc::new_fixkey(key, AesGenericArray::from_slice(iv_dec)),
         }
     }
 
