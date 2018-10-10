@@ -6,12 +6,12 @@ use nom::Err;
 use ring::{self, signature as ring_signature};
 use signatory::{
     curve::{NistP256, NistP384, WeierstrassCurve},
-    ecdsa::{EcdsaPublicKey, FixedSignature},
+    ecdsa::FixedSignature,
     ed25519,
     error::Error as SignatoryError,
     generic_array::typenum::Unsigned,
-    public_key, sign, verify, verify_sha256, verify_sha384, Ed25519PublicKey, Ed25519Seed,
-    Ed25519Signature, Signature as SignatorySignature,
+    public_key, sign, verify, verify_sha256, verify_sha384, EcdsaPublicKey, Ed25519PublicKey,
+    Ed25519Seed, Ed25519Signature, Signature as SignatorySignature,
 };
 use signatory_dalek::{Ed25519Signer, Ed25519Verifier};
 use signatory_ring::ecdsa::{P256Verifier, P384Verifier};

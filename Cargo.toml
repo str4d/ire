@@ -34,9 +34,9 @@ rand = "0.5"
 ring = "0.13"
 sha1 = "0.6"
 sha2 = "0.7"
-signatory = { version = "0.9.0-alpha3", features = ["ecdsa", "ed25519"] }
-signatory-dalek = "0.9.0-alpha3"
-signatory-ring = "0.9.0-alpha3"
+signatory = { version = "0.9.4", features = ["ecdsa", "ed25519"] }
+signatory-dalek = "0.9"
+signatory-ring = "0.9"
 siphasher = "0.2"
 tokio = { version = "0.1", optional = true }
 tokio-codec = "0.1"
