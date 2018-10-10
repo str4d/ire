@@ -51,7 +51,7 @@ macro_rules! reseed_4096 {
 }
 
 lazy_static! {
-    static ref RESEED_SIGNERS: HashMap<&'static str, OfflineSigningPublicKey> = {
+    pub(crate) static ref RESEED_SIGNERS: HashMap<&'static str, OfflineSigningPublicKey> = {
         let mut m = HashMap::new();
         reseed_4096!(m, "atomike@mail.i2p", "atomike_at_mail.i2p.der");
         reseed_4096!(m, "backup@mail.i2p", "backup_at_mail.i2p.der");

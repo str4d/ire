@@ -43,6 +43,13 @@ impl Su3File {
         signers: &HashMap<&'static str, OfflineSigningPublicKey>,
     ) -> Result<Su3File, Error<'a>> {
         let (data, _) = take_until!(input, &SU3_MAGIC[..])?;
+        Su3File::from_bytes(data, signers)
+    }
+
+    pub fn from_bytes<'a>(
+        data: &'a [u8],
+        signers: &HashMap<&'static str, OfflineSigningPublicKey>,
+    ) -> Result<Su3File, Error<'a>> {
         let (_, su3_file) = frame::su3_file(data)?;
 
         // Verify the SU3 file signature
@@ -54,6 +61,29 @@ impl Su3File {
         } {
             Ok(()) => Ok(su3_file),
             Err(e) => Err(e),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Su3Content, Su3File};
+    use crypto::SigType;
+    use netdb::reseed::RESEED_SIGNERS;
+    use tests::I2PSEEDS_SU3;
+
+    #[test]
+    fn reseed_file() {
+        match Su3File::from_bytes(I2PSEEDS_SU3, &RESEED_SIGNERS) {
+            Ok(su3_file) => {
+                assert_eq!(su3_file.version, "1539145006");
+                assert_eq!(su3_file.signer, "meeh@mail.i2p");
+                match su3_file.content {
+                    Su3Content::Reseed(ri) => assert_eq!(ri.len(), 75),
+                }
+                assert_eq!(su3_file.sig_type, SigType::Rsa4096Sha512);
+            }
+            Err(e) => panic!("Error while parsing reseed file: {:?}", e),
         }
     }
 }
