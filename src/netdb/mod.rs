@@ -24,6 +24,10 @@ impl LocalNetworkDatabase {
 }
 
 impl NetworkDatabase for LocalNetworkDatabase {
+    fn known_routers(&self) -> usize {
+        self.ri_ds.len()
+    }
+
     fn lookup_router_info(
         &mut self,
         key: &Hash,
@@ -81,8 +85,11 @@ mod tests {
         // TODO: replace fake key with real one
         let key = Hash([0u8; 32]);
 
+        assert_eq!(netdb.known_routers(), 0);
+
         // Storing the new RouterInfo should return no data
         assert_eq!(netdb.store_router_info(key.clone(), ri.clone()), Ok(None));
+        assert_eq!(netdb.known_routers(), 1);
 
         match netdb.lookup_router_info(&key, 100).poll() {
             Ok(Async::Ready(entry)) => assert_eq!(entry, ri),
