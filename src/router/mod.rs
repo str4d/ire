@@ -1,9 +1,9 @@
 use futures::Future;
-use std::io;
 use std::sync::{Arc, Mutex};
 
 use data::{Hash, RouterSecretKeys};
 use i2np::{DatabaseStoreData, Message, MessagePayload};
+use netdb::netdb_engine;
 
 mod builder;
 mod config;
@@ -62,9 +62,15 @@ impl Router {
     /// Start the router.
     ///
     /// This returns a Future that must be polled in order to drive the Router.
-    pub fn start(&mut self) -> impl Future<Item = (), Error = io::Error> {
+    pub fn start(&mut self) -> impl Future<Item = (), Error = ()> {
         let mut inner = self.inner.lock().unwrap();
         let keys = inner.keys.clone();
-        inner.comms.start(keys)
+        inner
+            .comms
+            .start(keys)
+            .map_err(|e| {
+                error!("CommSystem engine error: {}", e);
+            }).join(netdb_engine(inner.netdb.clone()))
+            .map(|_| ())
     }
 }

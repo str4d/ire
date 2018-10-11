@@ -23,7 +23,7 @@ and implemented.
     - [ ] ECDSA_SHA512_P521
     - [x] Ed25519
   - Verifying
-    - [ ] DSA
+    - [x] DSA
     - [x] ECDSA_SHA256_P256
     - [x] ECDSA_SHA384_P384
     - [ ] ECDSA_SHA512_P521
@@ -39,7 +39,7 @@ and implemented.
 - NetDB
   - [x] Local storage
   - [ ] Persistence to disk
-  - [ ] Reseeding
+  - [x] Reseeding
   - [ ] Lookups
   - [ ] Publishing
   - [ ] Floodfill
