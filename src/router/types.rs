@@ -1,6 +1,7 @@
 //! The traits for the various router components.
 
 use futures::Future;
+use std::fmt;
 use tokio_io::IoFuture;
 
 use data::{Hash, LeaseSet, RouterAddress, RouterInfo, RouterSecretKeys};
@@ -30,6 +31,20 @@ pub trait CommSystem: OutboundMessageHandler {
     fn start(&mut self, rsk: RouterSecretKeys) -> IoFuture<()>;
 }
 
+/// Network database errors
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NetworkDatabaseError {
+    NotFound,
+}
+
+impl fmt::Display for NetworkDatabaseError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            NetworkDatabaseError::NotFound => "Key not found".fmt(f),
+        }
+    }
+}
+
 /// Defines the mechanism for interacting with I2P's network database.
 pub trait NetworkDatabase: Send + Sync {
     /// Returns the number of RouterInfos that this database contains.
@@ -40,7 +55,7 @@ pub trait NetworkDatabase: Send + Sync {
         &mut self,
         key: &Hash,
         timeout_ms: u64,
-    ) -> Box<Future<Item = RouterInfo, Error = ()>>;
+    ) -> Box<Future<Item = RouterInfo, Error = NetworkDatabaseError>>;
 
     /// Finds the LeaseSet stored at the given key. If not known locally, the LeaseSet is
     /// looked up using the client tunnels for `from_local_dest` if provided, or
@@ -50,15 +65,23 @@ pub trait NetworkDatabase: Send + Sync {
         key: &Hash,
         timeout_ms: u64,
         from_local_dest: Option<Hash>,
-    ) -> Box<Future<Item = LeaseSet, Error = ()>>;
+    ) -> Box<Future<Item = LeaseSet, Error = NetworkDatabaseError>>;
 
     /// Stores a RouterInfo locally.
     ///
     /// Returns the RouterInfo that was previously at this key.
-    fn store_router_info(&mut self, key: Hash, ri: RouterInfo) -> Result<Option<RouterInfo>, ()>;
+    fn store_router_info(
+        &mut self,
+        key: Hash,
+        ri: RouterInfo,
+    ) -> Result<Option<RouterInfo>, NetworkDatabaseError>;
 
     /// Stores a LeaseSet locally.
     ///
     /// Returns the LeaseSet that was previously at this key.
-    fn store_lease_set(&mut self, key: Hash, ls: LeaseSet) -> Result<Option<LeaseSet>, ()>;
+    fn store_lease_set(
+        &mut self,
+        key: Hash,
+        ls: LeaseSet,
+    ) -> Result<Option<LeaseSet>, NetworkDatabaseError>;
 }
