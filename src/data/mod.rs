@@ -3,7 +3,7 @@
 //! [Common structures specification](https://geti2p.net/spec/common-structures)
 
 use cookie_factory::GenError;
-use nom::{Err, IResult};
+use nom::{self, Needed};
 use rand::{OsRng, Rng};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -22,6 +22,39 @@ use crypto::{
 
 #[allow(needless_pass_by_value)]
 pub(crate) mod frame;
+
+/// Data read errors
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ReadError {
+    FileIo(String),
+    Incomplete(Needed),
+    Parser,
+}
+
+impl fmt::Display for ReadError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            ReadError::FileIo(e) => format!("File IO error: {}", e).fmt(f),
+            ReadError::Incomplete(n) => format!("Data is incomplete (needed: {:?})", n).fmt(f),
+            ReadError::Parser => "Parser error".fmt(f),
+        }
+    }
+}
+
+impl From<io::Error> for ReadError {
+    fn from(e: io::Error) -> Self {
+        ReadError::FileIo(format!("{}", e))
+    }
+}
+
+impl<T> From<nom::Err<T>> for ReadError {
+    fn from(e: nom::Err<T>) -> Self {
+        match e {
+            nom::Err::Incomplete(n) => ReadError::Incomplete(n),
+            _ => ReadError::Parser,
+        }
+    }
+}
 
 //
 // Simple data types
@@ -135,14 +168,6 @@ pub enum Certificate {
 }
 
 impl Certificate {
-    pub fn from(buf: &[u8]) -> Option<Self> {
-        match frame::certificate(buf) {
-            Ok((_, s)) => Some(s),
-            Err(Err::Incomplete(_)) => None,
-            Err(Err::Error(_)) | Err(Err::Failure(_)) => panic!("Unsupported Certificate"),
-        }
-    }
-
     pub fn code(&self) -> u8 {
         match *self {
             Certificate::Null => constants::NULL_CERT,
@@ -165,21 +190,12 @@ pub struct RouterIdentity {
 }
 
 impl RouterIdentity {
-    pub fn from_file(path: &str) -> io::Result<Self> {
+    pub fn from_file(path: &str) -> Result<Self, ReadError> {
         let mut rid = File::open(path)?;
         let mut data: Vec<u8> = Vec::new();
         rid.read_to_end(&mut data)?;
-        match frame::router_identity(&data[..]) {
-            Ok((_, res)) => Ok(res),
-            Err(Err::Incomplete(n)) => Err(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
-                format!("needed: {:?}", n),
-            )),
-            Err(Err::Error(e)) | Err(Err::Failure(e)) => Err(io::Error::new(
-                io::ErrorKind::Other,
-                e.into_error_kind().description(),
-            )),
-        }
+        let (_, res) = frame::router_identity(&data[..])?;
+        Ok(res)
     }
 
     fn from_keys(public_key: PublicKey, signing_key: SigningPublicKey) -> Self {
@@ -261,21 +277,12 @@ impl RouterSecretKeys {
         }
     }
 
-    pub fn from_file(path: &str) -> io::Result<Self> {
+    pub fn from_file(path: &str) -> Result<Self, ReadError> {
         let mut rsk = File::open(path)?;
         let mut data: Vec<u8> = Vec::new();
         rsk.read_to_end(&mut data)?;
-        match frame::router_secret_keys(&data[..]) {
-            Ok((_, res)) => Ok(res),
-            Err(Err::Incomplete(n)) => Err(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
-                format!("needed: {:?}", n),
-            )),
-            Err(Err::Error(e)) | Err(Err::Failure(e)) => Err(io::Error::new(
-                io::ErrorKind::Other,
-                e.into_error_kind().description(),
-            )),
-        }
+        let (_, res) = frame::router_secret_keys(&data[..])?;
+        Ok(res)
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
@@ -437,21 +444,12 @@ impl RouterInfo {
             .map(|a| (*a).clone())
     }
 
-    pub fn from_file(path: &str) -> io::Result<Self> {
+    pub fn from_file(path: &str) -> Result<Self, ReadError> {
         let mut ri = File::open(path)?;
         let mut data: Vec<u8> = Vec::new();
         ri.read_to_end(&mut data)?;
-        match frame::router_info(&data[..]) {
-            Ok((_, res)) => Ok(res),
-            Err(Err::Incomplete(n)) => Err(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
-                format!("needed: {:?}", n),
-            )),
-            Err(Err::Error(e)) | Err(Err::Failure(e)) => Err(io::Error::new(
-                io::ErrorKind::Other,
-                e.into_error_kind().description(),
-            )),
-        }
+        let (_, res) = frame::router_info(&data[..])?;
+        Ok(res)
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
