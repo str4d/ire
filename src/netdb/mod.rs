@@ -7,7 +7,7 @@ use std::time::Duration;
 use tokio_timer::sleep;
 
 use data::{Hash, LeaseSet, RouterInfo};
-use router::types::NetworkDatabase;
+use router::types::{NetworkDatabase, NetworkDatabaseError};
 
 pub mod reseed;
 
@@ -100,10 +100,10 @@ impl NetworkDatabase for LocalNetworkDatabase {
         &mut self,
         key: &Hash,
         timeout_ms: u64,
-    ) -> Box<Future<Item = RouterInfo, Error = ()>> {
+    ) -> Box<Future<Item = RouterInfo, Error = NetworkDatabaseError>> {
         match self.ri_ds.get(key) {
             Some(ri) => Box::new(future::ok(ri.clone())),
-            None => Box::new(future::err(())),
+            None => Box::new(future::err(NetworkDatabaseError::NotFound)),
         }
     }
 
@@ -112,14 +112,18 @@ impl NetworkDatabase for LocalNetworkDatabase {
         key: &Hash,
         timeout_ms: u64,
         from_local_dest: Option<Hash>,
-    ) -> Box<Future<Item = LeaseSet, Error = ()>> {
+    ) -> Box<Future<Item = LeaseSet, Error = NetworkDatabaseError>> {
         match self.ls_ds.get(key) {
             Some(ls) => Box::new(future::ok(ls.clone())),
-            None => Box::new(future::err(())),
+            None => Box::new(future::err(NetworkDatabaseError::NotFound)),
         }
     }
 
-    fn store_router_info(&mut self, key: Hash, ri: RouterInfo) -> Result<Option<RouterInfo>, ()> {
+    fn store_router_info(
+        &mut self,
+        key: Hash,
+        ri: RouterInfo,
+    ) -> Result<Option<RouterInfo>, NetworkDatabaseError> {
         debug!(
             "Storing RouterInfo for peer {} at key {}",
             ri.router_id.hash(),
@@ -128,7 +132,11 @@ impl NetworkDatabase for LocalNetworkDatabase {
         Ok(self.ri_ds.insert(key, ri))
     }
 
-    fn store_lease_set(&mut self, key: Hash, ls: LeaseSet) -> Result<Option<LeaseSet>, ()> {
+    fn store_lease_set(
+        &mut self,
+        key: Hash,
+        ls: LeaseSet,
+    ) -> Result<Option<LeaseSet>, NetworkDatabaseError> {
         debug!("Storing LeaseSet at key {}", key);
         Ok(self.ls_ds.insert(key, ls))
     }
@@ -162,7 +170,7 @@ mod tests {
         match netdb.lookup_router_info(&key, 100).poll() {
             Ok(Async::Ready(entry)) => assert_eq!(entry, ri),
             Ok(_) => panic!("Local lookup should complete immediately"),
-            Err(_) => panic!("Error while looking up RouterInfo"),
+            Err(e) => panic!("Unexpected error: {}", e),
         }
     }
 }

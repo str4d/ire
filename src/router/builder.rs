@@ -6,7 +6,7 @@ use super::{
     types::{CommSystem, InboundMessageHandler, NetworkDatabase},
     Config, Inner, MessageHandler, Router,
 };
-use data::{RouterInfo, RouterSecretKeys};
+use data::{ReadError, RouterInfo, RouterSecretKeys};
 use netdb::LocalNetworkDatabase;
 use transport;
 
@@ -31,7 +31,7 @@ impl<'a> Builder<'a> {
     }
 
     /// Create a Builder from the given Config.
-    pub fn from_config(cfg: Config) -> io::Result<Self> {
+    pub fn from_config(cfg: Config) -> Result<Self, ReadError> {
         let ntcp_addr = cfg.ntcp_addr;
         let ntcp2_addr = cfg.ntcp2_addr;
         let ntcp2_keyfile = cfg.ntcp2_keyfile;

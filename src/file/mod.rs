@@ -2,23 +2,29 @@ use nom;
 use std::collections::HashMap;
 
 use crypto::{self, OfflineSigningPublicKey, SigType, Signature};
-use data::RouterInfo;
+use data::{ReadError, RouterInfo};
 
 mod frame;
 
 const SU3_MAGIC: &[u8; 6] = b"I2Psu3";
 
 /// SU3 errors
-#[derive(Debug)]
-pub enum Error<'a> {
-    Nom(nom::Err<&'a [u8]>),
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Error {
+    Crypto(crypto::Error),
+    Read(ReadError),
     UnknownSigner,
-    InvalidSignature(crypto::Error),
 }
 
-impl<'a> From<nom::Err<&'a [u8]>> for Error<'a> {
-    fn from(e: nom::Err<&'a [u8]>) -> Self {
-        Error::Nom(e)
+impl From<crypto::Error> for Error {
+    fn from(e: crypto::Error) -> Self {
+        Error::Crypto(e)
+    }
+}
+
+impl<T> From<nom::Err<T>> for Error {
+    fn from(e: nom::Err<T>) -> Self {
+        Error::Read(e.into())
     }
 }
 
@@ -38,30 +44,28 @@ pub struct Su3File {
 }
 
 impl Su3File {
-    pub fn from_http_data<'a>(
-        input: &'a [u8],
+    pub fn from_http_data(
+        input: &[u8],
         signers: &HashMap<&'static str, OfflineSigningPublicKey>,
-    ) -> Result<Su3File, Error<'a>> {
+    ) -> Result<Su3File, Error> {
         let (data, _) = take_until!(input, &SU3_MAGIC[..])?;
         Su3File::from_bytes(data, signers)
     }
 
-    pub fn from_bytes<'a>(
-        data: &'a [u8],
+    pub fn from_bytes(
+        data: &[u8],
         signers: &HashMap<&'static str, OfflineSigningPublicKey>,
-    ) -> Result<Su3File, Error<'a>> {
+    ) -> Result<Su3File, Error> {
         let (_, su3_file) = frame::su3_file(data)?;
 
         // Verify the SU3 file signature
-        match if let Some(pk) = signers.get(&su3_file.signer.as_str()) {
-            pk.verify(&data[..su3_file.msg_len], &su3_file.sig)
-                .map_err(|e| Error::InvalidSignature(e))
+        if let Some(pk) = signers.get(&su3_file.signer.as_str()) {
+            pk.verify(&data[..su3_file.msg_len], &su3_file.sig)?;
         } else {
-            Err(Error::UnknownSigner)
-        } {
-            Ok(()) => Ok(su3_file),
-            Err(e) => Err(e),
+            return Err(Error::UnknownSigner);
         }
+
+        Ok(su3_file)
     }
 }
 

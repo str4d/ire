@@ -12,7 +12,7 @@ use rand::{OsRng, Rng};
 use sha2::{Digest, Sha256};
 use std::ops::{Mul, Rem, Sub};
 
-use super::{math::rectify, PrivateKey, PublicKey};
+use super::{math::rectify, Error, PrivateKey, PublicKey};
 use constants::{ELGAMAL_G, ELGAMAL_P, ELGAMAL_PM1, ELGAMAL_PM2};
 
 fn gen_gamma_k() -> (BigUint, BigUint) {
@@ -70,12 +70,11 @@ impl<'a> From<&'a PublicKey> for Encryptor {
 
 impl Encryptor {
     /// Basic ElGamal encryption, following algorithm 8.18 1).
-    // TODO: Errors
-    fn encrypt_basic(&self, msg: &[u8]) -> Result<(BigUint, BigUint), ()> {
+    fn encrypt_basic(&self, msg: &[u8]) -> Result<(BigUint, BigUint), Error> {
         // Represent the message as an integer m in the range {0, 1, ..., p - 1}
         let m = BigUint::from_bytes_be(msg);
         if m > *ELGAMAL_PM1 {
-            return Err(());
+            return Err(Error::InvalidMessage);
         }
 
         // Select a random integer k, 1 <= k <= p - 2
@@ -90,11 +89,10 @@ impl Encryptor {
     }
 
     /// ElGamal encryption using I2P's message and ciphertext encoding schemes.
-    // TODO: Errors
-    pub fn encrypt(&self, msg: &[u8]) -> Result<[u8; 514], ()> {
+    pub fn encrypt(&self, msg: &[u8]) -> Result<[u8; 514], Error> {
         // Message must be no more than 222 bytes
         if msg.len() > 222 {
-            return Err(());
+            return Err(Error::InvalidMessage);
         }
 
         let mut rng = OsRng::new().expect("should be able to construct RNG");
@@ -149,10 +147,10 @@ impl Decryptor {
 
     /// ElGamal decryption using I2P's message and ciphertext encoding schemes.
     // TODO: Errors
-    pub fn decrypt(&self, ct: &[u8]) -> Result<Vec<u8>, ()> {
+    pub fn decrypt(&self, ct: &[u8]) -> Result<Vec<u8>, Error> {
         // Ciphertext must be 514 bytes
         if ct.len() != 514 {
-            return Err(());
+            return Err(Error::InvalidCiphertext);
         }
 
         // ElGamal ciphertext:
@@ -164,7 +162,7 @@ impl Decryptor {
         let data = self.decrypt_basic((gamma, delta));
         if data.len() < 33 {
             // Decrypted data is too small
-            return Err(());
+            return Err(Error::InvalidCiphertext);
         }
 
         // ElGamal plaintext:
@@ -175,7 +173,7 @@ impl Decryptor {
         if hash.as_slice() == &data[1..33] {
             Ok(msg)
         } else {
-            Err(())
+            Err(Error::InvalidCiphertext)
         }
     }
 }

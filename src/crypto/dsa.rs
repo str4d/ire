@@ -32,7 +32,7 @@ pub struct DsaPublicKey {
 impl DsaSignature {
     pub fn from_bytes(data: &[u8]) -> Result<DsaSignature, super::Error> {
         if data.len() < 40 {
-            return Err(super::Error::Dsa);
+            return Err(super::Error::InvalidSignature);
         }
 
         let mut rbar = [0u8; 20];
