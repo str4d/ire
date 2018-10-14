@@ -82,10 +82,19 @@ impl DatabaseStore {
     }
 }
 
+#[derive(Debug, PartialEq)]
+pub enum DatabaseLookupType {
+    Any,
+    LeaseSet,
+    RouterInfo,
+    Exploratory,
+}
+
+#[derive(Debug, PartialEq)]
 struct DatabaseLookupFlags {
     delivery: bool,
     encryption: bool,
-    lookup_type: u8,
+    lookup_type: DatabaseLookupType,
 }
 
 /// A request to look up an item in the network database. The response is either
