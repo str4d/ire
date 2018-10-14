@@ -7,7 +7,10 @@ use std::time::Duration;
 use tokio_timer::sleep;
 
 use data::{Hash, LeaseSet, RouterInfo};
-use router::types::{NetworkDatabase, NetworkDatabaseError};
+use router::{
+    types::{NetworkDatabase, NetworkDatabaseError},
+    Context,
+};
 
 pub mod reseed;
 
@@ -98,6 +101,7 @@ impl NetworkDatabase for LocalNetworkDatabase {
 
     fn lookup_router_info(
         &mut self,
+        ctx: Option<Arc<Context>>,
         key: &Hash,
         timeout_ms: u64,
     ) -> Box<Future<Item = RouterInfo, Error = NetworkDatabaseError>> {
@@ -109,6 +113,7 @@ impl NetworkDatabase for LocalNetworkDatabase {
 
     fn lookup_lease_set(
         &mut self,
+        ctx: Option<Arc<Context>>,
         key: &Hash,
         timeout_ms: u64,
         from_local_dest: Option<Hash>,
@@ -167,7 +172,7 @@ mod tests {
         assert_eq!(netdb.store_router_info(key.clone(), ri.clone()), Ok(None));
         assert_eq!(netdb.known_routers(), 1);
 
-        match netdb.lookup_router_info(&key, 100).poll() {
+        match netdb.lookup_router_info(None, &key, 100).poll() {
             Ok(Async::Ready(entry)) => assert_eq!(entry, ri),
             Ok(_) => panic!("Local lookup should complete immediately"),
             Err(e) => panic!("Unexpected error: {}", e),

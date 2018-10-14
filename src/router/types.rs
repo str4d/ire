@@ -2,8 +2,10 @@
 
 use futures::Future;
 use std::fmt;
+use std::sync::Arc;
 use tokio_io::IoFuture;
 
+use super::Context;
 use data::{Hash, LeaseSet, RouterAddress, RouterInfo, RouterSecretKeys};
 use i2np::Message;
 
@@ -50,18 +52,21 @@ pub trait NetworkDatabase: Send + Sync {
     /// Returns the number of RouterInfos that this database contains.
     fn known_routers(&self) -> usize;
 
-    /// Finds the RouterInfo stored at the given key.
+    /// Finds the RouterInfo stored at the given key. If a Context is provided,
+    /// a remote lookup will be performed if the key is not found locally.
     fn lookup_router_info(
         &mut self,
+        ctx: Option<Arc<Context>>,
         key: &Hash,
         timeout_ms: u64,
     ) -> Box<Future<Item = RouterInfo, Error = NetworkDatabaseError>>;
 
-    /// Finds the LeaseSet stored at the given key. If not known locally, the LeaseSet is
-    /// looked up using the client tunnels for `from_local_dest` if provided, or
-    /// exploratory tunnels otherwise.
+    /// Finds the LeaseSet stored at the given key. If not known locally, and a
+    /// Context is provided, the LeaseSet is looked up using the client tunnels
+    /// for `from_local_dest` if provided, or exploratory tunnels otherwise.
     fn lookup_lease_set(
         &mut self,
+        ctx: Option<Arc<Context>>,
         key: &Hash,
         timeout_ms: u64,
         from_local_dest: Option<Hash>,
