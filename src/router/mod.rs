@@ -1,7 +1,7 @@
 use futures::Future;
 use std::sync::{Arc, RwLock};
 
-use data::{Hash, RouterSecretKeys};
+use data::{Hash, RouterInfo, RouterSecretKeys};
 use i2np::{DatabaseStoreData, Message, MessagePayload};
 use netdb::netdb_engine;
 
@@ -54,6 +54,7 @@ pub struct Router {
 
 pub struct Context {
     keys: RouterSecretKeys,
+    pub ri: Arc<RwLock<RouterInfo>>,
     netdb: Arc<RwLock<types::NetworkDatabase>>,
     pub comms: Arc<RwLock<types::CommSystem>>,
 }

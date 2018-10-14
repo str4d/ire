@@ -102,7 +102,12 @@ impl<'a> Builder<'a> {
         ri.to_file(&ri_file)?;
 
         Ok(Router {
-            ctx: Arc::new(Context { keys, netdb, comms }),
+            ctx: Arc::new(Context {
+                keys,
+                ri: Arc::new(RwLock::new(ri)),
+                netdb,
+                comms,
+            }),
         })
     }
 }
