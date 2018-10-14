@@ -1,5 +1,5 @@
 use futures::Future;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 
 use data::{Hash, RouterSecretKeys};
 use i2np::{DatabaseStoreData, Message, MessagePayload};
@@ -14,11 +14,11 @@ pub use self::builder::Builder;
 pub use self::config::Config;
 
 pub struct MessageHandler {
-    netdb: Arc<Mutex<types::NetworkDatabase>>,
+    netdb: Arc<RwLock<types::NetworkDatabase>>,
 }
 
 impl MessageHandler {
-    pub fn new(netdb: Arc<Mutex<types::NetworkDatabase>>) -> Self {
+    pub fn new(netdb: Arc<RwLock<types::NetworkDatabase>>) -> Self {
         MessageHandler { netdb }
     }
 }
@@ -29,14 +29,14 @@ impl types::InboundMessageHandler for MessageHandler {
             MessagePayload::DatabaseStore(ds) => match ds.data {
                 DatabaseStoreData::RI(ri) => {
                     self.netdb
-                        .lock()
+                        .write()
                         .unwrap()
                         .store_router_info(ds.key, ri)
                         .expect("Failed to store RouterInfo");
                 }
                 DatabaseStoreData::LS(ls) => {
                     self.netdb
-                        .lock()
+                        .write()
                         .unwrap()
                         .store_lease_set(ds.key, ls)
                         .expect("Failed to store LeaseSet");
@@ -49,13 +49,13 @@ impl types::InboundMessageHandler for MessageHandler {
 
 /// An I2P router.
 pub struct Router {
-    inner: Arc<Mutex<Inner>>,
+    ctx: Arc<Context>,
 }
 
-struct Inner {
+pub struct Context {
     keys: RouterSecretKeys,
-    netdb: Arc<Mutex<types::NetworkDatabase>>,
-    comms: Box<types::CommSystem>,
+    netdb: Arc<RwLock<types::NetworkDatabase>>,
+    pub comms: Arc<RwLock<types::CommSystem>>,
 }
 
 impl Router {
@@ -63,14 +63,15 @@ impl Router {
     ///
     /// This returns a Future that must be polled in order to drive the Router.
     pub fn start(&mut self) -> impl Future<Item = (), Error = ()> {
-        let mut inner = self.inner.lock().unwrap();
-        let keys = inner.keys.clone();
-        inner
+        let keys = self.ctx.keys.clone();
+        self.ctx
             .comms
+            .write()
+            .unwrap()
             .start(keys)
             .map_err(|e| {
                 error!("CommSystem engine error: {}", e);
-            }).join(netdb_engine(inner.netdb.clone()))
+            }).join(netdb_engine(self.ctx.netdb.clone()))
             .map(|_| ())
     }
 }

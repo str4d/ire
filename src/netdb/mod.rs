@@ -2,7 +2,7 @@
 
 use futures::{future, Future};
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tokio_timer::sleep;
 
@@ -18,12 +18,12 @@ const MINIMUM_ROUTERS: usize = 50;
 
 /// Performs network database maintenance operations.
 struct Engine {
-    db: Arc<Mutex<NetworkDatabase>>,
+    db: Arc<RwLock<NetworkDatabase>>,
     reseeder: Option<reseed::HttpsReseeder>,
 }
 
 impl Engine {
-    fn new(db: Arc<Mutex<NetworkDatabase>>) -> Self {
+    fn new(db: Arc<RwLock<NetworkDatabase>>) -> Self {
         Engine { db, reseeder: None }
     }
 
@@ -33,11 +33,11 @@ impl Engine {
     }
 
     fn check_reseed(self) -> Box<Future<Item = Self, Error = ()> + Send> {
-        if self.reseeder.is_none() && self.db.lock().unwrap().known_routers() < MINIMUM_ROUTERS {
+        if self.reseeder.is_none() && self.db.read().unwrap().known_routers() < MINIMUM_ROUTERS {
             // Reseed "synchronously" within the engine, as we can't do much without peers
             Box::new(reseed::HttpsReseeder::new().and_then(|ris| {
                 {
-                    let mut db = self.db.lock().unwrap();
+                    let mut db = self.db.write().unwrap();
                     for ri in ris {
                         db.store_router_info(ri.router_id.hash(), ri).unwrap();
                     }
@@ -60,7 +60,7 @@ impl Engine {
     }
 }
 
-pub fn netdb_engine(db: Arc<Mutex<NetworkDatabase>>) -> Box<Future<Item = (), Error = ()> + Send> {
+pub fn netdb_engine(db: Arc<RwLock<NetworkDatabase>>) -> Box<Future<Item = (), Error = ()> + Send> {
     Box::new(future::loop_fn(Engine::new(db), |engine| {
         engine
             .start_cycle()
