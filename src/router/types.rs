@@ -22,7 +22,7 @@ pub trait OutboundMessageHandler {
 
 /// Manages the communication subsystem between peers, including connections,
 /// listeners, transports, connection keys, etc.
-pub trait CommSystem: OutboundMessageHandler {
+pub trait CommSystem: OutboundMessageHandler + Send + Sync {
     /// Returns the addresses of the underlying transports.
     fn addresses(&self) -> Vec<RouterAddress>;
 
@@ -59,7 +59,7 @@ pub trait NetworkDatabase: Send + Sync {
         ctx: Option<Arc<Context>>,
         key: &Hash,
         timeout_ms: u64,
-    ) -> Box<Future<Item = RouterInfo, Error = NetworkDatabaseError>>;
+    ) -> Box<Future<Item = RouterInfo, Error = NetworkDatabaseError> + Send + Sync>;
 
     /// Finds the LeaseSet stored at the given key. If not known locally, and a
     /// Context is provided, the LeaseSet is looked up using the client tunnels

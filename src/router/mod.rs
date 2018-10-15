@@ -7,7 +7,7 @@ use netdb::netdb_engine;
 
 mod builder;
 mod config;
-pub(crate) mod mock;
+pub mod mock;
 pub mod types;
 
 pub use self::builder::Builder;
@@ -55,7 +55,7 @@ pub struct Router {
 pub struct Context {
     pub keys: RouterSecretKeys,
     pub ri: Arc<RwLock<RouterInfo>>,
-    netdb: Arc<RwLock<types::NetworkDatabase>>,
+    pub netdb: Arc<RwLock<types::NetworkDatabase>>,
     pub comms: Arc<RwLock<types::CommSystem>>,
     pub msg_handler: Arc<types::InboundMessageHandler>,
 }

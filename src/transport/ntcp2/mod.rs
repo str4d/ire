@@ -40,6 +40,7 @@ use std::hash::Hasher;
 use std::io::{self, Read, Write};
 use std::iter::repeat;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio_codec::{Decoder, Encoder, Framed};
 use tokio_executor::spawn;
@@ -56,6 +57,7 @@ use super::{
 use constants::I2P_BASE64;
 use data::{Hash, I2PString, RouterAddress, RouterIdentity, RouterInfo};
 use i2np::{DatabaseStore, Message, MessagePayload};
+use router::Context;
 
 #[allow(needless_pass_by_value)]
 mod frame;
@@ -394,7 +396,10 @@ pub struct Manager {
 }
 
 pub struct Engine {
+    ctx: Option<Arc<Context>>,
+    static_private_key: Vec<u8>,
     session_engine: SessionEngine<Block>,
+    session_refs: SessionRefs<Block>,
 }
 
 impl Manager {
@@ -407,16 +412,22 @@ impl Manager {
         rng.fill(&mut aesobfse_iv[..]);
 
         let (session_manager, session_engine) = session::new_manager();
+        let session_refs = session_manager.refs();
 
         (
             Manager {
                 addr,
-                static_private_key: dh.private,
+                static_private_key: dh.private.clone(),
                 static_public_key: dh.public,
                 aesobfse_iv,
                 session_manager,
             },
-            Engine { session_engine },
+            Engine {
+                ctx: None,
+                static_private_key: dh.private,
+                session_engine,
+                session_refs,
+            },
         )
     }
 
@@ -434,16 +445,22 @@ impl Manager {
         aesobfse_iv.copy_from_slice(&data[64..]);
 
         let (session_manager, session_engine) = session::new_manager();
+        let session_refs = session_manager.refs();
 
         Ok((
             Manager {
                 addr,
-                static_private_key,
+                static_private_key: static_private_key.clone(),
                 static_public_key,
                 aesobfse_iv,
                 session_manager,
             },
-            Engine { session_engine },
+            Engine {
+                ctx: None,
+                static_private_key,
+                session_engine,
+                session_refs,
+            },
         ))
     }
 
@@ -526,29 +543,42 @@ impl Manager {
         own_ri: &RouterInfo,
         peer_ri: RouterInfo,
     ) -> io::Result<impl Future<Item = (), Error = io::Error>> {
-        // Connect to the peer
-        let transport = match handshake::OBHandshake::new(
-            |sa| Box::new(TcpStream::connect(sa)),
+        connect(
             &self.static_private_key,
-            &own_ri,
+            own_ri,
             peer_ri,
-        ) {
-            Ok(t) => t,
-            Err(e) => return io_err!(InvalidData, e),
-        };
-
-        // Add a timeout
-        let timed = Timeout::new(transport, Duration::new(10, 0))
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e));
-
-        // Once connected:
-        let session_refs = self.session_manager.refs();
-        Ok(timed.and_then(|(ri, conn)| {
-            let session = Session::new(&ri, conn, session_refs);
-            spawn(session.map_err(|_| ()));
-            Ok(())
-        }))
+            self.session_manager.refs(),
+        )
     }
+}
+
+fn connect(
+    static_private_key: &[u8],
+    own_ri: &RouterInfo,
+    peer_ri: RouterInfo,
+    session_refs: SessionRefs<Block>,
+) -> io::Result<impl Future<Item = (), Error = io::Error>> {
+    // Connect to the peer
+    let transport = match handshake::OBHandshake::new(
+        |sa| Box::new(TcpStream::connect(sa)),
+        static_private_key,
+        own_ri,
+        peer_ri,
+    ) {
+        Ok(t) => t,
+        Err(e) => return io_err!(InvalidData, e),
+    };
+
+    // Add a timeout
+    let timed = Timeout::new(transport, Duration::new(10, 0))
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, e));
+
+    // Once connected:
+    Ok(timed.and_then(|(ri, conn)| {
+        let session = Session::new(&ri, conn, session_refs);
+        spawn(session.map_err(|_| ()));
+        Ok(())
+    }))
 }
 
 impl Transport for Manager {
@@ -568,16 +598,61 @@ impl Transport for Manager {
     }
 }
 
+impl Engine {
+    pub fn set_context(&mut self, ctx: Arc<Context>) {
+        self.ctx = Some(ctx);
+    }
+}
+
 impl Stream for Engine {
     type Item = (Hash, Message);
     type Error = ();
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        while let Async::Ready(f) =
-            self.session_engine
-                .poll(Block::Message, Block::DateTime, |hash| {
-                    error!("No open session for {}", hash); // TODO: Connect to peer
-                })? {
+        let ctx = self
+            .ctx
+            .as_ref()
+            .cloned()
+            .expect("Should have called set_context()");
+        let static_private_key = self.static_private_key.clone();
+        let session_refs = self.session_refs.clone();
+
+        while let Async::Ready(f) = self.session_engine.poll(
+            ctx.clone(),
+            Block::Message,
+            Block::DateTime,
+            |ctx, hash| {
+                // Look up the RouterInfo for the peer we need to connect to
+                let lookup = ctx
+                    .netdb
+                    .write()
+                    .unwrap()
+                    .lookup_router_info(Some(ctx.clone()), hash, 10000)
+                    .map_err(|e| {
+                        error!("Failed to look up peer: {}", e);
+                    });
+
+                // Connect to the peer
+                let static_private_key = static_private_key.clone();
+                let own_ri = ctx.ri.read().unwrap().clone();
+                let session_refs = session_refs.clone();
+                let connector = lookup
+                    .and_then(move |peer_ri| {
+                        match connect(&static_private_key, &own_ri, peer_ri, session_refs) {
+                            Ok(f) => Ok(f),
+                            Err(e) => {
+                                error!("{}", e);
+                                Err(())
+                            }
+                        }
+                    }).and_then(|f| {
+                        f.map_err(|e| {
+                            error!("Error while connecting: {}", e);
+                        })
+                    });
+                spawn(connector);
+            },
+        )? {
             match f {
                 Some((from, Block::Message(msg))) => return Ok(Some((from, msg)).into()),
                 Some((from, block)) => {
@@ -602,8 +677,8 @@ mod tests {
     use tokio_codec::{Decoder, Encoder};
 
     use super::{frame, session, Block, Frame, Session, NTCP2_MTU};
-    use data::RouterSecretKeys;
     use i2np::Message;
+    use router::mock::mock_context;
     use transport::tests::{AliceNet, BobNet, NetworkCable};
 
     struct TestCodec;
@@ -673,7 +748,8 @@ mod tests {
 
     #[test]
     fn session_send() {
-        let rid = RouterSecretKeys::new().rid;
+        let ctx = mock_context();
+        let rid = ctx.keys.rid.clone();
         let hash = rid.hash();
 
         let cable = NetworkCable::new();
@@ -695,8 +771,12 @@ mod tests {
 
             // Pass it through the engine, session is requested, message queued
             engine
-                .poll(Block::Message, |_| panic!(), |h| assert_eq!(*h, hash))
-                .unwrap();
+                .poll(
+                    ctx,
+                    Block::Message,
+                    |_| panic!(),
+                    |_, h| assert_eq!(*h, hash),
+                ).unwrap();
 
             // Still not received
             received.clear();
@@ -719,7 +799,8 @@ mod tests {
 
     #[test]
     fn session_receive() {
-        let rid = RouterSecretKeys::new().rid;
+        let ctx = mock_context();
+        let rid = ctx.keys.rid.clone();
         let hash = rid.hash();
 
         let cable = NetworkCable::new();
@@ -736,7 +817,7 @@ mod tests {
 
             // Check it has not yet been received
             engine
-                .poll(|_| panic!(), |_| panic!(), |_| panic!())
+                .poll(ctx.clone(), |_| panic!(), |_| panic!(), |_, _| panic!())
                 .unwrap();
 
             // Pass it through the session
@@ -744,7 +825,7 @@ mod tests {
 
             // The engine should receive it now
             match engine
-                .poll(|_| panic!(), |_| panic!(), |_| panic!())
+                .poll(ctx, |_| panic!(), |_| panic!(), |_, _| panic!())
                 .unwrap()
             {
                 Async::Ready(Some((h, block))) => {

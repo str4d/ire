@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex};
 use super::{Handle, MessageRx, TimestampRx};
 use data::Hash;
 use i2np::Message;
+use router::Context;
 
 //
 // Session state
@@ -121,6 +122,15 @@ pub(super) struct SessionRefs<F> {
     pub(super) engine: EngineTx<F>,
 }
 
+impl<F> Clone for SessionRefs<F> {
+    fn clone(&self) -> Self {
+        SessionRefs {
+            state: self.state.clone(),
+            engine: self.engine.clone(),
+        }
+    }
+}
+
 impl<F> Stream for SessionRefs<F> {
     type Item = (SessionRefs<F>);
     type Error = io::Error;
@@ -190,6 +200,7 @@ impl<F> SessionManager<F> {
 impl<F> SessionEngine<F> {
     pub fn poll<P, Q, R>(
         &mut self,
+        ctx: Arc<Context>,
         frame_message: P,
         frame_timestamp: Q,
         connect_to_peer: R,
@@ -197,21 +208,23 @@ impl<F> SessionEngine<F> {
     where
         P: Fn(Message) -> F,
         Q: Fn(u32) -> F,
-        R: Fn(&Hash),
+        R: Fn(Arc<Context>, &Hash),
     {
         // Write timestamps first
         while let Async::Ready(f) = self.outbound_ts.poll().unwrap() {
             if let Some((hash, ts)) = f {
-                self.state
-                    .send(&hash, frame_timestamp(ts), || connect_to_peer(&hash));
+                self.state.send(&hash, frame_timestamp(ts), || {
+                    connect_to_peer(ctx.clone(), &hash)
+                });
             }
         }
 
         // Write messages
         while let Async::Ready(f) = self.outbound_msg.poll().unwrap() {
             if let Some((hash, msg)) = f {
-                self.state
-                    .send(&hash, frame_message(msg), || connect_to_peer(&hash));
+                self.state.send(&hash, frame_message(msg), || {
+                    connect_to_peer(ctx.clone(), &hash)
+                });
             }
         }
 

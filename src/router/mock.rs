@@ -43,7 +43,7 @@ impl CommSystem for MockCommSystem {
     }
 }
 
-pub(crate) fn mock_context() -> Arc<Context> {
+pub fn mock_context() -> Arc<Context> {
     let keys = RouterSecretKeys::new();
     let mut ri = RouterInfo::new(keys.rid.clone());
     ri.sign(&keys.signing_private_key);

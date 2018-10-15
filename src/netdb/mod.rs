@@ -104,7 +104,7 @@ impl NetworkDatabase for LocalNetworkDatabase {
         ctx: Option<Arc<Context>>,
         key: &Hash,
         timeout_ms: u64,
-    ) -> Box<Future<Item = RouterInfo, Error = NetworkDatabaseError>> {
+    ) -> Box<Future<Item = RouterInfo, Error = NetworkDatabaseError> + Send + Sync> {
         match self.ri_ds.get(key) {
             Some(ri) => Box::new(future::ok(ri.clone())),
             None => Box::new(future::err(NetworkDatabaseError::NotFound)),

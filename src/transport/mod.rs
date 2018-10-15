@@ -140,11 +140,14 @@ impl CommSystem for Manager {
     }
 
     fn start(&mut self, ctx: Arc<Context>) -> IoFuture<()> {
-        let ntcp_engine = self.ntcp_engine.take().expect("Cannot call listen() twice");
-        let ntcp2_engine = self
+        let mut ntcp_engine = self.ntcp_engine.take().expect("Cannot call listen() twice");
+        let mut ntcp2_engine = self
             .ntcp2_engine
             .take()
             .expect("Cannot call listen() twice");
+
+        ntcp_engine.set_context(ctx.clone());
+        ntcp2_engine.set_context(ctx.clone());
 
         let listener = self
             .ntcp
