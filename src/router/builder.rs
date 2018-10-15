@@ -3,23 +3,21 @@ use std::sync::{Arc, RwLock};
 
 use super::{
     mock,
-    types::{CommSystem, InboundMessageHandler, NetworkDatabase},
+    types::{CommSystem, NetworkDatabase},
     Config, Context, MessageHandler, Router,
 };
 use data::{ReadError, RouterInfo, RouterSecretKeys};
 use netdb::LocalNetworkDatabase;
 use transport;
 
-type CS<'a> = Box<Fn(Arc<InboundMessageHandler>) -> Arc<RwLock<CommSystem>> + 'a>;
-
-pub struct Builder<'a> {
+pub struct Builder {
     keys: Option<RouterSecretKeys>,
     ri_file: Option<String>,
     netdb: Option<Arc<RwLock<NetworkDatabase>>>,
-    comms: Option<CS<'a>>,
+    comms: Option<Arc<RwLock<CommSystem>>>,
 }
 
-impl<'a> Builder<'a> {
+impl Builder {
     /// Create a blank Builder.
     pub fn new() -> Self {
         Builder {
@@ -39,14 +37,11 @@ impl<'a> Builder<'a> {
         Ok(Builder::new()
             .router_keys(RouterSecretKeys::from_file(&cfg.router_keyfile)?)
             .router_info_file(cfg.ri_file)
-            .comm_system(move |msg_handler| {
-                Arc::new(RwLock::new(transport::Manager::new(
-                    msg_handler,
-                    ntcp_addr,
-                    ntcp2_addr,
-                    &ntcp2_keyfile,
-                )))
-            }))
+            .comm_system(Arc::new(RwLock::new(transport::Manager::new(
+                ntcp_addr,
+                ntcp2_addr,
+                &ntcp2_keyfile,
+            )))))
     }
 
     pub fn router_keys(mut self, keys: RouterSecretKeys) -> Self {
@@ -64,11 +59,8 @@ impl<'a> Builder<'a> {
         self
     }
 
-    pub fn comm_system<CS>(mut self, comms: CS) -> Self
-    where
-        CS: Fn(Arc<InboundMessageHandler>) -> Arc<RwLock<CommSystem>> + 'a,
-    {
-        self.comms = Some(Box::new(comms));
+    pub fn comm_system(mut self, comms: Arc<RwLock<CommSystem>>) -> Self {
+        self.comms = Some(comms);
         self
     }
 
@@ -89,12 +81,12 @@ impl<'a> Builder<'a> {
             None => Arc::new(RwLock::new(LocalNetworkDatabase::new())),
         };
 
-        let msg_handler = Arc::new(MessageHandler::new(netdb.clone()));
-
         let comms = match self.comms {
-            Some(comms) => comms(msg_handler),
+            Some(comms) => comms,
             None => Arc::new(RwLock::new(mock::MockCommSystem::new())),
         };
+
+        let msg_handler = Arc::new(MessageHandler::new(netdb.clone()));
 
         let mut ri = RouterInfo::new(keys.rid.clone());
         ri.set_addresses(comms.read().unwrap().addresses());
@@ -107,6 +99,7 @@ impl<'a> Builder<'a> {
                 ri: Arc::new(RwLock::new(ri)),
                 netdb,
                 comms,
+                msg_handler,
             }),
         })
     }

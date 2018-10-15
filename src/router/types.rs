@@ -6,7 +6,7 @@ use std::sync::Arc;
 use tokio_io::IoFuture;
 
 use super::Context;
-use data::{Hash, LeaseSet, RouterAddress, RouterInfo, RouterSecretKeys};
+use data::{Hash, LeaseSet, RouterAddress, RouterInfo};
 use i2np::Message;
 
 pub trait InboundMessageHandler: Send + Sync {
@@ -30,7 +30,7 @@ pub trait CommSystem: OutboundMessageHandler {
     ///
     /// This returns a Future that must be polled in order to drive network
     /// communications.
-    fn start(&mut self, rsk: RouterSecretKeys) -> IoFuture<()>;
+    fn start(&mut self, ctx: Arc<Context>) -> IoFuture<()>;
 }
 
 /// Network database errors

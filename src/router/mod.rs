@@ -53,10 +53,11 @@ pub struct Router {
 }
 
 pub struct Context {
-    keys: RouterSecretKeys,
+    pub keys: RouterSecretKeys,
     pub ri: Arc<RwLock<RouterInfo>>,
     netdb: Arc<RwLock<types::NetworkDatabase>>,
     pub comms: Arc<RwLock<types::CommSystem>>,
+    pub msg_handler: Arc<types::InboundMessageHandler>,
 }
 
 impl Router {
@@ -64,12 +65,11 @@ impl Router {
     ///
     /// This returns a Future that must be polled in order to drive the Router.
     pub fn start(&mut self) -> impl Future<Item = (), Error = ()> {
-        let keys = self.ctx.keys.clone();
         self.ctx
             .comms
             .write()
             .unwrap()
-            .start(keys)
+            .start(self.ctx.clone())
             .map_err(|e| {
                 error!("CommSystem engine error: {}", e);
             }).join(netdb_engine(self.ctx.netdb.clone()))

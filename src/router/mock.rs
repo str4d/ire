@@ -4,11 +4,13 @@
 //! self-consistency across its component's API.
 
 use futures::future;
+use std::sync::Arc;
 use tokio_io::IoFuture;
 
 use super::types::{CommSystem, OutboundMessageHandler};
-use data::{Hash, RouterAddress, RouterSecretKeys};
+use data::{Hash, RouterAddress};
 use i2np::Message;
+use router::Context;
 
 pub(super) struct MockCommSystem;
 
@@ -29,7 +31,7 @@ impl CommSystem for MockCommSystem {
         vec![]
     }
 
-    fn start(&mut self, _rsk: RouterSecretKeys) -> IoFuture<()> {
+    fn start(&mut self, _ctx: Arc<Context>) -> IoFuture<()> {
         Box::new(future::ok(()))
     }
 }
