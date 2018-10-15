@@ -40,7 +40,9 @@ and implemented.
   - [x] Local storage
   - [ ] Persistence to disk
   - [x] Reseeding
-  - [ ] Lookups
+  - [x] Lookups
+  - [ ] Expiry
+  - [ ] Exploration
   - [ ] Publishing
   - [ ] Floodfill
 - Transports

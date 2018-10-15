@@ -490,6 +490,14 @@ impl RouterInfo {
         self.options.0.get(&OPT_NET_ID)
     }
 
+    pub fn is_floodfill(&self) -> bool {
+        self.options
+            .0
+            .get(&OPT_CAPS)
+            .map(|caps| caps.0.contains('f'))
+            .unwrap_or(false)
+    }
+
     pub fn from_file(path: &str) -> Result<Self, ReadError> {
         let mut ri = File::open(path)?;
         let mut data: Vec<u8> = Vec::new();

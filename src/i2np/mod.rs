@@ -118,6 +118,19 @@ pub struct DatabaseLookup {
     reply_enc: Option<(SessionKey, Vec<SessionTag>)>,
 }
 
+impl DatabaseLookup {
+    pub fn create_msg(key: Hash, from: Hash, lookup_type: DatabaseLookupType) -> Message {
+        Message::from_payload(MessagePayload::DatabaseLookup(DatabaseLookup {
+            key,
+            from,
+            lookup_type,
+            reply_tid: None,
+            excluded_peers: vec![],
+            reply_enc: None,
+        }))
+    }
+}
+
 impl fmt::Display for DatabaseLookup {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         format!(
