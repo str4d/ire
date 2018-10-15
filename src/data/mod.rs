@@ -23,6 +23,18 @@ use crypto::{
 #[allow(needless_pass_by_value)]
 pub(crate) mod frame;
 
+lazy_static! {
+    static ref OPT_NET_ID: I2PString = "netId".into();
+    static ref OPT_ROUTER_VERSION: I2PString = "router.version".into();
+    static ref OPT_CAPS: I2PString = "caps".into();
+}
+
+lazy_static! {
+    pub static ref NET_ID: I2PString = "2".into();
+    static ref ROUTER_VERSION: I2PString = "0.9.37".into();
+    static ref CAPS: I2PString = "KU".into();
+}
+
 /// Data read errors
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ReadError {
@@ -116,6 +128,12 @@ impl I2PString {
 
     pub fn to_csv(&self) -> Vec<Self> {
         self.0.split(',').map(|s| Self::new(s)).collect()
+    }
+}
+
+impl<'a> From<&'a str> for I2PString {
+    fn from(a: &'a str) -> Self {
+        I2PString::new(a)
     }
 }
 
@@ -414,12 +432,17 @@ pub struct RouterInfo {
 
 impl RouterInfo {
     pub fn new(rid: RouterIdentity) -> Self {
+        let mut options: HashMap<I2PString, I2PString> = HashMap::new();
+        options.insert(OPT_NET_ID.clone(), NET_ID.clone());
+        options.insert(OPT_ROUTER_VERSION.clone(), ROUTER_VERSION.clone());
+        options.insert(OPT_CAPS.clone(), CAPS.clone());
+
         RouterInfo {
             router_id: rid,
             published: I2PDate::from_system_time(SystemTime::now()),
             addresses: Vec::new(),
             peers: Vec::new(),
-            options: Mapping(HashMap::new()),
+            options: Mapping(options),
             signature: None,
         }
     }
