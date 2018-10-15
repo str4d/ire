@@ -39,12 +39,18 @@ pub trait CommSystem: OutboundMessageHandler + Send + Sync {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LookupError {
     NotFound,
+    SendFailure,
+    TimedOut,
+    TimerFailure,
 }
 
 impl fmt::Display for LookupError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             LookupError::NotFound => "Key not found".fmt(f),
+            LookupError::SendFailure => "Send failure".fmt(f),
+            LookupError::TimedOut => "Lookup timed out".fmt(f),
+            LookupError::TimerFailure => "Timer failure".fmt(f),
         }
     }
 }
@@ -91,7 +97,7 @@ pub trait NetworkDatabase: Send + Sync {
         ctx: Option<Arc<Context>>,
         key: &Hash,
         timeout_ms: u64,
-    ) -> Box<Future<Item = RouterInfo, Error = LookupError> + Send + Sync>;
+    ) -> Box<Future<Item = RouterInfo, Error = LookupError> + Send>;
 
     /// Finds the LeaseSet stored at the given key. If not known locally, and a
     /// Context is provided, the LeaseSet is looked up using the client tunnels
