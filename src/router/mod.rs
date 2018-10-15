@@ -7,7 +7,7 @@ use netdb::netdb_engine;
 
 mod builder;
 mod config;
-mod mock;
+pub(crate) mod mock;
 pub mod types;
 
 pub use self::builder::Builder;
