@@ -47,6 +47,10 @@ impl CommSystem for MockCommSystem {
     fn start(&mut self, _ctx: Arc<Context>) -> IoFuture<()> {
         Box::new(future::ok(()))
     }
+
+    fn is_established(&self, hash: &Hash) -> bool {
+        false
+    }
 }
 
 pub fn mock_context() -> Arc<Context> {

@@ -35,6 +35,9 @@ pub trait CommSystem: OutboundMessageHandler + Send + Sync {
     /// This returns a Future that must be polled in order to drive network
     /// communications.
     fn start(&mut self, ctx: Arc<Context>) -> IoFuture<()>;
+
+    /// Returns true if there is an open session with the given peer.
+    fn is_established(&self, hash: &Hash) -> bool;
 }
 
 /// Network database lookup errors
@@ -126,4 +129,10 @@ pub trait NetworkDatabase: Send + Sync {
     ///
     /// Returns the LeaseSet that was previously at this key.
     fn store_lease_set(&mut self, key: Hash, ls: LeaseSet) -> Result<Option<LeaseSet>, StoreError>;
+
+    /// Drop any local RouterInfos that have expired.
+    fn expire_router_infos(&mut self, ctx: Option<Arc<Context>>);
+
+    /// Drop any local LeaseSets that have expired.
+    fn expire_lease_sets(&mut self);
 }

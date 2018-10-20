@@ -106,7 +106,7 @@ impl fmt::Display for Hash {
 
 /// The number of milliseconds since midnight on January 1, 1970 in the GMT
 /// timezone. If the number is 0, the date is undefined or null.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
 pub struct I2PDate(pub(crate) u64);
 
 impl I2PDate {
@@ -380,6 +380,19 @@ pub struct LeaseSet {
     sig_key: SigningPublicKey,
     leases: Vec<Lease>,
     sig: Signature,
+}
+
+impl LeaseSet {
+    pub fn is_current(&self) -> bool {
+        let expiry = self.leases.iter().fold(I2PDate(1), |expiry, lease| {
+            if lease.end_date > expiry {
+                lease.end_date
+            } else {
+                expiry
+            }
+        });
+        expiry < I2PDate::from_system_time(SystemTime::now())
+    }
 }
 
 /// Defines the means to contact a router through a transport protocol.

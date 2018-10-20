@@ -1,12 +1,12 @@
 //! The I2P network database.
 
 use chrono::offset::Utc;
-use futures::{future, sync::oneshot, Future};
+use futures::{future, sync::oneshot, Async, Future};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
-use tokio_timer::sleep;
+use tokio_timer::{sleep, Delay};
 
 use data::{Hash, LeaseSet, RouterInfo, NET_ID};
 use i2np::DatabaseLookupType;
@@ -24,17 +24,29 @@ const ROUTER_INFO_EXPIRATION: u64 = 27 * 60 * 60;
 
 /// Minimum seconds per engine cycle.
 const ENGINE_DOWNTIME: u64 = 10;
+/// Interval on which we expire RouterInfos.
+const EXPIRE_RI_INTERVAL: u64 = 5 * 60;
+/// Interval on which we expire LeaseSets.
+const EXPIRE_LS_INTERVAL: u64 = 60;
 /// If we know fewer than this many routers, we will reseed.
 const MINIMUM_ROUTERS: usize = 50;
+/// If we know fewer than this many routers, we won't expire RouterInfos.
+const KEEP_ROUTERS: usize = 150;
 
 /// Performs network database maintenance operations.
 struct Engine {
     ctx: Arc<Context>,
+    expire_ri_timer: Delay,
+    expire_ls_timer: Delay,
 }
 
 impl Engine {
     fn new(ctx: Arc<Context>) -> Self {
-        Engine { ctx }
+        Engine {
+            ctx,
+            expire_ri_timer: sleep(Duration::from_secs(EXPIRE_RI_INTERVAL)),
+            expire_ls_timer: sleep(Duration::from_secs(EXPIRE_LS_INTERVAL)),
+        }
     }
 
     fn start_cycle(self) -> future::FutureResult<Self, ()> {
@@ -58,6 +70,32 @@ impl Engine {
         }
     }
 
+    fn expire_router_infos(mut self) -> Box<Future<Item = Self, Error = ()> + Send> {
+        if let Ok(Async::Ready(())) = self.expire_ri_timer.poll() {
+            // Expire RouterInfos
+            if self.ctx.netdb.read().unwrap().known_routers() >= KEEP_ROUTERS {
+                self.ctx
+                    .netdb
+                    .write()
+                    .unwrap()
+                    .expire_router_infos(Some(self.ctx.clone()));
+            }
+            // Reset timer
+            self.expire_ri_timer = sleep(Duration::from_secs(EXPIRE_RI_INTERVAL));
+        }
+        Box::new(future::ok(self))
+    }
+
+    fn expire_lease_sets(mut self) -> Box<Future<Item = Self, Error = ()> + Send> {
+        if let Ok(Async::Ready(())) = self.expire_ls_timer.poll() {
+            // Expire LeaseSets
+            self.ctx.netdb.write().unwrap().expire_lease_sets();
+            // Reset timer
+            self.expire_ls_timer = sleep(Duration::from_secs(EXPIRE_LS_INTERVAL));
+        }
+        Box::new(future::ok(self))
+    }
+
     fn finish_cycle(self) -> Box<Future<Item = (Self, bool), Error = ()> + Send> {
         trace!("Finished NetDB engine cycle");
         Box::new(
@@ -74,6 +112,8 @@ pub fn netdb_engine(ctx: Arc<Context>) -> Box<Future<Item = (), Error = ()> + Se
         engine
             .start_cycle()
             .and_then(|engine| engine.check_reseed())
+            .and_then(|engine| engine.expire_router_infos())
+            .and_then(|engine| engine.expire_lease_sets())
             .and_then(|engine| engine.finish_cycle())
             .and_then(|(engine, done)| {
                 if done {
@@ -290,6 +330,35 @@ impl NetworkDatabase for LocalNetworkDatabase {
 
         debug!("Storing LeaseSet at key {}", key);
         Ok(self.ls_ds.insert(key, ls))
+    }
+
+    fn expire_router_infos(&mut self, ctx: Option<Arc<Context>>) {
+        let comms = ctx.as_ref().map(|ctx| ctx.comms.read().unwrap());
+
+        let before = self.ri_ds.len();
+        self.ri_ds.retain(|_, ri| {
+            // Don't expire RIs for peers we are connected to.
+            if let Some(comms) = comms.as_ref() {
+                if comms.is_established(&ri.router_id.hash()) {
+                    return true;
+                }
+            }
+
+            router_info_is_current(ri).is_ok()
+        });
+        let expired = before - self.ri_ds.len();
+        if expired > 0 {
+            debug!("Expired {} RouterInfos", expired);
+        }
+    }
+
+    fn expire_lease_sets(&mut self) {
+        let before = self.ls_ds.len();
+        self.ls_ds.retain(|_, ls| ls.is_current());
+        let expired = before - self.ls_ds.len();
+        if expired > 0 {
+            debug!("Expired {} LeaseSets", expired);
+        }
     }
 }
 
