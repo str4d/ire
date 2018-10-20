@@ -9,6 +9,7 @@ use nom::{Err, Offset};
 use std::io;
 use std::iter::repeat;
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 use tokio_codec::{Decoder, Encoder, Framed};
 use tokio_executor::spawn;
@@ -25,6 +26,7 @@ use super::{
 use crypto::{Aes256, SigningPrivateKey};
 use data::{Hash, I2PString, RouterAddress, RouterIdentity, RouterInfo};
 use i2np::Message;
+use router::Context;
 
 #[allow(needless_pass_by_value)]
 mod frame;
@@ -224,18 +226,25 @@ pub struct Manager {
 }
 
 pub struct Engine {
+    ctx: Option<Arc<Context>>,
     session_engine: SessionEngine<Frame>,
+    session_refs: SessionRefs<Frame>,
 }
 
 impl Manager {
     pub fn new(addr: SocketAddr) -> (Self, Engine) {
         let (session_manager, session_engine) = session::new_manager();
+        let session_refs = session_manager.refs();
         (
             Manager {
                 addr,
                 session_manager,
             },
-            Engine { session_engine },
+            Engine {
+                ctx: None,
+                session_engine,
+                session_refs,
+            },
         )
     }
 
@@ -282,30 +291,37 @@ impl Manager {
         own_key: SigningPrivateKey,
         peer_ri: RouterInfo,
     ) -> impl Future<Item = (), Error = io::Error> {
-        // TODO return error if there are no valid NTCP addresses (for some reason)
-        let addr = peer_ri
-            .address(&NTCP_STYLE, |_| true)
-            .unwrap()
-            .addr()
-            .unwrap();
-
-        // Connect to the peer
-        let conn = TcpStream::connect(&addr).and_then(|socket| {
-            handshake::OBHandshake::new(socket, own_ri, own_key, peer_ri.router_id)
-        });
-
-        // Add a timeout
-        let timed = Timeout::new(conn, Duration::new(10, 0))
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e));
-
-        // Once connected:
-        let session_refs = self.session_manager.refs();
-        timed.and_then(|(ri, conn)| {
-            let session = Session::new(ri, conn, session_refs);
-            spawn(session.map_err(|_| ()));
-            Ok(())
-        })
+        connect(own_ri, own_key, peer_ri, self.session_manager.refs())
     }
+}
+
+fn connect(
+    own_ri: RouterIdentity,
+    own_key: SigningPrivateKey,
+    peer_ri: RouterInfo,
+    session_refs: SessionRefs<Frame>,
+) -> impl Future<Item = (), Error = io::Error> {
+    // TODO return error if there are no valid NTCP addresses (for some reason)
+    let addr = peer_ri
+        .address(&NTCP_STYLE, |_| true)
+        .unwrap()
+        .addr()
+        .unwrap();
+
+    // Connect to the peer
+    let conn = TcpStream::connect(&addr)
+        .and_then(|socket| handshake::OBHandshake::new(socket, own_ri, own_key, peer_ri.router_id));
+
+    // Add a timeout
+    let timed = Timeout::new(conn, Duration::new(10, 0))
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, e));
+
+    // Once connected:
+    timed.and_then(|(ri, conn)| {
+        let session = Session::new(ri, conn, session_refs);
+        spawn(session.map_err(|_| ()));
+        Ok(())
+    })
 }
 
 impl Transport for Manager {
@@ -325,12 +341,51 @@ impl Transport for Manager {
     }
 }
 
+impl Engine {
+    pub fn set_context(&mut self, ctx: Arc<Context>) {
+        self.ctx = Some(ctx);
+    }
+}
+
 impl Stream for Engine {
     type Item = (Hash, Message);
     type Error = ();
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        while let Async::Ready(f) = self.session_engine.poll(Frame::Standard, Frame::TimeSync)? {
+        let ctx = self
+            .ctx
+            .as_ref()
+            .cloned()
+            .expect("Should have called set_context()");
+        let session_refs = self.session_refs.clone();
+
+        while let Async::Ready(f) = self.session_engine.poll(
+            ctx.clone(),
+            Frame::Standard,
+            Frame::TimeSync,
+            |ctx, hash| {
+                // Look up the RouterInfo for the peer we need to connect to
+                let lookup = ctx
+                    .netdb
+                    .write()
+                    .unwrap()
+                    .lookup_router_info(Some(ctx.clone()), hash, 10000)
+                    .map_err(|e| {
+                        error!("Failed to look up peer: {}", e);
+                    });
+
+                // Connect to the peer
+                let own_rid = ctx.keys.rid.clone();
+                let own_key = ctx.keys.signing_private_key.clone();
+                let session_refs = session_refs.clone();
+                let connector = lookup.and_then(|peer_ri| {
+                    connect(own_rid, own_key, peer_ri, session_refs).map_err(|e| {
+                        error!("Error while connecting: {}", e);
+                    })
+                });
+                spawn(connector);
+            },
+        )? {
             match f {
                 Some((from, Frame::Standard(msg))) => return Ok(Some((from, msg)).into()),
                 Some((from, frame)) => {
@@ -355,8 +410,8 @@ mod tests {
     use tokio_codec::{Decoder, Encoder};
 
     use super::{frame, session, Frame, Session, NTCP_MTU};
-    use data::RouterSecretKeys;
     use i2np::Message;
+    use router::mock::mock_context;
     use transport::tests::{AliceNet, BobNet, NetworkCable};
 
     struct TestCodec;
@@ -426,7 +481,8 @@ mod tests {
 
     #[test]
     fn session_send() {
-        let rid = RouterSecretKeys::new().rid;
+        let ctx = mock_context();
+        let rid = ctx.keys.rid.clone();
         let hash = rid.hash();
 
         let cable = NetworkCable::new();
@@ -434,7 +490,6 @@ mod tests {
         let alice_framed = TestCodec {}.framed(alice_net);
 
         let (manager, mut engine) = session::new_manager();
-        let mut session = Session::new(rid, alice_framed, manager.refs());
 
         // Run on a task context
         lazy(move || {
@@ -447,11 +502,22 @@ mod tests {
             assert!(bob_net.read_to_end(&mut received).is_err());
             assert!(received.is_empty());
 
-            // Pass it through the engine, still not received
-            engine.poll(Frame::Standard, |_| panic!()).unwrap();
+            // Pass it through the engine, session is requested, message queued
+            engine
+                .poll(
+                    ctx,
+                    Frame::Standard,
+                    |_| panic!(),
+                    |_, h| assert_eq!(*h, hash),
+                ).unwrap();
+
+            // Still not received
             received.clear();
             assert!(bob_net.read_to_end(&mut received).is_err());
             assert!(received.is_empty());
+
+            // Create a session
+            let mut session = Session::new(rid, alice_framed, manager.refs());
 
             // Pass it through the session, now it's on the wire
             session.poll().unwrap();
@@ -466,7 +532,8 @@ mod tests {
 
     #[test]
     fn session_receive() {
-        let rid = RouterSecretKeys::new().rid;
+        let ctx = mock_context();
+        let rid = ctx.keys.rid.clone();
         let hash = rid.hash();
 
         let cable = NetworkCable::new();
@@ -482,13 +549,18 @@ mod tests {
             assert!(alice_net.write_all(DUMMY_MSG_NTCP_DATA).is_ok());
 
             // Check it has not yet been received
-            engine.poll(|_| panic!(), |_| panic!()).unwrap();
+            engine
+                .poll(ctx.clone(), |_| panic!(), |_| panic!(), |_, _| panic!())
+                .unwrap();
 
             // Pass it through the session
             session.poll().unwrap();
 
             // The engine should receive it now
-            match engine.poll(|_| panic!(), |_| panic!()).unwrap() {
+            match engine
+                .poll(ctx, |_| panic!(), |_| panic!(), |_, _| panic!())
+                .unwrap()
+            {
                 Async::Ready(Some((h, frame))) => {
                     assert_eq!(h, hash);
                     match frame {

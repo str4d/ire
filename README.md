@@ -45,14 +45,14 @@ and implemented.
   - [ ] Floodfill
 - Transports
   - [x] Transport manager
-  - [ ] NTCP
+  - NTCP
     - [x] Handshake
     - [x] Session tracking
-    - [ ] Automatic session creation
-  - [ ] NTCP2
+    - [x] Automatic session creation
+  - NTCP2
     - [x] Handshake
     - [x] Session tracking
-    - [ ] Automatic session creation
+    - [x] Automatic session creation
   - [ ] SSU
 
 ## Usage

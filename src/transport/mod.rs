@@ -8,9 +8,12 @@ use std::sync::Arc;
 use tokio_io::IoFuture;
 
 use crypto::dh::DHSessionKeyBuilder;
-use data::{Hash, RouterAddress, RouterSecretKeys};
+use data::{Hash, RouterAddress};
 use i2np::Message;
-use router::types::{CommSystem, InboundMessageHandler, OutboundMessageHandler};
+use router::{
+    types::{CommSystem, InboundMessageHandler, OutboundMessageHandler},
+    Context,
+};
 
 pub mod ntcp;
 pub mod ntcp2;
@@ -77,8 +80,9 @@ impl Sink for Bid {
 /// transports.
 pub struct Manager {
     ntcp: ntcp::Manager,
+    ntcp_engine: Option<ntcp::Engine>,
     ntcp2: ntcp2::Manager,
-    engine: Option<Engine>,
+    ntcp2_engine: Option<ntcp2::Engine>,
 }
 
 pub struct Engine {
@@ -91,12 +95,7 @@ trait Transport {
 }
 
 impl Manager {
-    pub fn new(
-        msg_handler: Arc<InboundMessageHandler>,
-        ntcp_addr: SocketAddr,
-        ntcp2_addr: SocketAddr,
-        ntcp2_keyfile: &str,
-    ) -> Self {
+    pub fn new(ntcp_addr: SocketAddr, ntcp2_addr: SocketAddr, ntcp2_keyfile: &str) -> Self {
         let (ntcp_manager, ntcp_engine) = ntcp::Manager::new(ntcp_addr);
         let (ntcp2_manager, ntcp2_engine) =
             match ntcp2::Manager::from_file(ntcp2_addr, ntcp2_keyfile) {
@@ -109,11 +108,9 @@ impl Manager {
             };
         Manager {
             ntcp: ntcp_manager,
+            ntcp_engine: Some(ntcp_engine),
             ntcp2: ntcp2_manager,
-            engine: Some(Engine {
-                engines: ntcp_engine.select(ntcp2_engine),
-                msg_handler,
-            }),
+            ntcp2_engine: Some(ntcp2_engine),
         }
     }
 }
@@ -142,21 +139,33 @@ impl CommSystem for Manager {
         vec![self.ntcp.address(), self.ntcp2.address()]
     }
 
-    fn start(&mut self, rsk: RouterSecretKeys) -> IoFuture<()> {
-        let engine = self.engine.take().expect("Cannot call listen() twice");
+    fn start(&mut self, ctx: Arc<Context>) -> IoFuture<()> {
+        let mut ntcp_engine = self.ntcp_engine.take().expect("Cannot call listen() twice");
+        let mut ntcp2_engine = self
+            .ntcp2_engine
+            .take()
+            .expect("Cannot call listen() twice");
+
+        ntcp_engine.set_context(ctx.clone());
+        ntcp2_engine.set_context(ctx.clone());
 
         let listener = self
             .ntcp
-            .listen(rsk.rid.clone(), rsk.signing_private_key.clone())
+            .listen(ctx.keys.rid.clone(), ctx.keys.signing_private_key.clone())
             .map_err(|e| {
                 error!("NTCP listener error: {}", e);
                 e
             });
 
-        let listener2 = self.ntcp2.listen(&rsk.rid).map_err(|e| {
+        let listener2 = self.ntcp2.listen(&ctx.keys.rid).map_err(|e| {
             error!("NTCP2 listener error: {}", e);
             e
         });
+
+        let engine = Engine {
+            engines: ntcp_engine.select(ntcp2_engine),
+            msg_handler: ctx.msg_handler.clone(),
+        };
 
         Box::new(
             engine
@@ -384,18 +393,7 @@ mod tests {
         let ntcp2_addr = "127.0.0.2:0".parse().unwrap();
         let ntcp2_keyfile = dir.path().join("test.ntcp2.keys.dat");
 
-        struct MockMessageHandler;
-
-        impl InboundMessageHandler for MockMessageHandler {
-            fn handle(&self, from: Hash, msg: Message) {}
-        }
-
-        let manager = Manager::new(
-            Arc::new(MockMessageHandler {}),
-            ntcp_addr,
-            ntcp2_addr,
-            ntcp2_keyfile.to_str().unwrap(),
-        );
+        let manager = Manager::new(ntcp_addr, ntcp2_addr, ntcp2_keyfile.to_str().unwrap());
         let addrs = manager.addresses();
 
         assert_eq!(addrs[0].addr(), Some(ntcp_addr));

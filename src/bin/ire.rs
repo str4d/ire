@@ -12,7 +12,7 @@ use futures::{Future, Stream};
 use ire::{
     data, i2np,
     netdb::reseed::HttpsReseeder,
-    router::{Builder, Config},
+    router::{mock::mock_context, Builder, Config},
     transport,
 };
 
@@ -123,7 +123,8 @@ fn cli_client(args: &ArgMatches) -> i32 {
     info!("Connecting to {}", peer_ri.router_id.hash());
     match args.value_of("transport") {
         Some("NTCP") => {
-            let (ntcp, engine) = transport::ntcp::Manager::new("127.0.0.1:0".parse().unwrap());
+            let (ntcp, mut engine) = transport::ntcp::Manager::new("127.0.0.1:0".parse().unwrap());
+            engine.set_context(mock_context());
             let handle = ntcp.handle();
             let conn = ntcp
                 .connect(rsk.rid, rsk.signing_private_key, peer_ri)
@@ -143,7 +144,9 @@ fn cli_client(args: &ArgMatches) -> i32 {
             );
         }
         Some("NTCP2") => {
-            let (ntcp2, engine) = transport::ntcp2::Manager::new("127.0.0.1:0".parse().unwrap());
+            let (ntcp2, mut engine) =
+                transport::ntcp2::Manager::new("127.0.0.1:0".parse().unwrap());
+            engine.set_context(mock_context());
             let handle = ntcp2.handle();
             let conn = ntcp2
                 .connect(&ri, peer_ri)

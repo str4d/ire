@@ -2,9 +2,11 @@
 
 use futures::Future;
 use std::fmt;
+use std::sync::Arc;
 use tokio_io::IoFuture;
 
-use data::{Hash, LeaseSet, RouterAddress, RouterInfo, RouterSecretKeys};
+use super::Context;
+use data::{Hash, LeaseSet, RouterAddress, RouterInfo};
 use i2np::Message;
 
 pub trait InboundMessageHandler: Send + Sync {
@@ -20,7 +22,7 @@ pub trait OutboundMessageHandler {
 
 /// Manages the communication subsystem between peers, including connections,
 /// listeners, transports, connection keys, etc.
-pub trait CommSystem: OutboundMessageHandler {
+pub trait CommSystem: OutboundMessageHandler + Send + Sync {
     /// Returns the addresses of the underlying transports.
     fn addresses(&self) -> Vec<RouterAddress>;
 
@@ -28,7 +30,7 @@ pub trait CommSystem: OutboundMessageHandler {
     ///
     /// This returns a Future that must be polled in order to drive network
     /// communications.
-    fn start(&mut self, rsk: RouterSecretKeys) -> IoFuture<()>;
+    fn start(&mut self, ctx: Arc<Context>) -> IoFuture<()>;
 }
 
 /// Network database errors
@@ -50,18 +52,21 @@ pub trait NetworkDatabase: Send + Sync {
     /// Returns the number of RouterInfos that this database contains.
     fn known_routers(&self) -> usize;
 
-    /// Finds the RouterInfo stored at the given key.
+    /// Finds the RouterInfo stored at the given key. If a Context is provided,
+    /// a remote lookup will be performed if the key is not found locally.
     fn lookup_router_info(
         &mut self,
+        ctx: Option<Arc<Context>>,
         key: &Hash,
         timeout_ms: u64,
-    ) -> Box<Future<Item = RouterInfo, Error = NetworkDatabaseError>>;
+    ) -> Box<Future<Item = RouterInfo, Error = NetworkDatabaseError> + Send + Sync>;
 
-    /// Finds the LeaseSet stored at the given key. If not known locally, the LeaseSet is
-    /// looked up using the client tunnels for `from_local_dest` if provided, or
-    /// exploratory tunnels otherwise.
+    /// Finds the LeaseSet stored at the given key. If not known locally, and a
+    /// Context is provided, the LeaseSet is looked up using the client tunnels
+    /// for `from_local_dest` if provided, or exploratory tunnels otherwise.
     fn lookup_lease_set(
         &mut self,
+        ctx: Option<Arc<Context>>,
         key: &Hash,
         timeout_ms: u64,
         from_local_dest: Option<Hash>,

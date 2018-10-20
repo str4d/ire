@@ -219,7 +219,13 @@ named!(
         (DatabaseLookupFlags {
             delivery: delivery > 0,
             encryption: encryption > 0,
-            lookup_type,
+            lookup_type: match lookup_type {
+                0 => DatabaseLookupType::Any,
+                1 => DatabaseLookupType::LeaseSet,
+                2 => DatabaseLookupType::RouterInfo,
+                3 => DatabaseLookupType::Exploratory,
+                _ => unreachable!(),
+            },
         })
     ))
 );
@@ -235,7 +241,13 @@ fn gen_database_lookup_flags<'a>(
     if flags.encryption {
         x |= 0b10;
     }
-    x |= (flags.lookup_type << 2) & 0b1100;
+    x |= (match flags.lookup_type {
+        DatabaseLookupType::Any => 0,
+        DatabaseLookupType::LeaseSet => 1,
+        DatabaseLookupType::RouterInfo => 2,
+        DatabaseLookupType::Exploratory => 3,
+    } << 2)
+        & 0b1100;
     gen_be_u8!(input, x)
 }
 
@@ -813,6 +825,56 @@ mod tests {
                 Err(e) => panic!("Unexpected error: {:?}", e),
             }
         };
+    }
+
+    #[test]
+    fn test_database_lookup_flags() {
+        macro_rules! eval {
+            ($value:expr, $expected:expr) => {
+                bake_and_eat!(
+                    gen_database_lookup_flags,
+                    database_lookup_flags,
+                    $value,
+                    $expected
+                )
+            };
+        }
+
+        eval!(
+            DatabaseLookupFlags {
+                delivery: false,
+                encryption: false,
+                lookup_type: DatabaseLookupType::Any,
+            },
+            [0]
+        );
+
+        eval!(
+            DatabaseLookupFlags {
+                delivery: true,
+                encryption: false,
+                lookup_type: DatabaseLookupType::LeaseSet,
+            },
+            [5]
+        );
+
+        eval!(
+            DatabaseLookupFlags {
+                delivery: false,
+                encryption: true,
+                lookup_type: DatabaseLookupType::RouterInfo,
+            },
+            [10]
+        );
+
+        eval!(
+            DatabaseLookupFlags {
+                delivery: true,
+                encryption: true,
+                lookup_type: DatabaseLookupType::Exploratory,
+            },
+            [15]
+        );
     }
 
     #[test]
