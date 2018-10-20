@@ -325,6 +325,10 @@ fn connect(
 }
 
 impl Transport for Manager {
+    fn is_established(&self, hash: &Hash) -> bool {
+        self.session_manager.have_session(hash)
+    }
+
     fn bid(&self, peer: &RouterInfo, msg_size: usize) -> Option<Bid> {
         if msg_size > NTCP_MTU {
             return None;
@@ -335,7 +339,7 @@ impl Transport for Manager {
         }
 
         Some(Bid {
-            bid: if self.session_manager.have_session(&peer.router_id.hash()) {
+            bid: if self.is_established(&peer.router_id.hash()) {
                 25
             } else {
                 70

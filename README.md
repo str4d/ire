@@ -41,7 +41,7 @@ and implemented.
   - [ ] Persistence to disk
   - [x] Reseeding
   - [x] Lookups
-  - [ ] Expiry
+  - [x] Expiry
   - [ ] Exploration
   - [ ] Publishing
   - [ ] Floodfill

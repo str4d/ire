@@ -7,7 +7,7 @@ use std::sync::Arc;
 use tokio_io::IoFuture;
 
 use crypto::dh::DHSessionKeyBuilder;
-use data::{RouterAddress, RouterInfo};
+use data::{Hash, RouterAddress, RouterInfo};
 use i2np::Message;
 use router::{
     config,
@@ -91,6 +91,8 @@ pub struct Engine {
 }
 
 trait Transport {
+    fn is_established(&self, hash: &Hash) -> bool;
+
     fn bid(&self, peer: &RouterInfo, msg_size: usize) -> Option<Bid>;
 }
 
@@ -185,6 +187,10 @@ impl CommSystem for Manager {
                 .join3(listener, listener2)
                 .map(|_| ()),
         )
+    }
+
+    fn is_established(&self, hash: &Hash) -> bool {
+        self.ntcp.is_established(hash) || self.ntcp2.is_established(hash)
     }
 }
 
