@@ -115,7 +115,6 @@ fn cli_router(args: &ArgMatches) -> i32 {
 fn cli_client(args: &ArgMatches) -> i32 {
     let rsk = data::RouterSecretKeys::from_file(args.value_of("routerKeys").unwrap()).unwrap();
     let peer_ri = data::RouterInfo::from_file(args.value_of("peerInfo").unwrap()).unwrap();
-    let hash = peer_ri.router_id.hash();
 
     let mut ri = data::RouterInfo::new(rsk.rid.clone());
     ri.sign(&rsk.signing_private_key);
@@ -127,9 +126,12 @@ fn cli_client(args: &ArgMatches) -> i32 {
             engine.set_context(mock_context());
             let handle = ntcp.handle();
             let conn = ntcp
-                .connect(rsk.rid, rsk.signing_private_key, peer_ri)
-                .and_then(move |_| handle.timestamp(hash.clone(), 42).map(|_| (handle, hash)))
-                .and_then(|(handle, hash)| handle.send(hash, i2np::Message::dummy_data()))
+                .connect(rsk.rid, rsk.signing_private_key, peer_ri.clone())
+                .and_then(move |_| {
+                    handle
+                        .timestamp(peer_ri.clone(), 42)
+                        .map(|_| (handle, peer_ri))
+                }).and_then(|(handle, peer)| handle.send(peer, i2np::Message::dummy_data()))
                 .and_then(|_| {
                     info!("Dummy data sent!");
                     Ok(())
@@ -149,12 +151,14 @@ fn cli_client(args: &ArgMatches) -> i32 {
             engine.set_context(mock_context());
             let handle = ntcp2.handle();
             let conn = ntcp2
-                .connect(&ri, peer_ri)
+                .connect(&ri, peer_ri.clone())
                 .unwrap()
                 .and_then(move |_| {
                     info!("Connection established!");
-                    handle.timestamp(hash.clone(), 42).map(|_| (handle, hash))
-                }).and_then(|(handle, hash)| handle.send(hash, i2np::Message::dummy_data()))
+                    handle
+                        .timestamp(peer_ri.clone(), 42)
+                        .map(|_| (handle, peer_ri))
+                }).and_then(|(handle, peer)| handle.send(peer, i2np::Message::dummy_data()))
                 .and_then(|_| {
                     info!("Dummy data sent!");
                     Ok(())

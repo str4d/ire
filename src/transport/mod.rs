@@ -8,7 +8,7 @@ use std::sync::Arc;
 use tokio_io::IoFuture;
 
 use crypto::dh::DHSessionKeyBuilder;
-use data::{Hash, RouterAddress};
+use data::{RouterAddress, RouterInfo};
 use i2np::Message;
 use router::{
     types::{CommSystem, InboundMessageHandler, OutboundMessageHandler},
@@ -20,16 +20,16 @@ pub mod ntcp2;
 mod session;
 
 /// Shorthand for the transmit half of a Transport-bound message channel.
-type MessageTx = mpsc::UnboundedSender<(Hash, Message)>;
+type MessageTx = mpsc::UnboundedSender<(RouterInfo, Message)>;
 
 /// Shorthand for the receive half of a Transport-bound message channel.
-type MessageRx = mpsc::UnboundedReceiver<(Hash, Message)>;
+type MessageRx = mpsc::UnboundedReceiver<(RouterInfo, Message)>;
 
 /// Shorthand for the transmit half of a Transport-bound timestamp channel.
-type TimestampTx = mpsc::UnboundedSender<(Hash, u32)>;
+type TimestampTx = mpsc::UnboundedSender<(RouterInfo, u32)>;
 
 /// Shorthand for the receive half of a Transport-bound timestamp channel.
-type TimestampRx = mpsc::UnboundedReceiver<(Hash, u32)>;
+type TimestampRx = mpsc::UnboundedReceiver<(RouterInfo, u32)>;
 
 /// A reference to a transport, that can be used to send messages and
 /// timestamps to other routers (if they are reachable via this transport).
@@ -40,15 +40,15 @@ pub struct Handle {
 }
 
 impl Handle {
-    pub fn send(&self, hash: Hash, msg: Message) -> io::Result<()> {
+    pub fn send(&self, peer: RouterInfo, msg: Message) -> io::Result<()> {
         self.message
-            .unbounded_send((hash, msg))
+            .unbounded_send((peer, msg))
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
     }
 
-    pub fn timestamp(&self, hash: Hash, ts: u32) -> io::Result<()> {
+    pub fn timestamp(&self, peer: RouterInfo, ts: u32) -> io::Result<()> {
         self.timestamp
-            .unbounded_send((hash, ts))
+            .unbounded_send((peer, ts))
             .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
     }
 }
@@ -61,7 +61,7 @@ struct Bid {
 }
 
 impl Sink for Bid {
-    type SinkItem = (Hash, Message);
+    type SinkItem = (RouterInfo, Message);
     type SinkError = ();
 
     fn start_send(
@@ -91,7 +91,7 @@ pub struct Engine {
 }
 
 trait Transport {
-    fn bid(&self, hash: &Hash, msg_size: usize) -> Option<Bid>;
+    fn bid(&self, peer: &RouterInfo, msg_size: usize) -> Option<Bid>;
 }
 
 impl Manager {
@@ -120,16 +120,16 @@ impl OutboundMessageHandler for Manager {
     ///
     /// Returns an Err giving back the message if it cannot be sent over any of
     /// our transports.
-    fn send(&self, hash: Hash, msg: Message) -> Result<IoFuture<()>, (Hash, Message)> {
-        match once(self.ntcp.bid(&hash, msg.size()))
-            .chain(once(self.ntcp2.bid(&hash, msg.ntcp2_size())))
+    fn send(&self, peer: RouterInfo, msg: Message) -> Result<IoFuture<()>, (RouterInfo, Message)> {
+        match once(self.ntcp.bid(&peer, msg.size()))
+            .chain(once(self.ntcp2.bid(&peer, msg.ntcp2_size())))
             .filter_map(|b| b)
             .min_by_key(|b| b.bid)
         {
-            Some(bid) => Ok(Box::new(bid.send((hash, msg)).map(|_| ()).map_err(|_| {
+            Some(bid) => Ok(Box::new(bid.send((peer, msg)).map(|_| ()).map_err(|_| {
                 io::Error::new(io::ErrorKind::Other, "Error in transport::Engine")
             }))),
-            None => Err((hash, msg)),
+            None => Err((peer, msg)),
         }
     }
 }
@@ -199,6 +199,7 @@ mod tests {
     use tokio_io::{AsyncRead, AsyncWrite};
 
     use super::*;
+    use data::{Hash, RouterSecretKeys};
 
     pub struct NetworkCable {
         alice_to_bob: Vec<u8>,
@@ -331,12 +332,13 @@ mod tests {
             );
 
             // Send a message
-            handle.send(hash.clone(), msg).unwrap();
+            let ri = RouterInfo::new(RouterSecretKeys::new().rid);
+            handle.send(ri.clone(), msg).unwrap();
 
             // Check it was received
             assert_eq!(
                 (message_rx.poll(), timestamp_rx.poll()),
-                (Ok(Async::Ready(Some((hash, msg2)))), Ok(Async::NotReady))
+                (Ok(Async::Ready(Some((ri, msg2)))), Ok(Async::NotReady))
             );
 
             // Check the queue is empty again
@@ -365,13 +367,13 @@ mod tests {
             );
 
             // Send a message
-            let hash = Hash::from_bytes(&[0; 32]);
-            handle.timestamp(hash.clone(), 42).unwrap();
+            let ri = RouterInfo::new(RouterSecretKeys::new().rid);
+            handle.timestamp(ri.clone(), 42).unwrap();
 
             // Check it was received
             assert_eq!(
                 (message_rx.poll(), timestamp_rx.poll()),
-                (Ok(Async::NotReady), Ok(Async::Ready(Some((hash, 42)))))
+                (Ok(Async::NotReady), Ok(Async::Ready(Some((ri, 42)))))
             );
 
             // Check the queue is empty again
