@@ -582,13 +582,13 @@ fn connect(
 }
 
 impl Transport for Manager {
-    fn bid(&self, hash: &Hash, msg_size: usize) -> Option<Bid> {
+    fn bid(&self, peer: &RouterInfo, msg_size: usize) -> Option<Bid> {
         if msg_size > NTCP2_MTU {
             return None;
         }
 
         Some(Bid {
-            bid: if self.session_manager.have_session(hash) {
+            bid: if self.session_manager.have_session(&peer.router_id.hash()) {
                 10
             } else {
                 40
@@ -621,36 +621,20 @@ impl Stream for Engine {
             ctx.clone(),
             Block::Message,
             Block::DateTime,
-            |ctx, hash| {
-                // Look up the RouterInfo for the peer we need to connect to
-                let lookup = ctx
-                    .netdb
-                    .write()
-                    .unwrap()
-                    .lookup_router_info(Some(ctx.clone()), hash, 10000)
-                    .map_err(|e| {
-                        error!("Failed to look up peer: {}", e);
-                    });
-
+            |ctx, peer| {
                 // Connect to the peer
-                let static_private_key = static_private_key.clone();
-                let own_ri = ctx.ri.read().unwrap().clone();
                 let session_refs = session_refs.clone();
-                let connector = lookup
-                    .and_then(move |peer_ri| {
-                        match connect(&static_private_key, &own_ri, peer_ri, session_refs) {
-                            Ok(f) => Ok(f),
-                            Err(e) => {
-                                error!("{}", e);
-                                Err(())
-                            }
-                        }
-                    }).and_then(|f| {
-                        f.map_err(|e| {
-                            error!("Error while connecting: {}", e);
-                        })
-                    });
-                spawn(connector);
+                match connect(
+                    &static_private_key,
+                    &ctx.ri.read().unwrap(),
+                    peer,
+                    session_refs,
+                ) {
+                    Ok(f) => spawn(f.map_err(|e| {
+                        error!("Error while connecting: {}", e);
+                    })),
+                    Err(e) => error!("{}", e),
+                }
             },
         )? {
             match f {
@@ -749,8 +733,8 @@ mod tests {
     #[test]
     fn session_send() {
         let ctx = mock_context();
+        let ri = ctx.ri.read().unwrap().clone();
         let rid = ctx.keys.rid.clone();
-        let hash = rid.hash();
 
         let cable = NetworkCable::new();
         let alice_net = AliceNet::new(cable.clone());
@@ -761,7 +745,7 @@ mod tests {
         // Run on a task context
         lazy(move || {
             let handle = manager.handle();
-            handle.send(hash.clone(), Message::dummy_data()).unwrap();
+            handle.send(ri.clone(), Message::dummy_data()).unwrap();
 
             // Check it has not yet been received
             let mut bob_net = BobNet::new(cable);
@@ -775,7 +759,7 @@ mod tests {
                     ctx,
                     Block::Message,
                     |_| panic!(),
-                    |_, h| assert_eq!(*h, hash),
+                    |_, peer| assert_eq!(peer, ri),
                 ).unwrap();
 
             // Still not received

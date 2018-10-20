@@ -28,7 +28,11 @@ impl MockCommSystem {
 }
 
 impl OutboundMessageHandler for MockCommSystem {
-    fn send(&self, _hash: Hash, _msg: Message) -> Result<IoFuture<()>, (Hash, Message)> {
+    fn send(
+        &self,
+        _peer: RouterInfo,
+        _msg: Message,
+    ) -> Result<IoFuture<()>, (RouterInfo, Message)> {
         Ok(Box::new(future::ok(())))
     }
 }

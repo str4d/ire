@@ -17,7 +17,7 @@ pub trait OutboundMessageHandler {
     /// Send an I2NP message to a peer.
     ///
     /// Returns an Err giving back the message if it cannot be sent.
-    fn send(&self, hash: Hash, msg: Message) -> Result<IoFuture<()>, (Hash, Message)>;
+    fn send(&self, peer: RouterInfo, msg: Message) -> Result<IoFuture<()>, (RouterInfo, Message)>;
 }
 
 /// Manages the communication subsystem between peers, including connections,

@@ -6,7 +6,7 @@ use std::io;
 use std::sync::{Arc, Mutex};
 
 use super::{Handle, MessageRx, TimestampRx};
-use data::Hash;
+use data::{Hash, RouterInfo};
 use i2np::Message;
 use router::Context;
 
@@ -208,23 +208,25 @@ impl<F> SessionEngine<F> {
     where
         P: Fn(Message) -> F,
         Q: Fn(u32) -> F,
-        R: Fn(Arc<Context>, &Hash),
+        R: Fn(Arc<Context>, RouterInfo),
     {
         // Write timestamps first
         while let Async::Ready(f) = self.outbound_ts.poll().unwrap() {
-            if let Some((hash, ts)) = f {
-                self.state.send(&hash, frame_timestamp(ts), || {
-                    connect_to_peer(ctx.clone(), &hash)
-                });
+            if let Some((peer, ts)) = f {
+                self.state
+                    .send(&peer.router_id.hash(), frame_timestamp(ts), || {
+                        connect_to_peer(ctx.clone(), peer)
+                    });
             }
         }
 
         // Write messages
         while let Async::Ready(f) = self.outbound_msg.poll().unwrap() {
-            if let Some((hash, msg)) = f {
-                self.state.send(&hash, frame_message(msg), || {
-                    connect_to_peer(ctx.clone(), &hash)
-                });
+            if let Some((peer, msg)) = f {
+                self.state
+                    .send(&peer.router_id.hash(), frame_message(msg), || {
+                        connect_to_peer(ctx.clone(), peer)
+                    });
             }
         }
 
