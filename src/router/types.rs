@@ -95,6 +95,9 @@ pub trait NetworkDatabase: Send + Sync {
     /// Returns the number of RouterInfos that this database contains.
     fn known_routers(&self) -> usize;
 
+    /// Returns the closest floodfill router to the given netDb key.
+    fn select_closest_ff(&self, key: &Hash) -> Option<RouterInfo>;
+
     /// Finds the RouterInfo stored at the given key. If a Context is provided,
     /// a remote lookup will be performed if the key is not found locally.
     fn lookup_router_info(

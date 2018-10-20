@@ -270,3 +270,32 @@ pub fn lookup_db_entry<T: Send + 'static>(
         }),
     )
 }
+
+/// Explores the netDb for a given key.
+pub fn explore_netdb(
+    ctx: Arc<Context>,
+    key: Hash,
+    ff: RouterInfo,
+    timeout_ms: u64,
+) -> LookupFuture<(), LookupError> {
+    let from = ctx.ri.read().unwrap().router_id.hash();
+
+    let explorer =
+        iterative_lookup(ctx, key, from, DatabaseLookupType::Exploratory, ff).then(|_| {
+            // No more peers to explore, so we are done
+            debug!("Finished exploratory lookup");
+            Ok(())
+        });
+
+    Box::new(
+        Timeout::new(explorer, Duration::from_millis(timeout_ms)).map_err(|e| {
+            if e.is_inner() {
+                e.into_inner().unwrap()
+            } else if e.is_elapsed() {
+                LookupError::TimedOut
+            } else {
+                LookupError::TimerFailure
+            }
+        }),
+    )
+}

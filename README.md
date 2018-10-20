@@ -42,7 +42,7 @@ and implemented.
   - [x] Reseeding
   - [x] Lookups
   - [x] Expiry
-  - [ ] Exploration
+  - [x] Exploration
   - [ ] Publishing
   - [ ] Floodfill
 - Transports

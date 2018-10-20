@@ -2,10 +2,12 @@
 
 use chrono::offset::Utc;
 use futures::{future, sync::oneshot, Async, Future};
+use rand::{thread_rng, Rng};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
+use tokio_executor::spawn;
 use tokio_timer::{sleep, Delay};
 
 use data::{Hash, LeaseSet, RouterInfo, NET_ID};
@@ -32,12 +34,19 @@ const EXPIRE_LS_INTERVAL: u64 = 60;
 const MINIMUM_ROUTERS: usize = 50;
 /// If we know fewer than this many routers, we won't expire RouterInfos.
 const KEEP_ROUTERS: usize = 150;
+/// Don't explore the network more often than this.
+const EXPLORE_MIN_INTERVAL: u64 = 30;
+/// Explore the network at least this often.
+const EXPLORE_MAX_INTERVAL: u64 = 15 * 60;
+/// Explore quickly if we have fewer than this many routers.
+const EXPLORE_MIN_ROUTERS: usize = 250;
 
 /// Performs network database maintenance operations.
 struct Engine {
     ctx: Arc<Context>,
     expire_ri_timer: Delay,
     expire_ls_timer: Delay,
+    explore_timer: Delay,
 }
 
 impl Engine {
@@ -46,6 +55,7 @@ impl Engine {
             ctx,
             expire_ri_timer: sleep(Duration::from_secs(EXPIRE_RI_INTERVAL)),
             expire_ls_timer: sleep(Duration::from_secs(EXPIRE_LS_INTERVAL)),
+            explore_timer: sleep(Duration::from_secs(0)),
         }
     }
 
@@ -96,6 +106,36 @@ impl Engine {
         Box::new(future::ok(self))
     }
 
+    fn explore(mut self) -> Box<Future<Item = Self, Error = ()> + Send> {
+        if let Ok(Async::Ready(())) = self.explore_timer.poll() {
+            let netdb = self.ctx.netdb.read().unwrap();
+            debug!("Known routers before exploring: {}", netdb.known_routers());
+
+            // Pick a random key to search for
+            let mut key = Hash([0u8; 32]);
+            thread_rng().fill(&mut key.0);
+            debug!("Exploring netDB for RouterInfo with key {}", key);
+            let ff = netdb.select_closest_ff(&key).unwrap();
+
+            // Fire off an exploration job
+            let explore = lookup::explore_netdb(self.ctx.clone(), key, ff, 30 * 1000);
+            spawn(
+                explore
+                    .map(|_| ())
+                    .map_err(|e| error!("Error while exploring: {}", e)),
+            );
+
+            // Reset timer
+            let interval = if netdb.known_routers() < EXPLORE_MIN_ROUTERS {
+                EXPLORE_MIN_INTERVAL
+            } else {
+                EXPLORE_MAX_INTERVAL
+            };
+            self.explore_timer = sleep(Duration::from_secs(interval));
+        }
+        Box::new(future::ok(self))
+    }
+
     fn finish_cycle(self) -> Box<Future<Item = (Self, bool), Error = ()> + Send> {
         trace!("Finished NetDB engine cycle");
         Box::new(
@@ -114,6 +154,7 @@ pub fn netdb_engine(ctx: Arc<Context>) -> Box<Future<Item = (), Error = ()> + Se
             .and_then(|engine| engine.check_reseed())
             .and_then(|engine| engine.expire_router_infos())
             .and_then(|engine| engine.expire_lease_sets())
+            .and_then(|engine| engine.explore())
             .and_then(|engine| engine.finish_cycle())
             .and_then(|(engine, done)| {
                 if done {
@@ -180,6 +221,12 @@ impl LocalNetworkDatabase {
             pending_ls: HashMap::new(),
         }
     }
+}
+
+impl NetworkDatabase for LocalNetworkDatabase {
+    fn known_routers(&self) -> usize {
+        self.ri_ds.len()
+    }
 
     fn select_closest_ff(&self, key: &Hash) -> Option<RouterInfo> {
         let key = create_routing_key(key);
@@ -188,12 +235,6 @@ impl LocalNetworkDatabase {
             .filter(|ri| ri.is_floodfill())
             .min_by_key(|ri| XorMetric::for_hash(&ri.router_id.hash(), &key))
             .cloned()
-    }
-}
-
-impl NetworkDatabase for LocalNetworkDatabase {
-    fn known_routers(&self) -> usize {
-        self.ri_ds.len()
     }
 
     fn lookup_router_info(
