@@ -9,7 +9,7 @@ use tokio_timer::sleep;
 use data::{Hash, LeaseSet, RouterInfo};
 use router::{
     config,
-    types::{NetworkDatabase, NetworkDatabaseError},
+    types::{LookupError, NetworkDatabase, StoreError},
     Context,
 };
 
@@ -111,10 +111,10 @@ impl NetworkDatabase for LocalNetworkDatabase {
         ctx: Option<Arc<Context>>,
         key: &Hash,
         timeout_ms: u64,
-    ) -> Box<Future<Item = RouterInfo, Error = NetworkDatabaseError> + Send + Sync> {
+    ) -> Box<Future<Item = RouterInfo, Error = LookupError> + Send + Sync> {
         match self.ri_ds.get(key) {
             Some(ri) => Box::new(future::ok(ri.clone())),
-            None => Box::new(future::err(NetworkDatabaseError::NotFound)),
+            None => Box::new(future::err(LookupError::NotFound)),
         }
     }
 
@@ -124,10 +124,10 @@ impl NetworkDatabase for LocalNetworkDatabase {
         key: &Hash,
         timeout_ms: u64,
         from_local_dest: Option<Hash>,
-    ) -> Box<Future<Item = LeaseSet, Error = NetworkDatabaseError>> {
+    ) -> Box<Future<Item = LeaseSet, Error = LookupError>> {
         match self.ls_ds.get(key) {
             Some(ls) => Box::new(future::ok(ls.clone())),
-            None => Box::new(future::err(NetworkDatabaseError::NotFound)),
+            None => Box::new(future::err(LookupError::NotFound)),
         }
     }
 
@@ -135,7 +135,7 @@ impl NetworkDatabase for LocalNetworkDatabase {
         &mut self,
         key: Hash,
         ri: RouterInfo,
-    ) -> Result<Option<RouterInfo>, NetworkDatabaseError> {
+    ) -> Result<Option<RouterInfo>, StoreError> {
         debug!(
             "Storing RouterInfo for peer {} at key {}",
             ri.router_id.hash(),
@@ -144,11 +144,7 @@ impl NetworkDatabase for LocalNetworkDatabase {
         Ok(self.ri_ds.insert(key, ri))
     }
 
-    fn store_lease_set(
-        &mut self,
-        key: Hash,
-        ls: LeaseSet,
-    ) -> Result<Option<LeaseSet>, NetworkDatabaseError> {
+    fn store_lease_set(&mut self, key: Hash, ls: LeaseSet) -> Result<Option<LeaseSet>, StoreError> {
         debug!("Storing LeaseSet at key {}", key);
         Ok(self.ls_ds.insert(key, ls))
     }
