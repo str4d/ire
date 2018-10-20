@@ -49,6 +49,7 @@ use tokio_tcp::{TcpListener, TcpStream};
 use tokio_timer::Timeout;
 
 use super::{
+    ntcp::NTCP_STYLE,
     session::{
         self, EngineTx, SessionContext, SessionEngine, SessionManager, SessionRefs, SessionRx,
     },
@@ -584,6 +585,22 @@ fn connect(
 impl Transport for Manager {
     fn bid(&self, peer: &RouterInfo, msg_size: usize) -> Option<Bid> {
         if msg_size > NTCP2_MTU {
+            return None;
+        }
+
+        let filter = |ra: &RouterAddress| {
+            match ra.option(&NTCP2_OPT_V) {
+                Some(v) => if !v.to_csv().contains(&NTCP2_VERSION) {
+                    return false;
+                },
+                None => return false,
+            };
+            ra.option(&NTCP2_OPT_S).is_some() && ra.option(&NTCP2_OPT_I).is_some()
+        };
+
+        if peer.address(&NTCP2_STYLE, filter).is_none()
+            && peer.address(&NTCP_STYLE, filter).is_none()
+        {
             return None;
         }
 

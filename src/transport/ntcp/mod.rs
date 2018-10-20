@@ -330,6 +330,10 @@ impl Transport for Manager {
             return None;
         }
 
+        if peer.address(&NTCP_STYLE, |_| true).is_none() {
+            return None;
+        }
+
         Some(Bid {
             bid: if self.session_manager.have_session(&peer.router_id.hash()) {
                 25
