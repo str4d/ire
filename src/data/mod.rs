@@ -115,6 +115,10 @@ impl I2PDate {
             .unwrap_or_else(|_| Duration::new(0, 0));
         I2PDate(d.as_secs() * 1_000 + u64::from(d.subsec_millis()))
     }
+
+    pub fn to_system_time(&self) -> SystemTime {
+        UNIX_EPOCH + Duration::from_millis(self.0)
+    }
 }
 
 /// A UTF-8-encoded string.
@@ -423,7 +427,7 @@ impl RouterAddress {
 #[derive(Clone, Debug, PartialEq)]
 pub struct RouterInfo {
     pub router_id: RouterIdentity,
-    published: I2PDate,
+    pub published: I2PDate,
     addresses: Vec<RouterAddress>,
     peers: Vec<Hash>,
     options: Mapping,
@@ -465,6 +469,10 @@ impl RouterInfo {
             .filter(|a| a.addr().unwrap().is_ipv4())
             .find(|a| filter(a))
             .map(|a| (*a).clone())
+    }
+
+    pub fn network_id(&self) -> Option<&I2PString> {
+        self.options.0.get(&OPT_NET_ID)
     }
 
     pub fn from_file(path: &str) -> Result<Self, ReadError> {

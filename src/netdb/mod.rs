@@ -3,10 +3,10 @@
 use futures::{future, Future};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use tokio_timer::sleep;
 
-use data::{Hash, LeaseSet, RouterInfo};
+use data::{Hash, LeaseSet, RouterInfo, NET_ID};
 use router::{
     config,
     types::{LookupError, NetworkDatabase, StoreError},
@@ -14,6 +14,9 @@ use router::{
 };
 
 pub mod reseed;
+
+/// Maximum age of a local RouterInfo.
+const ROUTER_INFO_EXPIRATION: u64 = 27 * 60 * 60;
 
 /// Minimum seconds per engine cycle.
 const ENGINE_DOWNTIME: u64 = 10;
@@ -49,7 +52,10 @@ impl Engine {
                 {
                     let mut db = self.ctx.netdb.write().unwrap();
                     for ri in ris {
-                        db.store_router_info(ri.router_id.hash(), ri).unwrap();
+                        let hash = ri.router_id.hash();
+                        if let Err(e) = db.store_router_info(hash.clone(), ri) {
+                            error!("Invalid RouterInfo {} received from reseed: {}", hash, e);
+                        }
                     }
                 }
                 future::ok(self)
@@ -84,6 +90,22 @@ pub fn netdb_engine(ctx: Arc<Context>) -> Box<Future<Item = (), Error = ()> + Se
                 }
             })
     }))
+}
+
+fn router_info_is_current(ri: &RouterInfo) -> Result<(), StoreError> {
+    let published = ri.published.to_system_time();
+    let now = SystemTime::now();
+
+    if published < now - Duration::from_secs(ROUTER_INFO_EXPIRATION) {
+        return Err(StoreError::Expired(now.duration_since(published).unwrap()));
+    }
+
+    // Allow RouterInfos published up to 2 minutes in the future, to handle clock drift.
+    if published > now + Duration::from_secs(2 * 60) {
+        return Err(StoreError::PublishedInFuture);
+    }
+
+    Ok(())
 }
 
 /// A NetworkDatabase that never publishes data to the network.
@@ -136,6 +158,20 @@ impl NetworkDatabase for LocalNetworkDatabase {
         key: Hash,
         ri: RouterInfo,
     ) -> Result<Option<RouterInfo>, StoreError> {
+        // Validate the RouterInfo
+        if key != ri.router_id.hash() {
+            return Err(StoreError::InvalidKey);
+        }
+        ri.verify()?;
+        if ri
+            .network_id()
+            .map(|net_id| *net_id != *NET_ID)
+            .unwrap_or(true)
+        {
+            return Err(StoreError::WrongNetwork);
+        }
+        router_info_is_current(&ri)?;
+
         debug!(
             "Storing RouterInfo for peer {} at key {}",
             ri.router_id.hash(),
@@ -156,7 +192,7 @@ mod tests {
 
     use super::LocalNetworkDatabase;
     use data::{Hash, RouterInfo, RouterSecretKeys};
-    use router::types::NetworkDatabase;
+    use router::types::{NetworkDatabase, StoreError};
 
     #[test]
     fn store_and_retrieve() {
@@ -166,10 +202,15 @@ mod tests {
         let mut ri = RouterInfo::new(rsk.rid);
         ri.sign(&rsk.signing_private_key);
 
-        // TODO: replace fake key with real one
-        let key = Hash([0u8; 32]);
+        let key = ri.router_id.hash();
 
         assert_eq!(netdb.known_routers(), 0);
+
+        // Storing with an invalid key should fail
+        assert_eq!(
+            netdb.store_router_info(Hash([0u8; 32]), ri.clone()),
+            Err(StoreError::InvalidKey)
+        );
 
         // Storing the new RouterInfo should return no data
         assert_eq!(netdb.store_router_info(key.clone(), ri.clone()), Ok(None));

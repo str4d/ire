@@ -3,9 +3,11 @@
 use futures::Future;
 use std::fmt;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio_io::IoFuture;
 
 use super::Context;
+use crypto;
 use data::{Hash, LeaseSet, RouterAddress, RouterInfo};
 use i2np::Message;
 
@@ -49,7 +51,33 @@ impl fmt::Display for LookupError {
 
 /// Network database store errors
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum StoreError {}
+pub enum StoreError {
+    Crypto(crypto::Error),
+    Expired(Duration),
+    InvalidKey,
+    PublishedInFuture,
+    WrongNetwork,
+}
+
+impl From<crypto::Error> for StoreError {
+    fn from(e: crypto::Error) -> Self {
+        StoreError::Crypto(e)
+    }
+}
+
+impl fmt::Display for StoreError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            StoreError::Crypto(e) => e.fmt(f),
+            StoreError::Expired(age) => {
+                format!("Too old (published {} seconds ago)", age.as_secs()).fmt(f)
+            }
+            StoreError::InvalidKey => "Key does not match RouterInfo's RouterIdentity".fmt(f),
+            StoreError::PublishedInFuture => "Published in future".fmt(f),
+            StoreError::WrongNetwork => "Not in our network".fmt(f),
+        }
+    }
+}
 
 /// Defines the mechanism for interacting with I2P's network database.
 pub trait NetworkDatabase: Send + Sync {
