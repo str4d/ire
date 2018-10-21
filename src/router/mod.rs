@@ -1,5 +1,5 @@
 use config::Config;
-use futures::Future;
+use futures::{future::join_all, Future};
 use std::sync::{Arc, RwLock};
 
 use data::{Hash, RouterInfo, RouterSecretKeys};
@@ -66,14 +66,19 @@ impl Router {
     ///
     /// This returns a Future that must be polled in order to drive the Router.
     pub fn start(&mut self) -> impl Future<Item = (), Error = ()> {
-        self.ctx
-            .comms
-            .write()
-            .unwrap()
-            .start(self.ctx.clone())
-            .map_err(|e| {
-                error!("CommSystem engine error: {}", e);
-            }).join(netdb_engine(self.ctx.clone()))
-            .map(|_| ())
+        let components: Vec<Box<Future<Item = (), Error = ()> + Send>> = vec![
+            Box::new(
+                self.ctx
+                    .comms
+                    .write()
+                    .unwrap()
+                    .start(self.ctx.clone())
+                    .map_err(|e| {
+                        error!("CommSystem engine error: {}", e);
+                    }),
+            ),
+            netdb_engine(self.ctx.clone()),
+        ];
+        join_all(components).map(|_| ())
     }
 }
