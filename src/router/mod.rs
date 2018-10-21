@@ -1,3 +1,4 @@
+use config::Config;
 use futures::Future;
 use std::sync::{Arc, RwLock};
 
@@ -52,6 +53,7 @@ pub struct Router {
 }
 
 pub struct Context {
+    pub config: RwLock<Config>,
     pub keys: RouterSecretKeys,
     pub ri: Arc<RwLock<RouterInfo>>,
     pub netdb: Arc<RwLock<types::NetworkDatabase>>,

@@ -3,6 +3,7 @@
 //! Each implementation keeps sufficient internal state as to ensure
 //! self-consistency across its component's API.
 
+use config::Config;
 use futures::future;
 use std::sync::{Arc, RwLock};
 use tokio_io::IoFuture;
@@ -53,6 +54,7 @@ pub fn mock_context() -> Arc<Context> {
     ri.sign(&keys.signing_private_key);
 
     Arc::new(Context {
+        config: RwLock::new(Config::default()),
         keys,
         ri: Arc::new(RwLock::new(ri)),
         netdb: Arc::new(RwLock::new(LocalNetworkDatabase::new())),

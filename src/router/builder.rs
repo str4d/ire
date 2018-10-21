@@ -145,6 +145,7 @@ impl Builder {
 
         Ok(Router {
             ctx: Arc::new(Context {
+                config: RwLock::new(settings),
                 keys,
                 ri: Arc::new(RwLock::new(ri)),
                 netdb,
