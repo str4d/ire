@@ -73,7 +73,7 @@ impl Router {
             .start(self.ctx.clone())
             .map_err(|e| {
                 error!("CommSystem engine error: {}", e);
-            }).join(netdb_engine(self.ctx.netdb.clone()))
+            }).join(netdb_engine(self.ctx.clone()))
             .map(|_| ())
     }
 }
