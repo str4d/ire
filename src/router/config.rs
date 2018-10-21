@@ -1,27 +1,10 @@
-use std::net::SocketAddr;
+pub use config::Config;
 
-pub struct Config {
-    pub(super) router_keyfile: String,
-    pub(super) ri_file: String,
-    pub(super) ntcp_addr: SocketAddr,
-    pub(super) ntcp2_addr: SocketAddr,
-    pub(super) ntcp2_keyfile: String,
-}
+// Router
+pub const ROUTER_KEYFILE: &str = "router.keyfile";
+pub const RI_FILE: &str = "router.infofile";
 
-impl Config {
-    pub fn new(
-        router_keyfile: String,
-        ri_file: String,
-        ntcp_addr: SocketAddr,
-        ntcp2_addr: SocketAddr,
-        ntcp2_keyfile: String,
-    ) -> Self {
-        Config {
-            router_keyfile,
-            ri_file,
-            ntcp_addr,
-            ntcp2_addr,
-            ntcp2_keyfile,
-        }
-    }
-}
+// Transports
+pub const NTCP_LISTEN: &str = "transport.ntcp.listen";
+pub const NTCP2_LISTEN: &str = "transport.ntcp2.listen";
+pub const NTCP2_KEYFILE: &str = "transport.ntcp2.keyfile";

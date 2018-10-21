@@ -12,7 +12,7 @@ use futures::{Future, Stream};
 use ire::{
     data, i2np,
     netdb::reseed::HttpsReseeder,
-    router::{mock::mock_context, Builder, Config},
+    router::{mock::mock_context, Builder},
     transport,
 };
 
@@ -28,6 +28,12 @@ fn inner_main() -> i32 {
         .author("Jack Grigg <str4d@i2pmail.org>")
         .about("The I2P Rust engine")
         .subcommand(
+            SubCommand::with_name("router").arg(
+                Arg::with_name("cfgFile")
+                    .help("Path to the router's TOML config file")
+                    .required(true),
+            ),
+        ).subcommand(
             SubCommand::with_name("cli")
                 .subcommand(
                     SubCommand::with_name("gen").arg(
@@ -35,29 +41,6 @@ fn inner_main() -> i32 {
                             .help("Path to write the router.keys.dat to")
                             .required(true),
                     ),
-                ).subcommand(
-                    SubCommand::with_name("router")
-                        .arg(
-                            Arg::with_name("routerKeys")
-                                .help("Path to the server's router.keys.dat")
-                                .required(true),
-                        ).arg(
-                            Arg::with_name("routerInfo")
-                                .help("Path to write the router.info to")
-                                .required(true),
-                        ).arg(
-                            Arg::with_name("ntcp")
-                                .help("Address:Port to bind NTCP to")
-                                .required(true),
-                        ).arg(
-                            Arg::with_name("ntcp2")
-                                .help("Address:Port to bind NTCP2 to")
-                                .required(true),
-                        ).arg(
-                            Arg::with_name("ntcp2Keys")
-                                .help("Path to the server's NTCP2 keys")
-                                .required(true),
-                        ),
                 ).subcommand(
                     SubCommand::with_name("client")
                         .arg(
@@ -78,9 +61,9 @@ fn inner_main() -> i32 {
         ).get_matches();
 
     match matches.subcommand() {
+        ("router", Some(matches)) => cli_router(matches),
         ("cli", Some(matches)) => match matches.subcommand() {
             ("gen", Some(matches)) => cli_gen(matches),
-            ("router", Some(matches)) => cli_router(matches),
             ("client", Some(matches)) => cli_client(matches),
             ("reseed", Some(_)) => cli_reseed(),
             (&_, _) => panic!("Invalid matches for cli subcommand"),
@@ -96,15 +79,15 @@ fn cli_gen(args: &ArgMatches) -> i32 {
 }
 
 fn cli_router(args: &ArgMatches) -> i32 {
-    let config = Config::new(
-        args.value_of("routerKeys").unwrap().to_owned(),
-        args.value_of("routerInfo").unwrap().to_owned(),
-        args.value_of("ntcp").unwrap().parse().unwrap(),
-        args.value_of("ntcp2").unwrap().parse().unwrap(),
-        args.value_of("ntcp2Keys").unwrap().to_owned(),
-    );
+    let builder = Builder::new();
 
-    let mut r = Builder::from_config(config).unwrap().build().unwrap();
+    let builder = if let Some(cfg_file) = args.value_of("cfgFile") {
+        builder.config_file(cfg_file.to_string())
+    } else {
+        builder
+    };
+
+    let mut r = builder.build().unwrap();
 
     let runner = r.start();
 

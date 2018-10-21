@@ -6,12 +6,11 @@ use i2np::{DatabaseStoreData, Message, MessagePayload};
 use netdb::netdb_engine;
 
 mod builder;
-mod config;
+pub mod config;
 pub mod mock;
 pub mod types;
 
 pub use self::builder::Builder;
-pub use self::config::Config;
 
 pub struct MessageHandler {
     netdb: Arc<RwLock<types::NetworkDatabase>>,
