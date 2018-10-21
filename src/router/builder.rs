@@ -89,6 +89,10 @@ impl Builder {
     /// Build a Router.
     pub fn build(self) -> Result<Router, Error> {
         let mut settings = Config::default();
+
+        // Default config options
+        settings.set_default(config::RESEED_ENABLE, true).unwrap();
+
         if let Some(ref cfg_file) = self.cfg_file {
             settings.merge(File::with_name(&cfg_file)).unwrap();
         }

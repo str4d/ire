@@ -8,6 +8,7 @@ use tokio_timer::sleep;
 
 use data::{Hash, LeaseSet, RouterInfo};
 use router::{
+    config,
     types::{NetworkDatabase, NetworkDatabaseError},
     Context,
 };
@@ -39,7 +40,15 @@ impl Engine {
     }
 
     fn check_reseed(self) -> Box<Future<Item = Self, Error = ()> + Send> {
-        if self.reseeder.is_none()
+        let enabled = self
+            .ctx
+            .config
+            .read()
+            .unwrap()
+            .get_bool(config::RESEED_ENABLE)
+            .unwrap();
+        if enabled
+            && self.reseeder.is_none()
             && self.ctx.netdb.read().unwrap().known_routers() < MINIMUM_ROUTERS
         {
             // Reseed "synchronously" within the engine, as we can't do much without peers
