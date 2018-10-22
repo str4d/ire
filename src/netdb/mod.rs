@@ -23,15 +23,11 @@ const MINIMUM_ROUTERS: usize = 50;
 /// Performs network database maintenance operations.
 struct Engine {
     ctx: Arc<Context>,
-    reseeder: Option<reseed::HttpsReseeder>,
 }
 
 impl Engine {
     fn new(ctx: Arc<Context>) -> Self {
-        Engine {
-            ctx,
-            reseeder: None,
-        }
+        Engine { ctx }
     }
 
     fn start_cycle(self) -> future::FutureResult<Self, ()> {
@@ -47,10 +43,7 @@ impl Engine {
             .unwrap()
             .get_bool(config::RESEED_ENABLE)
             .unwrap();
-        if enabled
-            && self.reseeder.is_none()
-            && self.ctx.netdb.read().unwrap().known_routers() < MINIMUM_ROUTERS
-        {
+        if enabled && self.ctx.netdb.read().unwrap().known_routers() < MINIMUM_ROUTERS {
             // Reseed "synchronously" within the engine, as we can't do much without peers
             Box::new(reseed::HttpsReseeder::new().and_then(|ris| {
                 {
