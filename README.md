@@ -60,20 +60,8 @@ and implemented.
 The binary implements a router, along with a basic client that can be used to
 test the various transports:
 
-1. Create a `router.toml` file containing:
-
-  ```toml
-[router]
-keyfile = "router.keys.dat"
-infofile = "router.info"
-
-[transport.ntcp]
-listen = "127.0.0.1:12345"
-
-[transport.ntcp2]
-listen = "127.0.0.1:12346"
-keyfile = "ntcp2.keys.dat"
-  ```
+1. Create a `router.toml` file and configure the router. See `examples/router.toml` for
+   available configuration options.
 
 2. Run the router:
 

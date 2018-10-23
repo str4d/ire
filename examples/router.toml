@@ -1,0 +1,29 @@
+# Example Ire router configuration
+
+[router]
+# Path to the file where the router's keys should be stored.
+# If unset, the router's keys are ephemeral.
+#keyfile = "router.keys.dat"
+
+# Path to the file where the router's RouterInfo should be written.
+# If unset, the RouterInfo is not written to disk.
+#infofile = "router.info"
+
+[reseed]
+# Control whether the router will reseed if it is low on peers.
+enable = true
+
+# General transport configuration.
+# Individual transports are configured in [transport.NAME] sections.
+[transport]
+
+[transport.ntcp]
+# The address:port on which NTCP should listen.
+listen = "127.0.0.1:12345"
+
+[transport.ntcp2]
+# The address:port on which NTCP2 should listen.
+listen = "127.0.0.1:12346"
+# Where NTCP2 should write its key material.
+keyfile = "ntcp2.keys.dat"
+
