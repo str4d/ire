@@ -156,7 +156,7 @@ mod tests {
 
     #[test]
     fn random_signatures() {
-        for _ in 0..1000 {
+        for _ in 0..200 {
             let sk = DsaPrivateKey::new();
             let vk = DsaPublicKey::from_private(&sk);
 

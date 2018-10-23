@@ -3,7 +3,6 @@
 use futures::{stream::Select, sync::mpsc, Async, Future, Poll, Sink, StartSend, Stream};
 use std::io;
 use std::iter::once;
-use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio_io::IoFuture;
 
@@ -11,6 +10,7 @@ use crypto::dh::DHSessionKeyBuilder;
 use data::{RouterAddress, RouterInfo};
 use i2np::Message;
 use router::{
+    config,
     types::{CommSystem, InboundMessageHandler, OutboundMessageHandler},
     Context,
 };
@@ -95,14 +95,26 @@ trait Transport {
 }
 
 impl Manager {
-    pub fn new(ntcp_addr: SocketAddr, ntcp2_addr: SocketAddr, ntcp2_keyfile: &str) -> Self {
+    pub fn from_config(config: &config::Config) -> Self {
+        let ntcp_addr = config
+            .get_str(config::NTCP_LISTEN)
+            .expect("Must configure an NTCP address")
+            .parse()
+            .unwrap();
+        let ntcp2_addr = config
+            .get_str(config::NTCP2_LISTEN)
+            .expect("Must configure an NTCP2 address")
+            .parse()
+            .unwrap();
+        let ntcp2_keyfile = config.get_str(config::NTCP2_KEYFILE).unwrap();
+
         let (ntcp_manager, ntcp_engine) = ntcp::Manager::new(ntcp_addr);
         let (ntcp2_manager, ntcp2_engine) =
-            match ntcp2::Manager::from_file(ntcp2_addr, ntcp2_keyfile) {
+            match ntcp2::Manager::from_file(ntcp2_addr, &ntcp2_keyfile) {
                 Ok(ret) => ret,
                 Err(_) => {
                     let (ntcp2_manager, ntcp2_engine) = ntcp2::Manager::new(ntcp2_addr);
-                    ntcp2_manager.to_file(ntcp2_keyfile).unwrap();
+                    ntcp2_manager.to_file(&ntcp2_keyfile).unwrap();
                     (ntcp2_manager, ntcp2_engine)
                 }
             };
@@ -194,6 +206,7 @@ impl Future for Engine {
 mod tests {
     use futures::{lazy, Async, Stream};
     use std::io::{self, Read, Write};
+    use std::net::SocketAddr;
     use std::sync::{Arc, Mutex};
     use tempfile::tempdir;
     use tokio_io::{AsyncRead, AsyncWrite};
@@ -391,11 +404,22 @@ mod tests {
     fn manager_addresses() {
         let dir = tempdir().unwrap();
 
-        let ntcp_addr = "127.0.0.1:0".parse().unwrap();
-        let ntcp2_addr = "127.0.0.2:0".parse().unwrap();
+        let ntcp_addr: SocketAddr = "127.0.0.1:0".parse().unwrap();
+        let ntcp2_addr: SocketAddr = "127.0.0.2:0".parse().unwrap();
         let ntcp2_keyfile = dir.path().join("test.ntcp2.keys.dat");
 
-        let manager = Manager::new(ntcp_addr, ntcp2_addr, ntcp2_keyfile.to_str().unwrap());
+        let mut config = config::Config::default();
+        config
+            .set(config::NTCP_LISTEN, ntcp_addr.to_string())
+            .unwrap();
+        config
+            .set(config::NTCP2_LISTEN, ntcp2_addr.to_string())
+            .unwrap();
+        config
+            .set(config::NTCP2_KEYFILE, ntcp2_keyfile.to_str())
+            .unwrap();
+
+        let manager = Manager::from_config(&config);
         let addrs = manager.addresses();
 
         assert_eq!(addrs[0].addr(), Some(ntcp_addr));

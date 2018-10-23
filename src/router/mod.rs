@@ -1,4 +1,5 @@
-use futures::Future;
+use config::Config;
+use futures::{future::join_all, Future};
 use std::sync::{Arc, RwLock};
 
 use data::{Hash, RouterInfo, RouterSecretKeys};
@@ -6,12 +7,11 @@ use i2np::{DatabaseStoreData, Message, MessagePayload};
 use netdb::netdb_engine;
 
 mod builder;
-mod config;
+pub mod config;
 pub mod mock;
 pub mod types;
 
 pub use self::builder::Builder;
-pub use self::config::Config;
 
 pub struct MessageHandler {
     netdb: Arc<RwLock<types::NetworkDatabase>>,
@@ -53,6 +53,7 @@ pub struct Router {
 }
 
 pub struct Context {
+    pub config: RwLock<Config>,
     pub keys: RouterSecretKeys,
     pub ri: Arc<RwLock<RouterInfo>>,
     pub netdb: Arc<RwLock<types::NetworkDatabase>>,
@@ -65,14 +66,19 @@ impl Router {
     ///
     /// This returns a Future that must be polled in order to drive the Router.
     pub fn start(&mut self) -> impl Future<Item = (), Error = ()> {
-        self.ctx
-            .comms
-            .write()
-            .unwrap()
-            .start(self.ctx.clone())
-            .map_err(|e| {
-                error!("CommSystem engine error: {}", e);
-            }).join(netdb_engine(self.ctx.netdb.clone()))
-            .map(|_| ())
+        let components: Vec<Box<Future<Item = (), Error = ()> + Send>> = vec![
+            Box::new(
+                self.ctx
+                    .comms
+                    .write()
+                    .unwrap()
+                    .start(self.ctx.clone())
+                    .map_err(|e| {
+                        error!("CommSystem engine error: {}", e);
+                    }),
+            ),
+            netdb_engine(self.ctx.clone()),
+        ];
+        join_all(components).map(|_| ())
     }
 }

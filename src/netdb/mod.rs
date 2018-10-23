@@ -2,12 +2,13 @@
 
 use futures::{future, Future};
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio_timer::sleep;
 
 use data::{Hash, LeaseSet, RouterInfo};
 use router::{
+    config,
     types::{NetworkDatabase, NetworkDatabaseError},
     Context,
 };
@@ -21,13 +22,12 @@ const MINIMUM_ROUTERS: usize = 50;
 
 /// Performs network database maintenance operations.
 struct Engine {
-    db: Arc<RwLock<NetworkDatabase>>,
-    reseeder: Option<reseed::HttpsReseeder>,
+    ctx: Arc<Context>,
 }
 
 impl Engine {
-    fn new(db: Arc<RwLock<NetworkDatabase>>) -> Self {
-        Engine { db, reseeder: None }
+    fn new(ctx: Arc<Context>) -> Self {
+        Engine { ctx }
     }
 
     fn start_cycle(self) -> future::FutureResult<Self, ()> {
@@ -36,11 +36,18 @@ impl Engine {
     }
 
     fn check_reseed(self) -> Box<Future<Item = Self, Error = ()> + Send> {
-        if self.reseeder.is_none() && self.db.read().unwrap().known_routers() < MINIMUM_ROUTERS {
+        let enabled = self
+            .ctx
+            .config
+            .read()
+            .unwrap()
+            .get_bool(config::RESEED_ENABLE)
+            .unwrap();
+        if enabled && self.ctx.netdb.read().unwrap().known_routers() < MINIMUM_ROUTERS {
             // Reseed "synchronously" within the engine, as we can't do much without peers
             Box::new(reseed::HttpsReseeder::new().and_then(|ris| {
                 {
-                    let mut db = self.db.write().unwrap();
+                    let mut db = self.ctx.netdb.write().unwrap();
                     for ri in ris {
                         db.store_router_info(ri.router_id.hash(), ri).unwrap();
                     }
@@ -63,8 +70,8 @@ impl Engine {
     }
 }
 
-pub fn netdb_engine(db: Arc<RwLock<NetworkDatabase>>) -> Box<Future<Item = (), Error = ()> + Send> {
-    Box::new(future::loop_fn(Engine::new(db), |engine| {
+pub fn netdb_engine(ctx: Arc<Context>) -> Box<Future<Item = (), Error = ()> + Send> {
+    Box::new(future::loop_fn(Engine::new(ctx), |engine| {
         engine
             .start_cycle()
             .and_then(|engine| engine.check_reseed())
