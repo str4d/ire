@@ -82,7 +82,7 @@ impl DatabaseStore {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum DatabaseLookupType {
     Any,
     LeaseSet,
@@ -102,11 +102,10 @@ struct DatabaseLookupFlags {
 pub struct DatabaseLookup {
     key: Hash,
     from: Hash,
-    flags: DatabaseLookupFlags,
+    lookup_type: DatabaseLookupType,
     reply_tid: Option<TunnelId>,
     excluded_peers: Vec<Hash>,
-    reply_key: Option<SessionKey>,
-    tags: Option<Vec<SessionTag>>,
+    reply_enc: Option<(SessionKey, Vec<SessionTag>)>,
 }
 
 /// The response to a failed DatabaseLookup message, containing a list of router
