@@ -6,6 +6,7 @@ pub const RI_FILE: &str = "router.infofile";
 
 // Reseeding
 pub const RESEED_ENABLE: &str = "reseed.enable";
+pub const RESEED_FLOODFILL: &str = "reseed.floodfill";
 
 // Transports
 pub const NTCP_LISTEN: &str = "transport.ntcp.listen";

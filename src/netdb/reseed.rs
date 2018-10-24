@@ -1,4 +1,4 @@
-use futures::{Async, Future, Poll};
+use futures::{future, Async, Future, Poll};
 use native_tls::{Certificate, TlsConnector};
 use rand::{thread_rng, Rng};
 use std::collections::HashMap;
@@ -10,7 +10,9 @@ use tokio_tcp::TcpStream;
 use tokio_tls;
 
 use crypto::{OfflineSigningPublicKey, SigType};
+use data::{Hash, RouterInfo};
 use file::{Su3Content, Su3File};
+use i2np::{DatabaseLookup, DatabaseLookupType};
 use router::Context;
 
 // newest first, please add new ones at the top
@@ -215,4 +217,41 @@ impl Future for HttpsReseeder {
             }
         }
     }
+}
+
+/// Fetch RouterInfos from a specified floodfill.
+///
+/// We send DatabaseLookup messages for random keys with both RouterInfo and
+/// exploratory lookup types:
+/// - The RouterInfo lookups will result either in DatabaseStore messages (if we
+///   are lucky), or DatabaseSearchReply messages containing router hashes that
+///   with high probability are for floodfills.
+/// - The exploratory lookups will result in DatabaseSearchReply messages that
+///   are guaranteed to only contain router hashes for non-floodfill routers.
+///
+/// The DatabaseSearchReply messages then trigger lookups of the corresponding
+/// RouterInfos from the same specified floodfill.
+pub fn reseed_from_floodfill(
+    ctx: Arc<Context>,
+    ff: RouterInfo,
+) -> Result<impl Future<Item = (), Error = ()>, ()> {
+    let mut key = Hash([0u8; 32]);
+    let from = ctx.keys.rid.hash();
+
+    Ok(future::join_all(
+        (0..20)
+            .map(|_| DatabaseLookupType::RouterInfo)
+            .chain((0..40).map(|_| DatabaseLookupType::Exploratory))
+            .map(move |lookup_type| {
+                // Pick a random key to search for
+                thread_rng().fill(&mut key.0);
+                let dlm =
+                    DatabaseLookup::create_msg(key.clone(), from.clone(), lookup_type, vec![]);
+                ctx.comms
+                    .read()
+                    .unwrap()
+                    .send(ff.clone(), dlm)
+                    .map_err(|_| ())
+            }),
+    ).map(|_| ()))
 }

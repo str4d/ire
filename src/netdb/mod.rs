@@ -55,16 +55,56 @@ impl Engine {
     }
 
     fn check_reseed(self) -> Box<Future<Item = Self, Error = ()> + Send> {
-        let enabled = self
-            .ctx
-            .config
-            .read()
-            .unwrap()
-            .get_bool(config::RESEED_ENABLE)
-            .unwrap();
+        let (enabled, floodfill) = {
+            let cfg = self.ctx.config.read().unwrap();
+            (
+                cfg.get_bool(config::RESEED_ENABLE).unwrap(),
+                cfg.get_str(config::RESEED_FLOODFILL),
+            )
+        };
+
         if enabled && self.ctx.netdb.read().unwrap().known_routers() < MINIMUM_ROUTERS {
             // Reseed "synchronously" within the engine, as we can't do much without peers
-            Box::new(reseed::HttpsReseeder::new(self.ctx.clone()).and_then(|()| future::ok(self)))
+            if let Ok(ff) = floodfill {
+                match RouterInfo::from_file(&ff) {
+                    Ok(ri) => if ri.is_floodfill() {
+                        let store_res = self
+                            .ctx
+                            .netdb
+                            .write()
+                            .unwrap()
+                            .store_router_info(ri.router_id.hash(), ri.clone());
+                        match store_res {
+                            Ok(_) => match reseed::reseed_from_floodfill(self.ctx.clone(), ri) {
+                                Ok(f) => Box::new(f.and_then(|_| future::ok(self))),
+                                Err(_) => Box::new(future::err(())),
+                            },
+                            Err(e) => {
+                                error!("Invalid RouterInfo: {}", e);
+                                Box::new(future::err(()))
+                            }
+                        }
+                    } else {
+                        error!(
+                            "{} not configured with a floodfill RouterInfo",
+                            config::RESEED_FLOODFILL
+                        );
+                        Box::new(future::err(()))
+                    },
+                    Err(e) => {
+                        error!(
+                            "Failed to read RouterInfo from {}: {}",
+                            config::RESEED_FLOODFILL,
+                            e
+                        );
+                        Box::new(future::err(()))
+                    }
+                }
+            } else {
+                Box::new(
+                    reseed::HttpsReseeder::new(self.ctx.clone()).and_then(|()| future::ok(self)),
+                )
+            }
         } else {
             Box::new(future::ok(self))
         }

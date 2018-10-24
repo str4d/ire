@@ -13,6 +13,11 @@
 # Control whether the router will reseed if it is low on peers.
 enable = true
 
+# Reseed directly from a single floodfill router.
+# If configured, reseed servers will not be queried.
+# The provided RouterInfo must have the floodfill capability set.
+#floodfill = "path/to/floodfill.router.info"
+
 # General transport configuration.
 # Individual transports are configured in [transport.NAME] sections.
 [transport]
