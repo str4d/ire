@@ -66,6 +66,8 @@ impl Router {
     ///
     /// This returns a Future that must be polled in order to drive the Router.
     pub fn start(&mut self) -> impl Future<Item = (), Error = ()> {
+        info!("Our router hash is {}", self.ctx.keys.rid.hash());
+
         let components: Vec<Box<Future<Item = (), Error = ()> + Send>> = vec![
             Box::new(
                 self.ctx

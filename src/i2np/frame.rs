@@ -260,16 +260,18 @@ named!(
         flags:          database_lookup_flags >>
         reply_tid:      cond!(flags.delivery, call!(tunnel_id)) >>
         excluded_peers: length_count!(be_u16, hash) >>
-        reply_key:      cond!(flags.encryption, call!(session_key)) >>
-        tags:           cond!(flags.encryption, length_count!(be_u8, session_tag)) >>
+        reply_enc:      cond!(flags.encryption, do_parse!(
+            reply_key:  call!(session_key) >>
+            tags:       length_count!(be_u8, session_tag) >>
+            ((reply_key, tags))
+        )) >>
         (MessagePayload::DatabaseLookup(DatabaseLookup {
             key,
             from,
-            flags,
+            lookup_type: flags.lookup_type,
             reply_tid,
             excluded_peers,
-            reply_key,
-            tags,
+            reply_enc,
         }))
     )
 );
@@ -278,27 +280,29 @@ fn gen_database_lookup<'a>(
     input: (&'a mut [u8], usize),
     dl: &DatabaseLookup,
 ) -> Result<(&'a mut [u8], usize), GenError> {
+    let flags = DatabaseLookupFlags {
+        delivery: dl.reply_tid.is_some(),
+        encryption: dl.reply_enc.is_some(),
+        lookup_type: dl.lookup_type,
+    };
     #[cfg_attr(rustfmt, rustfmt_skip)]
     do_gen!(
         input,
         gen_hash(&dl.key) >>
         gen_hash(&dl.from) >>
-        gen_database_lookup_flags(&dl.flags) >>
+        gen_database_lookup_flags(&flags) >>
         gen_cond!(
-            dl.flags.delivery,
+            flags.delivery,
             do_gen!(gen_tunnel_id(dl.reply_tid.as_ref().unwrap()))
         ) >>
         gen_be_u16!(dl.excluded_peers.len() as u16) >>
         gen_many!(&dl.excluded_peers, gen_hash) >>
         gen_cond!(
-            dl.flags.encryption,
-            do_gen!(gen_session_key(dl.reply_key.as_ref().unwrap()))
-        ) >>
-        gen_cond!(
-            dl.flags.encryption,
+            flags.encryption,
             do_gen!(
-                gen_be_u8!(dl.tags.as_ref().unwrap().len() as u8) >>
-                gen_many!(dl.tags.as_ref().unwrap(), gen_session_tag)
+                gen_session_key(&dl.reply_enc.as_ref().unwrap().0) >>
+                gen_be_u8!(dl.reply_enc.as_ref().unwrap().1.len() as u8) >>
+                gen_many!(&dl.reply_enc.as_ref().unwrap().1, gen_session_tag)
             )
         )
     )
