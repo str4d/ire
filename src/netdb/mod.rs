@@ -172,11 +172,7 @@ impl NetworkDatabase for LocalNetworkDatabase {
         }
         router_info_is_current(&ri)?;
 
-        debug!(
-            "Storing RouterInfo for peer {} at key {}",
-            ri.router_id.hash(),
-            key
-        );
+        debug!("Storing RouterInfo at key {}", key);
         Ok(self.ri_ds.insert(key, ri))
     }
 
