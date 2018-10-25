@@ -86,6 +86,12 @@ impl DatabaseStore {
     }
 }
 
+impl fmt::Display for DatabaseStore {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        format!("DatabaseStore\n key: {}\ntype: {}", self.key, self.ds_type).fmt(f)
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum DatabaseLookupType {
     Any,
@@ -112,6 +118,24 @@ pub struct DatabaseLookup {
     reply_enc: Option<(SessionKey, Vec<SessionTag>)>,
 }
 
+impl fmt::Display for DatabaseLookup {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        format!(
+            "DatabaseLookup\n- key: {}\n- type: {:?}\n- excluded peers: [\n{}\n  ]",
+            self.key,
+            self.lookup_type,
+            self.excluded_peers
+                .iter()
+                .map(|peer| format!("    {}", peer))
+                .fold(String::new(), |acc, peer| if acc.is_empty() {
+                    peer
+                } else {
+                    acc + &"\n" + &peer
+                })
+        ).fmt(f)
+    }
+}
+
 /// The response to a failed DatabaseLookup message, containing a list of router
 /// hashes closest to the requested key.
 pub struct DatabaseSearchReply {
@@ -120,12 +144,39 @@ pub struct DatabaseSearchReply {
     from: Hash,
 }
 
+impl fmt::Display for DatabaseSearchReply {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        format!(
+            "DatabaseSearchReply\n- key: {}\n- peers: [\n{}\n  ]\n- from: {}",
+            self.key,
+            self.peers.iter().map(|peer| format!("    {}", peer)).fold(
+                String::new(),
+                |acc, peer| if acc.is_empty() {
+                    peer
+                } else {
+                    acc + &"\n" + &peer
+                }
+            ),
+            self.from
+        ).fmt(f)
+    }
+}
+
 /// A simple message acknowledgment. Generally created by the message originator,
 /// and wrapped in a Garlic message with the message itself, to be returned by
 /// the destination.
 pub struct DeliveryStatus {
     msg_id: u32,
     time_stamp: I2PDate,
+}
+
+impl fmt::Display for DeliveryStatus {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        format!(
+            "DeliveryStatus\n- mid: {}\n- ts: {}",
+            self.msg_id, self.time_stamp
+        ).fmt(f)
+    }
 }
 
 pub struct GarlicCloveDeliveryInstructions {
@@ -227,11 +278,45 @@ impl fmt::Debug for MessagePayload {
     }
 }
 
+impl fmt::Display for MessagePayload {
+    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            MessagePayload::DatabaseStore(ref ds) => ds.fmt(formatter),
+            MessagePayload::DatabaseLookup(ref dl) => dl.fmt(formatter),
+            MessagePayload::DatabaseSearchReply(ref dsr) => dsr.fmt(formatter),
+            MessagePayload::DeliveryStatus(ref ds) => ds.fmt(formatter),
+            MessagePayload::Garlic(_) => "Garlic".fmt(formatter),
+            MessagePayload::TunnelData(ref td) => {
+                format!("TunnelData (tid: {})", td.tid).fmt(formatter)
+            }
+            MessagePayload::TunnelGateway(ref tg) => {
+                format!("TunnelGateway (tid: {})", tg.tid).fmt(formatter)
+            }
+            MessagePayload::Data(_) => "Data".fmt(formatter),
+            MessagePayload::TunnelBuild(_) => "TunnelBuild".fmt(formatter),
+            MessagePayload::TunnelBuildReply(_) => "TunnelBuildReply".fmt(formatter),
+            MessagePayload::VariableTunnelBuild(_) => "VariableTunnelBuild".fmt(formatter),
+            MessagePayload::VariableTunnelBuildReply(_) => {
+                "VariableTunnelBuildReply".fmt(formatter)
+            }
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct Message {
     pub(crate) id: u32,
     pub(crate) expiration: I2PDate,
     pub(crate) payload: MessagePayload,
+}
+
+impl fmt::Display for Message {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        format!(
+            "Message ID: {}\nExpiration: {}\nPayload: {}",
+            self.id, self.expiration, self.payload
+        ).fmt(f)
+    }
 }
 
 impl PartialEq for Message {

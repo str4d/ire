@@ -18,6 +18,7 @@ extern crate aes;
 extern crate block_modes;
 extern crate byteorder;
 extern crate bytes;
+extern crate chrono;
 extern crate config;
 extern crate cookie_factory;
 extern crate data_encoding;

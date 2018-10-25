@@ -2,6 +2,7 @@
 //!
 //! [Common structures specification](https://geti2p.net/spec/common-structures)
 
+use chrono::{DateTime, Utc};
 use cookie_factory::GenError;
 use nom::{self, Needed};
 use rand::{OsRng, Rng};
@@ -121,6 +122,12 @@ impl I2PDate {
     }
 }
 
+impl fmt::Display for I2PDate {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        DateTime::<Utc>::from(self.to_system_time()).fmt(f)
+    }
+}
+
 /// A UTF-8-encoded string.
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct I2PString(pub String);
@@ -161,6 +168,12 @@ impl SessionTag {
 /// special cases.
 #[derive(Clone, Copy, Debug)]
 pub struct TunnelId(pub u32);
+
+impl fmt::Display for TunnelId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
 
 /// A key certificate provides a mechanism to indicate the type of the PublicKey
 /// and SigningPublicKey in the Destination or RouterIdentity, and to package
