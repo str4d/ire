@@ -10,8 +10,10 @@
 
 use cookie_factory::GenError;
 use nom::IResult;
+use rand::{thread_rng, Rng};
 use std::fmt;
 use std::iter::repeat;
+use std::time::{Duration, SystemTime};
 
 use crypto::SessionKey;
 use data::{Certificate, Hash, I2PDate, LeaseSet, RouterInfo, SessionTag, TunnelId};
@@ -19,6 +21,8 @@ use data::{Certificate, Hash, I2PDate, LeaseSet, RouterInfo, SessionTag, TunnelI
 #[allow(double_parens)]
 #[allow(needless_pass_by_value)]
 pub(crate) mod frame;
+
+const MESSAGE_EXPIRATION_MS: u64 = 60 * 1000;
 
 //
 // Common structures
@@ -262,10 +266,11 @@ macro_rules! measure_size {
 
 impl Message {
     pub fn from_payload(payload: MessagePayload) -> Self {
-        // TODO Random id, correct expiration
         Message {
-            id: 0,
-            expiration: I2PDate(0x123_4567_87c0),
+            id: thread_rng().gen(),
+            expiration: I2PDate::from_system_time(
+                SystemTime::now() + Duration::from_millis(MESSAGE_EXPIRATION_MS),
+            ),
             payload,
         }
     }
