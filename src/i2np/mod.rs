@@ -119,13 +119,18 @@ pub struct DatabaseLookup {
 }
 
 impl DatabaseLookup {
-    pub fn create_msg(key: Hash, from: Hash, lookup_type: DatabaseLookupType) -> Message {
+    pub fn create_msg(
+        key: Hash,
+        from: Hash,
+        lookup_type: DatabaseLookupType,
+        excluded_peers: Vec<Hash>,
+    ) -> Message {
         Message::from_payload(MessagePayload::DatabaseLookup(DatabaseLookup {
             key,
             from,
             lookup_type,
             reply_tid: None,
-            excluded_peers: vec![],
+            excluded_peers,
             reply_enc: None,
         }))
     }
@@ -152,8 +157,8 @@ impl fmt::Display for DatabaseLookup {
 /// The response to a failed DatabaseLookup message, containing a list of router
 /// hashes closest to the requested key.
 pub struct DatabaseSearchReply {
-    key: Hash,
-    peers: Vec<Hash>,
+    pub key: Hash,
+    pub peers: Vec<Hash>,
     from: Hash,
 }
 

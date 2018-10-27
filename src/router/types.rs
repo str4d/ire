@@ -1,6 +1,6 @@
 //! The traits for the various router components.
 
-use futures::Future;
+use futures::{sync::oneshot, Future};
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
@@ -9,9 +9,11 @@ use tokio_io::IoFuture;
 use super::Context;
 use crypto;
 use data::{Hash, LeaseSet, RouterAddress, RouterInfo};
-use i2np::Message;
+use i2np::{DatabaseSearchReply, Message};
 
 pub trait InboundMessageHandler: Send + Sync {
+    fn register_lookup(&self, key: Hash, tx: oneshot::Sender<DatabaseSearchReply>);
+
     fn handle(&self, from: Hash, msg: Message);
 }
 
@@ -97,6 +99,7 @@ pub trait NetworkDatabase: Send + Sync {
         ctx: Option<Arc<Context>>,
         key: &Hash,
         timeout_ms: u64,
+        from_peer: Option<RouterInfo>,
     ) -> Box<Future<Item = RouterInfo, Error = LookupError> + Send>;
 
     /// Finds the LeaseSet stored at the given key. If not known locally, and a

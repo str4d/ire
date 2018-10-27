@@ -1,9 +1,10 @@
 use config::Config;
-use futures::{future::join_all, Future};
-use std::sync::{Arc, RwLock};
+use futures::{future::join_all, sync::oneshot, Future};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, RwLock};
 
 use data::{Hash, RouterInfo, RouterSecretKeys};
-use i2np::{DatabaseStoreData, Message, MessagePayload};
+use i2np::{DatabaseSearchReply, DatabaseStoreData, Message, MessagePayload};
 use netdb::netdb_engine;
 
 mod builder;
@@ -13,17 +14,27 @@ pub mod types;
 
 pub use self::builder::Builder;
 
+type PendingLookups = HashMap<Hash, oneshot::Sender<DatabaseSearchReply>>;
+
 pub struct MessageHandler {
     netdb: Arc<RwLock<types::NetworkDatabase>>,
+    pending_lookups: Mutex<PendingLookups>,
 }
 
 impl MessageHandler {
     pub fn new(netdb: Arc<RwLock<types::NetworkDatabase>>) -> Self {
-        MessageHandler { netdb }
+        MessageHandler {
+            netdb,
+            pending_lookups: Mutex::new(HashMap::new()),
+        }
     }
 }
 
 impl types::InboundMessageHandler for MessageHandler {
+    fn register_lookup(&self, key: Hash, tx: oneshot::Sender<DatabaseSearchReply>) {
+        self.pending_lookups.lock().unwrap().insert(key, tx);
+    }
+
     fn handle(&self, from: Hash, msg: Message) {
         match msg.payload {
             MessagePayload::DatabaseStore(ds) => match ds.data {
@@ -42,6 +53,18 @@ impl types::InboundMessageHandler for MessageHandler {
                         .expect("Failed to store LeaseSet");
                 }
             },
+            MessagePayload::DatabaseSearchReply(dsr) => {
+                if let Some(pending) = self.pending_lookups.lock().unwrap().remove(&dsr.key) {
+                    if let Err(dsr) = pending.send(dsr) {
+                        warn!(
+                            "Lookup task timed out waiting for DatabaseSearchReply on {}",
+                            dsr.key
+                        );
+                    }
+                } else {
+                    debug!("Received from {} with no pending lookup:\n{}", from, dsr)
+                }
+            }
             _ => debug!("Received message from {}:\n{}", from, msg),
         }
     }

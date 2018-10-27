@@ -164,6 +164,7 @@ impl NetworkDatabase for LocalNetworkDatabase {
         ctx: Option<Arc<Context>>,
         key: &Hash,
         timeout_ms: u64,
+        from_peer: Option<RouterInfo>,
     ) -> Box<Future<Item = RouterInfo, Error = LookupError> + Send> {
         // First look for it locally, either available or pending
         let local: Option<Box<Future<Item = RouterInfo, Error = LookupError> + Send>> =
@@ -184,7 +185,7 @@ impl NetworkDatabase for LocalNetworkDatabase {
             Some(f) => f,
             None => if let Some(ctx) = ctx {
                 // TODO: Handle case where we don't know any floodfills
-                match self.select_closest_ff(key) {
+                match from_peer.or_else(|| self.select_closest_ff(key)) {
                     Some(ff) => lookup::lookup_db_entry(
                         ctx,
                         key.clone(),
@@ -340,7 +341,7 @@ mod tests {
         assert_eq!(netdb.store_router_info(key.clone(), ri.clone()), Ok(None));
         assert_eq!(netdb.known_routers(), 1);
 
-        match netdb.lookup_router_info(None, &key, 100).poll() {
+        match netdb.lookup_router_info(None, &key, 100, None).poll() {
             Ok(Async::Ready(entry)) => assert_eq!(entry, ri),
             Ok(_) => panic!("Local lookup should complete immediately"),
             Err(e) => panic!("Unexpected error: {}", e),
