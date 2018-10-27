@@ -152,9 +152,9 @@ impl fmt::Display for DatabaseLookup {
 /// The response to a failed DatabaseLookup message, containing a list of router
 /// hashes closest to the requested key.
 pub struct DatabaseSearchReply {
-    key: Hash,
-    peers: Vec<Hash>,
-    from: Hash,
+    pub key: Hash,
+    pub peers: Vec<Hash>,
+    pub from: Hash,
 }
 
 impl fmt::Display for DatabaseSearchReply {
