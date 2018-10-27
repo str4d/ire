@@ -162,10 +162,7 @@ fn cli_client(args: &ArgMatches) -> i32 {
 }
 
 fn cli_reseed() -> i32 {
-    let reseeder = HttpsReseeder::new().and_then(|ri| {
-        println!("Received {} RouterInfos", ri.len());
-        Ok(())
-    });
+    let reseeder = HttpsReseeder::new(mock_context());
     tokio::run(reseeder);
     0
 }

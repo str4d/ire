@@ -48,18 +48,7 @@ impl Engine {
             .unwrap();
         if enabled && self.ctx.netdb.read().unwrap().known_routers() < MINIMUM_ROUTERS {
             // Reseed "synchronously" within the engine, as we can't do much without peers
-            Box::new(reseed::HttpsReseeder::new().and_then(|ris| {
-                {
-                    let mut db = self.ctx.netdb.write().unwrap();
-                    for ri in ris {
-                        let hash = ri.router_id.hash();
-                        if let Err(e) = db.store_router_info(hash.clone(), ri) {
-                            error!("Invalid RouterInfo {} received from reseed: {}", hash, e);
-                        }
-                    }
-                }
-                future::ok(self)
-            }))
+            Box::new(reseed::HttpsReseeder::new(self.ctx.clone()).and_then(|()| future::ok(self)))
         } else {
             Box::new(future::ok(self))
         }
