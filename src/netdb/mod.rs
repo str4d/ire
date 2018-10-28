@@ -3,17 +3,20 @@
 use futures::{future, Future};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 use tokio_timer::sleep;
 
-use data::{Hash, LeaseSet, RouterInfo};
+use data::{Hash, LeaseSet, RouterInfo, NET_ID};
 use router::{
     config,
-    types::{NetworkDatabase, NetworkDatabaseError},
+    types::{LookupError, NetworkDatabase, StoreError},
     Context,
 };
 
 pub mod reseed;
+
+/// Maximum age of a local RouterInfo.
+const ROUTER_INFO_EXPIRATION: u64 = 27 * 60 * 60;
 
 /// Minimum seconds per engine cycle.
 const ENGINE_DOWNTIME: u64 = 10;
@@ -45,15 +48,7 @@ impl Engine {
             .unwrap();
         if enabled && self.ctx.netdb.read().unwrap().known_routers() < MINIMUM_ROUTERS {
             // Reseed "synchronously" within the engine, as we can't do much without peers
-            Box::new(reseed::HttpsReseeder::new().and_then(|ris| {
-                {
-                    let mut db = self.ctx.netdb.write().unwrap();
-                    for ri in ris {
-                        db.store_router_info(ri.router_id.hash(), ri).unwrap();
-                    }
-                }
-                future::ok(self)
-            }))
+            Box::new(reseed::HttpsReseeder::new(self.ctx.clone()).and_then(|()| future::ok(self)))
         } else {
             Box::new(future::ok(self))
         }
@@ -86,6 +81,22 @@ pub fn netdb_engine(ctx: Arc<Context>) -> Box<Future<Item = (), Error = ()> + Se
     }))
 }
 
+fn router_info_is_current(ri: &RouterInfo) -> Result<(), StoreError> {
+    let published = ri.published.to_system_time();
+    let now = SystemTime::now();
+
+    if published < now - Duration::from_secs(ROUTER_INFO_EXPIRATION) {
+        return Err(StoreError::Expired(now.duration_since(published).unwrap()));
+    }
+
+    // Allow RouterInfos published up to 2 minutes in the future, to handle clock drift.
+    if published > now + Duration::from_secs(2 * 60) {
+        return Err(StoreError::PublishedInFuture);
+    }
+
+    Ok(())
+}
+
 /// A NetworkDatabase that never publishes data to the network.
 pub struct LocalNetworkDatabase {
     ri_ds: HashMap<Hash, RouterInfo>,
@@ -111,10 +122,10 @@ impl NetworkDatabase for LocalNetworkDatabase {
         ctx: Option<Arc<Context>>,
         key: &Hash,
         timeout_ms: u64,
-    ) -> Box<Future<Item = RouterInfo, Error = NetworkDatabaseError> + Send + Sync> {
+    ) -> Box<Future<Item = RouterInfo, Error = LookupError> + Send + Sync> {
         match self.ri_ds.get(key) {
             Some(ri) => Box::new(future::ok(ri.clone())),
-            None => Box::new(future::err(NetworkDatabaseError::NotFound)),
+            None => Box::new(future::err(LookupError::NotFound)),
         }
     }
 
@@ -124,10 +135,10 @@ impl NetworkDatabase for LocalNetworkDatabase {
         key: &Hash,
         timeout_ms: u64,
         from_local_dest: Option<Hash>,
-    ) -> Box<Future<Item = LeaseSet, Error = NetworkDatabaseError>> {
+    ) -> Box<Future<Item = LeaseSet, Error = LookupError>> {
         match self.ls_ds.get(key) {
             Some(ls) => Box::new(future::ok(ls.clone())),
-            None => Box::new(future::err(NetworkDatabaseError::NotFound)),
+            None => Box::new(future::err(LookupError::NotFound)),
         }
     }
 
@@ -135,20 +146,26 @@ impl NetworkDatabase for LocalNetworkDatabase {
         &mut self,
         key: Hash,
         ri: RouterInfo,
-    ) -> Result<Option<RouterInfo>, NetworkDatabaseError> {
-        debug!(
-            "Storing RouterInfo for peer {} at key {}",
-            ri.router_id.hash(),
-            key
-        );
+    ) -> Result<Option<RouterInfo>, StoreError> {
+        // Validate the RouterInfo
+        if key != ri.router_id.hash() {
+            return Err(StoreError::InvalidKey);
+        }
+        ri.verify()?;
+        if ri
+            .network_id()
+            .map(|net_id| *net_id != *NET_ID)
+            .unwrap_or(true)
+        {
+            return Err(StoreError::WrongNetwork);
+        }
+        router_info_is_current(&ri)?;
+
+        debug!("Storing RouterInfo at key {}", key);
         Ok(self.ri_ds.insert(key, ri))
     }
 
-    fn store_lease_set(
-        &mut self,
-        key: Hash,
-        ls: LeaseSet,
-    ) -> Result<Option<LeaseSet>, NetworkDatabaseError> {
+    fn store_lease_set(&mut self, key: Hash, ls: LeaseSet) -> Result<Option<LeaseSet>, StoreError> {
         debug!("Storing LeaseSet at key {}", key);
         Ok(self.ls_ds.insert(key, ls))
     }
@@ -157,10 +174,12 @@ impl NetworkDatabase for LocalNetworkDatabase {
 #[cfg(test)]
 mod tests {
     use futures::Async;
+    use std::time::{Duration, SystemTime};
 
-    use super::LocalNetworkDatabase;
-    use data::{Hash, RouterInfo, RouterSecretKeys};
-    use router::types::NetworkDatabase;
+    use super::{router_info_is_current, LocalNetworkDatabase, ROUTER_INFO_EXPIRATION};
+    use crypto;
+    use data::{Hash, I2PDate, RouterInfo, RouterSecretKeys, OPT_NET_ID};
+    use router::types::{NetworkDatabase, StoreError};
 
     #[test]
     fn store_and_retrieve() {
@@ -170,10 +189,31 @@ mod tests {
         let mut ri = RouterInfo::new(rsk.rid);
         ri.sign(&rsk.signing_private_key);
 
-        // TODO: replace fake key with real one
-        let key = Hash([0u8; 32]);
+        let key = ri.router_id.hash();
 
         assert_eq!(netdb.known_routers(), 0);
+
+        // Storing with an invalid key should fail
+        assert_eq!(
+            netdb.store_router_info(Hash([0u8; 32]), ri.clone()),
+            Err(StoreError::InvalidKey)
+        );
+
+        // Storing a RouterInfo modified after signing should fail
+        let old_netid = ri.options.0.insert(OPT_NET_ID.clone(), "0".into()).unwrap();
+        assert_eq!(
+            netdb.store_router_info(key.clone(), ri.clone()),
+            Err(StoreError::Crypto(crypto::Error::InvalidSignature))
+        );
+        ri.sign(&rsk.signing_private_key);
+
+        // Storing with a different netId should fail
+        assert_eq!(
+            netdb.store_router_info(key.clone(), ri.clone()),
+            Err(StoreError::WrongNetwork)
+        );
+        ri.options.0.insert(OPT_NET_ID.clone(), old_netid);
+        ri.sign(&rsk.signing_private_key);
 
         // Storing the new RouterInfo should return no data
         assert_eq!(netdb.store_router_info(key.clone(), ri.clone()), Ok(None));
@@ -184,5 +224,31 @@ mod tests {
             Ok(_) => panic!("Local lookup should complete immediately"),
             Err(e) => panic!("Unexpected error: {}", e),
         }
+    }
+
+    #[test]
+    fn ri_expiry() {
+        let rsk = RouterSecretKeys::new();
+        let mut ri = RouterInfo::new(rsk.rid);
+        assert_eq!(router_info_is_current(&ri), Ok(()));
+
+        // Expire the RouterInfo
+        ri.published = I2PDate::from_system_time(
+            SystemTime::now() - Duration::from_secs(ROUTER_INFO_EXPIRATION + 100),
+        );
+        match router_info_is_current(&ri) {
+            Ok(()) => panic!("RouterInfo should have expired"),
+            Err(StoreError::Expired(_)) => (),
+            Err(e) => panic!("Unexpected error: {}", e),
+        }
+
+        // Create it in the future
+        ri.published = I2PDate::from_system_time(
+            SystemTime::now() + Duration::from_secs(ROUTER_INFO_EXPIRATION + 100),
+        );
+        assert_eq!(
+            router_info_is_current(&ri),
+            Err(StoreError::PublishedInFuture)
+        );
     }
 }

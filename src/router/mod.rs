@@ -42,7 +42,7 @@ impl types::InboundMessageHandler for MessageHandler {
                         .expect("Failed to store LeaseSet");
                 }
             },
-            _ => debug!("Received message from {}: {:?}", from, msg),
+            _ => debug!("Received message from {}:\n{}", from, msg),
         }
     }
 }

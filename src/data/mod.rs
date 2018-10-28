@@ -2,6 +2,7 @@
 //!
 //! [Common structures specification](https://geti2p.net/spec/common-structures)
 
+use chrono::{DateTime, Utc};
 use cookie_factory::GenError;
 use nom::{self, Needed};
 use rand::{OsRng, Rng};
@@ -24,7 +25,7 @@ use crypto::{
 pub(crate) mod frame;
 
 lazy_static! {
-    static ref OPT_NET_ID: I2PString = "netId".into();
+    pub(crate) static ref OPT_NET_ID: I2PString = "netId".into();
     static ref OPT_ROUTER_VERSION: I2PString = "router.version".into();
     static ref OPT_CAPS: I2PString = "caps".into();
 }
@@ -115,6 +116,16 @@ impl I2PDate {
             .unwrap_or_else(|_| Duration::new(0, 0));
         I2PDate(d.as_secs() * 1_000 + u64::from(d.subsec_millis()))
     }
+
+    pub fn to_system_time(&self) -> SystemTime {
+        UNIX_EPOCH + Duration::from_millis(self.0)
+    }
+}
+
+impl fmt::Display for I2PDate {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        DateTime::<Utc>::from(self.to_system_time()).fmt(f)
+    }
 }
 
 /// A UTF-8-encoded string.
@@ -157,6 +168,12 @@ impl SessionTag {
 /// special cases.
 #[derive(Clone, Copy, Debug)]
 pub struct TunnelId(pub u32);
+
+impl fmt::Display for TunnelId {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        self.0.fmt(f)
+    }
+}
 
 /// A key certificate provides a mechanism to indicate the type of the PublicKey
 /// and SigningPublicKey in the Destination or RouterIdentity, and to package
@@ -423,10 +440,10 @@ impl RouterAddress {
 #[derive(Clone, Debug, PartialEq)]
 pub struct RouterInfo {
     pub router_id: RouterIdentity,
-    published: I2PDate,
+    pub published: I2PDate,
     addresses: Vec<RouterAddress>,
     peers: Vec<Hash>,
-    options: Mapping,
+    pub(crate) options: Mapping,
     signature: Option<Signature>,
 }
 
@@ -465,6 +482,10 @@ impl RouterInfo {
             .filter(|a| a.addr().unwrap().is_ipv4())
             .find(|a| filter(a))
             .map(|a| (*a).clone())
+    }
+
+    pub fn network_id(&self) -> Option<&I2PString> {
+        self.options.0.get(&OPT_NET_ID)
     }
 
     pub fn from_file(path: &str) -> Result<Self, ReadError> {

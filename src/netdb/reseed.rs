@@ -4,13 +4,14 @@ use rand::{thread_rng, Rng};
 use std::collections::HashMap;
 use std::io;
 use std::net::ToSocketAddrs;
+use std::sync::Arc;
 use tokio_io::{self, IoFuture};
 use tokio_tcp::TcpStream;
 use tokio_tls;
 
 use crypto::{OfflineSigningPublicKey, SigType};
-use data::RouterInfo;
 use file::{Su3Content, Su3File};
+use router::Context;
 
 // newest first, please add new ones at the top
 //
@@ -125,15 +126,17 @@ fn reseed_from_host(
 
 /// Fetches RouterInfos from reseed servers via HTTPS.
 pub struct HttpsReseeder {
+    ctx: Arc<Context>,
     cx: TlsConnector,
     pending: Vec<((&'static str, u16), &'static str)>,
     active: IoFuture<Su3File>,
     succeeded: usize,
-    ri: Option<Vec<RouterInfo>>,
+    fetched: usize,
+    valid: usize,
 }
 
 impl HttpsReseeder {
-    pub fn new() -> Self {
+    pub fn new(ctx: Arc<Context>) -> Self {
         // Build TLS context with the necessary self-signed certificates
         let mut cx = TlsConnector::builder();
         cx.add_root_certificate(Certificate::from_pem(SSL_CERT_CREATIVECOWPAT_NET).unwrap());
@@ -147,23 +150,19 @@ impl HttpsReseeder {
         let active = reseed_from_host(&cx, hosts.swap_remove(0));
 
         HttpsReseeder {
+            ctx,
             cx,
             pending: hosts,
             active,
             succeeded: 0,
-            ri: Some(vec![]),
+            fetched: 0,
+            valid: 0,
         }
     }
 }
 
-impl Default for HttpsReseeder {
-    fn default() -> Self {
-        HttpsReseeder::new()
-    }
-}
-
 impl Future for HttpsReseeder {
-    type Item = Vec<RouterInfo>;
+    type Item = ();
     type Error = ();
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
@@ -171,16 +170,27 @@ impl Future for HttpsReseeder {
             // Check the currently-active reseed request
             match self.active.poll() {
                 Ok(Async::Ready(su3)) => match su3.content {
-                    Su3Content::Reseed(mut new_ri) => {
+                    Su3Content::Reseed(new_ri) => {
                         self.succeeded += 1;
-                        let mut ri = self.ri.take().unwrap();
-                        ri.append(&mut new_ri);
+                        self.fetched += new_ri.len();
+
+                        let mut db = self.ctx.netdb.write().unwrap();
+                        for ri in new_ri {
+                            let hash = ri.router_id.hash();
+                            if let Err(e) = db.store_router_info(hash.clone(), ri) {
+                                error!("Invalid RouterInfo {} received from reseed: {}", hash, e);
+                            } else {
+                                self.valid += 1;
+                            }
+                        }
 
                         // Check if we are done reseeding
-                        if ri.len() >= MIN_RI_WANTED && self.succeeded >= MIN_RESEED_SERVERS {
-                            return Ok(Async::Ready(ri));
-                        } else {
-                            self.ri = Some(ri);
+                        if self.valid >= MIN_RI_WANTED && self.succeeded >= MIN_RESEED_SERVERS {
+                            info!(
+                                "Fetched {} RouterInfos from {} servers ({} valid)",
+                                self.fetched, self.succeeded, self.valid
+                            );
+                            return Ok(Async::Ready(()));
                         }
                     }
                 },
@@ -190,12 +200,15 @@ impl Future for HttpsReseeder {
 
             // If we reach here, the active reseed has finished
             if self.pending.is_empty() {
-                let ri = self.ri.take().unwrap();
-                if ri.is_empty() {
+                if self.valid == 0 {
                     error!("Failed to reseed from any server");
                     return Err(());
                 } else {
-                    return Ok(Async::Ready(ri));
+                    info!(
+                        "Fetched {} RouterInfos from {} servers ({} valid)",
+                        self.fetched, self.succeeded, self.valid
+                    );
+                    return Ok(Async::Ready(()));
                 }
             } else {
                 self.active = reseed_from_host(&self.cx, self.pending.swap_remove(0));
