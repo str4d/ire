@@ -24,6 +24,7 @@ data-encoding = "2.1"
 env_logger = { version = "0.5", optional = true }
 flate2 = "1.0"
 futures = "0.1"
+i2p_ring = { git = "https://github.com/str4d/ring.git", rev = "b389a90d0e1097c6703b241dc5c67b9b1d699551" }
 i2p_snow = "0.4"
 itertools = "0.7"
 lazy_static = "1.0"
@@ -53,9 +54,6 @@ zip = { version = "0.4", default-features = false, features = ["deflate"] }
 [dev-dependencies]
 pretty_assertions = "0.5"
 tempfile = "3"
-
-[patch.crates-io]
-ring = { git = "https://github.com/str4d/ring.git", branch = "i2p-rsa-raw" }
 
 [features]
 cli = ["clap", "env_logger", "tokio"]
