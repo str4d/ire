@@ -25,7 +25,7 @@ use crypto::{
 pub(crate) mod frame;
 
 lazy_static! {
-    static ref OPT_NET_ID: I2PString = "netId".into();
+    pub(crate) static ref OPT_NET_ID: I2PString = "netId".into();
     static ref OPT_ROUTER_VERSION: I2PString = "router.version".into();
     static ref OPT_CAPS: I2PString = "caps".into();
 }
@@ -443,7 +443,7 @@ pub struct RouterInfo {
     pub published: I2PDate,
     addresses: Vec<RouterAddress>,
     peers: Vec<Hash>,
-    options: Mapping,
+    pub(crate) options: Mapping,
     signature: Option<Signature>,
 }
 

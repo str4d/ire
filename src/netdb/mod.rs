@@ -174,9 +174,11 @@ impl NetworkDatabase for LocalNetworkDatabase {
 #[cfg(test)]
 mod tests {
     use futures::Async;
+    use std::time::{Duration, SystemTime};
 
-    use super::LocalNetworkDatabase;
-    use data::{Hash, RouterInfo, RouterSecretKeys};
+    use super::{router_info_is_current, LocalNetworkDatabase, ROUTER_INFO_EXPIRATION};
+    use crypto;
+    use data::{Hash, I2PDate, RouterInfo, RouterSecretKeys, OPT_NET_ID};
     use router::types::{NetworkDatabase, StoreError};
 
     #[test]
@@ -197,6 +199,22 @@ mod tests {
             Err(StoreError::InvalidKey)
         );
 
+        // Storing a RouterInfo modified after signing should fail
+        let old_netid = ri.options.0.insert(OPT_NET_ID.clone(), "0".into()).unwrap();
+        assert_eq!(
+            netdb.store_router_info(key.clone(), ri.clone()),
+            Err(StoreError::Crypto(crypto::Error::InvalidSignature))
+        );
+        ri.sign(&rsk.signing_private_key);
+
+        // Storing with a different netId should fail
+        assert_eq!(
+            netdb.store_router_info(key.clone(), ri.clone()),
+            Err(StoreError::WrongNetwork)
+        );
+        ri.options.0.insert(OPT_NET_ID.clone(), old_netid);
+        ri.sign(&rsk.signing_private_key);
+
         // Storing the new RouterInfo should return no data
         assert_eq!(netdb.store_router_info(key.clone(), ri.clone()), Ok(None));
         assert_eq!(netdb.known_routers(), 1);
@@ -206,5 +224,31 @@ mod tests {
             Ok(_) => panic!("Local lookup should complete immediately"),
             Err(e) => panic!("Unexpected error: {}", e),
         }
+    }
+
+    #[test]
+    fn ri_expiry() {
+        let rsk = RouterSecretKeys::new();
+        let mut ri = RouterInfo::new(rsk.rid);
+        assert_eq!(router_info_is_current(&ri), Ok(()));
+
+        // Expire the RouterInfo
+        ri.published = I2PDate::from_system_time(
+            SystemTime::now() - Duration::from_secs(ROUTER_INFO_EXPIRATION + 100),
+        );
+        match router_info_is_current(&ri) {
+            Ok(()) => panic!("RouterInfo should have expired"),
+            Err(StoreError::Expired(_)) => (),
+            Err(e) => panic!("Unexpected error: {}", e),
+        }
+
+        // Create it in the future
+        ri.published = I2PDate::from_system_time(
+            SystemTime::now() + Duration::from_secs(ROUTER_INFO_EXPIRATION + 100),
+        );
+        assert_eq!(
+            router_info_is_current(&ri),
+            Err(StoreError::PublishedInFuture)
+        );
     }
 }
