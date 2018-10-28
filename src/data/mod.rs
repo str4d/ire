@@ -492,8 +492,10 @@ impl RouterInfo {
         self.addresses
             .iter()
             .filter(|a| a.transport_style == *style)
-            .filter(|a| a.addr().unwrap().is_ipv4())
-            .find(|a| filter(a))
+            .filter(|a| match a.addr() {
+                Some(addr) => addr.is_ipv4(),
+                None => false,
+            }).find(|a| filter(a))
             .map(|a| (*a).clone())
     }
 
