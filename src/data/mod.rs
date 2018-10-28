@@ -479,8 +479,10 @@ impl RouterInfo {
         self.addresses
             .iter()
             .filter(|a| a.transport_style == *style)
-            .filter(|a| a.addr().unwrap().is_ipv4())
-            .find(|a| filter(a))
+            .filter(|a| match a.addr() {
+                Some(addr) => addr.is_ipv4(),
+                None => false,
+            }).find(|a| filter(a))
             .map(|a| (*a).clone())
     }
 
@@ -635,6 +637,12 @@ mod tests {
 
         ri.set_addresses(vec![
             RouterAddress::new(&I2PString::new("other"), "127.0.0.1:12345".parse().unwrap()),
+            RouterAddress {
+                cost: 0,
+                expiration: I2PDate(0),
+                transport_style: style.clone(),
+                options: Mapping(HashMap::new()),
+            },
             RouterAddress::new(&style, "127.0.0.1:23456".parse().unwrap()),
             RouterAddress::new(&style, "127.0.0.1:34567".parse().unwrap()),
         ]);
