@@ -36,7 +36,7 @@ num-traits = "0.2"
 rand = "0.5"
 ring = "0.13"
 sha1 = "0.6"
-sha2 = "0.7"
+sha2 = "0.8"
 signatory = { version = "0.10", features = ["ecdsa", "ed25519"] }
 signatory-dalek = "0.10"
 signatory-ring = "0.10"

@@ -558,7 +558,7 @@ dependencies = [
  "rand 0.5.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "ring 0.13.2 (registry+https://github.com/rust-lang/crates.io-index)",
  "sha1 0.6.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "sha2 0.7.1 (registry+https://github.com/rust-lang/crates.io-index)",
+ "sha2 0.8.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "signatory 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "signatory-dalek 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "signatory-ring 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)",
