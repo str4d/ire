@@ -25,7 +25,7 @@ env_logger = { version = "0.5", optional = true }
 flate2 = "1.0"
 futures = "0.1"
 i2p_ring = { git = "https://github.com/str4d/ring.git", rev = "b389a90d0e1097c6703b241dc5c67b9b1d699551" }
-i2p_snow = "0.4"
+i2p_snow = { git = "https://github.com/str4d/snow.git", rev = "81c17faf3d9283db5da8e2f5a65dbba71ba906b2" }
 itertools = "0.7"
 lazy_static = "1.0"
 log = "0.4"
