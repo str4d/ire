@@ -3,7 +3,7 @@
 use aes::{self, block_cipher_trait::generic_array::GenericArray as AesGenericArray};
 use block_modes::{block_padding::ZeroPadding, BlockMode, BlockModeIv, Cbc};
 use nom::Err;
-use ring::signature as ring_signature;
+use i2p_ring::signature as ring_signature;
 use signatory::{
     curve::{NistP256, NistP384, WeierstrassCurve},
     ecdsa::FixedSignature,

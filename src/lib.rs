@@ -23,6 +23,7 @@ extern crate config;
 extern crate cookie_factory;
 extern crate data_encoding;
 extern crate flate2;
+extern crate i2p_ring;
 extern crate i2p_snow;
 extern crate itertools;
 extern crate native_tls;
