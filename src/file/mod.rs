@@ -12,6 +12,7 @@ const SU3_MAGIC: &[u8; 6] = b"I2Psu3";
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Error {
     Crypto(crypto::Error),
+    Http(u16),
     Read(ReadError),
     UnknownSigner,
 }
@@ -48,6 +49,11 @@ impl Su3File {
         input: &[u8],
         signers: &HashMap<&'static str, OfflineSigningPublicKey>,
     ) -> Result<Su3File, Error> {
+        let (input, ret) = frame::http_status_line(input)?;
+        if let Err(e) = ret {
+            return Err(e);
+        }
+
         let (data, _) = take_until!(input, &SU3_MAGIC[..])?;
         Su3File::from_bytes(data, signers)
     }
@@ -71,10 +77,75 @@ impl Su3File {
 
 #[cfg(test)]
 mod tests {
-    use super::{Su3Content, Su3File};
+    use nom::Needed;
+    use std::collections::HashMap;
+
+    use super::{Error, Su3Content, Su3File};
     use crypto::SigType;
+    use data::ReadError;
     use netdb::reseed::RESEED_SIGNERS;
     use tests::I2PSEEDS_SU3;
+
+    #[test]
+    fn reseed_http_errors() {
+        let signers = HashMap::new();
+
+        for (incomplete, needed) in [
+            (&b""[..], 7),
+            (&b"HTTP"[..], 7),
+            (&b"HTTP/1"[..], 7),
+            (&b"HTTP/1."[..], 1),
+            (&b"HTTP/1.0"[..], 1),
+            (&b"HTTP/1.1"[..], 1),
+            (&b"HTTP/1.0 "[..], 3),
+        ]
+            .iter()
+        {
+            match Su3File::from_http_data(incomplete, &signers) {
+                Ok(_) => panic!("Wat"),
+                Err(e) => assert_eq!(e, Error::Read(ReadError::Incomplete(Needed::Size(*needed)))),
+            }
+        }
+
+        for bad in [
+            &b"Foo"[..],
+            &b"Foo "[..],
+            &b"Foo bar"[..],
+            &b"Foo 12b"[..],
+            &b"Foo 123"[..],
+            &b"HTTP/1.2"[..],
+            &b"HTTP/1.0 12b"[..],
+            &b"Spam/1.0 123"[..],
+        ]
+            .iter()
+        {
+            match Su3File::from_http_data(bad, &signers) {
+                Ok(_) => panic!("Wat"),
+                Err(e) => assert_eq!(e, Error::Read(ReadError::Parser)),
+            }
+        }
+
+        for (input, status) in [
+            (&b"HTTP/1.0 123"[..], 123),
+            (&b"HTTP/1.1 401"[..], 401),
+            (&b"HTTP/1.0 404"[..], 404),
+            (&b"HTTP/1.1 429"[..], 429),
+            (&b"HTTP/1.0 429"[..], 429),
+        ]
+            .iter()
+        {
+            match Su3File::from_http_data(input, &signers) {
+                Ok(_) => panic!("Wat"),
+                Err(e) => assert_eq!(e, Error::Http(*status)),
+            }
+        }
+
+        // Now just missing SU3_MAGIC
+        match Su3File::from_http_data(b"HTTP/1.0 200", &signers) {
+            Ok(_) => panic!("Wat"),
+            Err(e) => assert_eq!(e, Error::Read(ReadError::Incomplete(Needed::Size(6)))),
+        }
+    }
 
     #[test]
     fn reseed_file() {
