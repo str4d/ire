@@ -12,7 +12,7 @@ use tokio_timer::Timeout;
 use tokio_tls;
 
 use crypto::{OfflineSigningPublicKey, SigType};
-use file::{Su3Content, Su3File};
+use file::{Error as FileError, Su3Content, Su3File};
 use router::Context;
 
 // newest first, please add new ones at the top
@@ -117,11 +117,21 @@ fn reseed_from_host(
             )
         }).and_then(|(socket, _)| tokio_io::io::read_to_end(socket, Vec::new()))
         .and_then(|(_, data)| {
-            Su3File::from_http_data(&data, &RESEED_SIGNERS).map_err(|e| {
-                io::Error::new(
+            Su3File::from_http_data(&data, &RESEED_SIGNERS).map_err(|e| match e {
+                FileError::Http(status) => match status {
+                    401 | 402 | 403 | 451 => io::Error::new(
+                        io::ErrorKind::PermissionDenied,
+                        format!("Permission denied ({})", status),
+                    ),
+                    404 => io::Error::new(io::ErrorKind::NotFound, "Reseed file not found"),
+                    status => {
+                        io::Error::new(io::ErrorKind::Other, format!("HTTP status code {}", status))
+                    }
+                },
+                e => io::Error::new(
                     io::ErrorKind::InvalidData,
                     format!("Invalid SU3 file: {:?}", e),
-                )
+                ),
             })
         });
 
