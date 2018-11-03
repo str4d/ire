@@ -5,8 +5,10 @@ use std::collections::HashMap;
 use std::io;
 use std::net::ToSocketAddrs;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio_io::{self, IoFuture};
 use tokio_tcp::TcpStream;
+use tokio_timer::Timeout;
 use tokio_tls;
 
 use crypto::{OfflineSigningPublicKey, SigType};
@@ -83,6 +85,8 @@ const SSL_CERT_ECHELON: &[u8; 1452] =
 
 const MIN_RI_WANTED: usize = 100;
 const MIN_RESEED_SERVERS: usize = 2;
+/// Maximum response time for a single reseed server, in seconds.
+const PER_RESEED_TIMEOUT: u64 = 10;
 
 fn reseed_from_host(
     cx: &TlsConnector,
@@ -94,34 +98,49 @@ fn reseed_from_host(
     let socket = TcpStream::connect(&addr);
     let cx = tokio_tls::TlsConnector::from(cx.clone());
 
-    Box::new(
-        socket
-            .and_then(move |socket| {
-                cx.connect(host.0, socket)
-                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
-            }).and_then(move |socket| {
-                tokio_io::io::write_all(
-                    socket,
-                    format!(
-                        "\
-                         GET {}i2pseeds.su3 HTTP/1.0\r\n\
-                         Host: {}\r\n\
-                         User-Agent: Wget/1.11.4\r\n\
-                         \r\n\
-                         ",
-                        path, host.0
-                    ),
+    let reseeder = socket
+        .and_then(move |socket| {
+            cx.connect(host.0, socket)
+                .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+        }).and_then(move |socket| {
+            tokio_io::io::write_all(
+                socket,
+                format!(
+                    "\
+                     GET {}i2pseeds.su3 HTTP/1.0\r\n\
+                     Host: {}\r\n\
+                     User-Agent: Wget/1.11.4\r\n\
+                     \r\n\
+                     ",
+                    path, host.0
+                ),
+            )
+        }).and_then(|(socket, _)| tokio_io::io::read_to_end(socket, Vec::new()))
+        .and_then(|(_, data)| {
+            Su3File::from_http_data(&data, &RESEED_SIGNERS).map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("Invalid SU3 file: {:?}", e),
                 )
-            }).and_then(|(socket, _)| tokio_io::io::read_to_end(socket, Vec::new()))
-            .and_then(|(_, data)| {
-                Su3File::from_http_data(&data, &RESEED_SIGNERS).map_err(|e| {
-                    io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        format!("Invalid SU3 file: {:?}", e),
-                    )
-                })
-            }),
-    )
+            })
+        });
+
+    // Add a timeout
+    let timed = Timeout::new(reseeder, Duration::new(PER_RESEED_TIMEOUT, 0)).map_err(|e| {
+        if e.is_inner() {
+            e.into_inner().unwrap()
+        } else if e.is_elapsed() {
+            io::Error::new(
+                io::ErrorKind::TimedOut,
+                "Reseed server didn't respond before timeout",
+            )
+        } else {
+            assert!(e.is_timer());
+            io::Error::new(io::ErrorKind::Other, e.into_timer().unwrap())
+        }
+    });
+
+    Box::new(timed)
 }
 
 /// Fetches RouterInfos from reseed servers via HTTPS.
