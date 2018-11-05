@@ -3,12 +3,12 @@ use std::io::{Cursor, Read};
 use std::str::from_utf8;
 use zip;
 
-use super::{Su3Content, Su3File, SU3_MAGIC};
+use super::{Error, Su3Content, Su3File, SU3_MAGIC};
 use crypto::{
     frame::{sig_type, signature},
     SigType,
 };
-use data::frame::router_info;
+use data::{frame::router_info, ReadError};
 
 named_args!(su3_sig_len(sig_type: SigType)<u16>,
     verify!(be_u16, |sig_len| sig_len as u32 == sig_type.sig_len())
@@ -83,4 +83,23 @@ named!(pub su3_file<Su3File>, do_parse!(
         msg_len: 40 + version_len as usize + signer_len as usize + content_len as usize,
         sig,
     })
+));
+
+// Simple HTTP parser to convert status code into an error
+named!(pub http_status_line<Result<(), Error>>, do_parse!(
+    tag!("HTTP/1.") >> one_of!("01") >> char!(' ') >> status: take!(3) >> (
+        if let Ok(status) = std::str::from_utf8(status) {
+            if let Ok(status) = status.parse::<u16>() {
+                if status == 200 {
+                    Ok(())
+                } else {
+                    Err(Error::Http(status))
+                }
+            } else {
+                Err(Error::Read(ReadError::Parser))
+            }
+        } else {
+            Err(Error::Read(ReadError::Parser))
+        }
+    )
 ));
