@@ -4,19 +4,20 @@
 //! self-consistency across its component's API.
 
 use config::Config;
-use futures::future;
+use futures::{future, sync::oneshot};
 use std::sync::{Arc, RwLock};
 use tokio_io::IoFuture;
 
 use super::types::{CommSystem, InboundMessageHandler, OutboundMessageHandler};
 use data::{Hash, RouterAddress, RouterInfo, RouterSecretKeys};
-use i2np::Message;
+use i2np::{DatabaseSearchReply, Message};
 use netdb::LocalNetworkDatabase;
 use router::Context;
 
 struct MockMessageHandler;
 
 impl InboundMessageHandler for MockMessageHandler {
+    fn register_lookup(&self, from: Hash, key: Hash, tx: oneshot::Sender<DatabaseSearchReply>) {}
     fn handle(&self, from: Hash, msg: Message) {}
 }
 
@@ -45,6 +46,10 @@ impl CommSystem for MockCommSystem {
 
     fn start(&mut self, _ctx: Arc<Context>) -> IoFuture<()> {
         Box::new(future::ok(()))
+    }
+
+    fn is_established(&self, hash: &Hash) -> bool {
+        false
     }
 }
 

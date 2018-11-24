@@ -1,6 +1,6 @@
 //! The traits for the various router components.
 
-use futures::Future;
+use futures::{sync::oneshot, Future};
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
@@ -9,9 +9,11 @@ use tokio_io::IoFuture;
 use super::Context;
 use crypto;
 use data::{Hash, LeaseSet, RouterAddress, RouterInfo};
-use i2np::Message;
+use i2np::{DatabaseSearchReply, Message};
 
 pub trait InboundMessageHandler: Send + Sync {
+    fn register_lookup(&self, from: Hash, key: Hash, tx: oneshot::Sender<DatabaseSearchReply>);
+
     fn handle(&self, from: Hash, msg: Message);
 }
 
@@ -33,18 +35,27 @@ pub trait CommSystem: OutboundMessageHandler + Send + Sync {
     /// This returns a Future that must be polled in order to drive network
     /// communications.
     fn start(&mut self, ctx: Arc<Context>) -> IoFuture<()>;
+
+    /// Returns true if there is an open session with the given peer.
+    fn is_established(&self, hash: &Hash) -> bool;
 }
 
 /// Network database lookup errors
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LookupError {
     NotFound,
+    SendFailure,
+    TimedOut,
+    TimerFailure,
 }
 
 impl fmt::Display for LookupError {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self {
             LookupError::NotFound => "Key not found".fmt(f),
+            LookupError::SendFailure => "Send failure".fmt(f),
+            LookupError::TimedOut => "Lookup timed out".fmt(f),
+            LookupError::TimerFailure => "Timer failure".fmt(f),
         }
     }
 }
@@ -84,6 +95,9 @@ pub trait NetworkDatabase: Send + Sync {
     /// Returns the number of RouterInfos that this database contains.
     fn known_routers(&self) -> usize;
 
+    /// Returns the closest floodfill router to the given netDb key.
+    fn select_closest_ff(&self, key: &Hash) -> Option<RouterInfo>;
+
     /// Finds the RouterInfo stored at the given key. If a Context is provided,
     /// a remote lookup will be performed if the key is not found locally.
     fn lookup_router_info(
@@ -91,7 +105,8 @@ pub trait NetworkDatabase: Send + Sync {
         ctx: Option<Arc<Context>>,
         key: &Hash,
         timeout_ms: u64,
-    ) -> Box<Future<Item = RouterInfo, Error = LookupError> + Send + Sync>;
+        from_peer: Option<RouterInfo>,
+    ) -> Box<Future<Item = RouterInfo, Error = LookupError> + Send>;
 
     /// Finds the LeaseSet stored at the given key. If not known locally, and a
     /// Context is provided, the LeaseSet is looked up using the client tunnels
@@ -117,4 +132,10 @@ pub trait NetworkDatabase: Send + Sync {
     ///
     /// Returns the LeaseSet that was previously at this key.
     fn store_lease_set(&mut self, key: Hash, ls: LeaseSet) -> Result<Option<LeaseSet>, StoreError>;
+
+    /// Drop any local RouterInfos that have expired.
+    fn expire_router_infos(&mut self, ctx: Option<Arc<Context>>);
+
+    /// Drop any local LeaseSets that have expired.
+    fn expire_lease_sets(&mut self);
 }
