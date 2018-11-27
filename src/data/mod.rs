@@ -24,6 +24,7 @@ pub mod dest;
 
 #[allow(needless_pass_by_value)]
 pub(crate) mod frame;
+pub mod ls2;
 
 pub use self::dest::{Destination, Lease, LeaseSet};
 
@@ -166,6 +167,12 @@ impl<'a> From<&'a str> for I2PString {
 /// A set of key/value mappings or properties.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Mapping(pub HashMap<I2PString, I2PString>);
+
+impl Default for Mapping {
+    fn default() -> Self {
+        Mapping(HashMap::new())
+    }
+}
 
 /// A random number.
 pub struct SessionTag(pub [u8; 32]);

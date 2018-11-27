@@ -40,6 +40,7 @@ pub enum Error {
     InvalidKey,
     InvalidMessage,
     InvalidSignature,
+    KeyExpired,
     NoSignature,
     SigningFailed,
     TypeMismatch,
@@ -53,6 +54,7 @@ impl fmt::Display for Error {
             Error::InvalidKey => "Invalid cryptographic key".fmt(f),
             Error::InvalidMessage => "Invalid message".fmt(f),
             Error::InvalidSignature => "Bad signature".fmt(f),
+            Error::KeyExpired => "Key expired".fmt(f),
             Error::NoSignature => "No signature".fmt(f),
             Error::SigningFailed => "Failed to create a signature".fmt(f),
             Error::TypeMismatch => "Signature type doesn't match key type".fmt(f),
@@ -156,7 +158,7 @@ impl SigType {
     }
 }
 
-/// Various encryption algorithms present on the network.
+/// Field in a RouterInfo or Destination KeyCertificate.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum EncType {
     ElGamal2048,
@@ -187,6 +189,27 @@ impl EncType {
 //
 // Key material and signatures
 //
+
+/// Key material for initiating various end-to-end encryption algorithms.
+#[derive(Clone, Debug)]
+pub enum CryptoKey {
+    ElGamalAES(PublicKey),
+    Unsupported(u16, Vec<u8>),
+}
+
+pub enum CryptoSecretKey {
+    ElGamalAES(PrivateKey),
+}
+
+impl CryptoSecretKey {
+    pub fn new_keypair() -> (Self, CryptoKey) {
+        let (privkey, pubkey) = elgamal::KeyPairGenerator::generate();
+        (
+            CryptoSecretKey::ElGamalAES(privkey),
+            CryptoKey::ElGamalAES(pubkey),
+        )
+    }
+}
 
 /// The public component of an ElGamal encryption keypair. Represents only the
 /// exponent, not the primes (which are constants).

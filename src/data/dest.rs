@@ -11,7 +11,7 @@ pub(crate) mod frame;
 
 /// A Destination defines a particular endpoint to which messages can be
 /// directed for secure delivery.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Destination {
     pub(super) public_key: PublicKey,
     pub(super) padding: Option<Padding>,

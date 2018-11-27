@@ -3,7 +3,7 @@ use nom::*;
 
 use crate::constants;
 use crate::crypto::{
-    EncType, PrivateKey, PublicKey, SessionKey, SigType, Signature, SigningPrivateKey,
+    CryptoKey, EncType, PrivateKey, PublicKey, SessionKey, SigType, Signature, SigningPrivateKey,
     SigningPublicKey,
 };
 
@@ -54,6 +54,37 @@ pub fn gen_session_key<'a>(
 //
 // Key material and signatures
 //
+
+// CryptoKey
+
+named!(
+    pub crypto_key<CryptoKey>,
+    switch!(be_u16,
+        constants::ELGAMAL2048 => do_parse!(
+            tag!(b"\x01\x00") >> pubkey: public_key >> (CryptoKey::ElGamalAES(pubkey))
+        ) |
+        crypto_type => do_parse!(
+            data: length_data!(be_u16)
+                >> (CryptoKey::Unsupported(crypto_type, data.to_vec()))
+        )
+    )
+);
+
+pub fn gen_crypto_key<'a>(
+    input: (&'a mut [u8], usize),
+    crypto_key: &CryptoKey,
+) -> Result<(&'a mut [u8], usize), GenError> {
+    match crypto_key {
+        CryptoKey::ElGamalAES(pubkey) => do_gen!(
+            input,
+            gen_be_u16!(constants::ELGAMAL2048) >> gen_be_u16!(256) >> gen_public_key(pubkey)
+        ),
+        CryptoKey::Unsupported(crypto_type, data) => do_gen!(
+            input,
+            gen_be_u16!(*crypto_type) >> gen_be_u16!(data.len()) >> gen_slice!(data)
+        ),
+    }
+}
 
 // PublicKey
 
