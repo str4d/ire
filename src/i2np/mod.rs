@@ -13,8 +13,10 @@ use rand::{rngs::OsRng, thread_rng, Rng};
 use std::fmt;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use crate::constants;
 use crate::crypto::{self, elgamal, SessionKey};
 use crate::data::{
+    ls2::{LeaseSet2, MetaLeaseSet2},
     Certificate, Hash, I2PDate, LeaseSet, ReadError, RouterInfo, SessionTag, TunnelId,
 };
 use crate::util::serialize;
@@ -148,6 +150,8 @@ pub struct ReplyPath {
 pub enum DatabaseStoreData {
     RI(RouterInfo),
     LS(LeaseSet),
+    LS2(LeaseSet2),
+    MetaLS2(MetaLeaseSet2),
 }
 
 /// An unsolicited database store, or the response to a successful DatabaseLookup
@@ -163,7 +167,7 @@ impl DatabaseStore {
     pub fn from_ri(ri: RouterInfo, reply: Option<ReplyPath>) -> Self {
         DatabaseStore {
             key: ri.router_id.hash(),
-            ds_type: 0,
+            ds_type: constants::NETDB_STORE_RI,
             reply,
             data: DatabaseStoreData::RI(ri),
         }
@@ -172,7 +176,7 @@ impl DatabaseStore {
     pub fn from_ls(ls: LeaseSet, reply: Option<ReplyPath>) -> Self {
         DatabaseStore {
             key: ls.dest.hash(),
-            ds_type: 1,
+            ds_type: constants::NETDB_STORE_LS,
             reply,
             data: DatabaseStoreData::LS(ls),
         }

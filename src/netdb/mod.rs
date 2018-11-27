@@ -231,6 +231,15 @@ impl Future for Engine {
                                         .store_lease_set(ds.key, ls)
                                         .expect("Failed to store LeaseSet");
                                 }
+                                DatabaseStoreData::LS2(_) => {
+                                    debug!("Received LeaseSet2 in msg {} from {}", msg.id, from);
+                                }
+                                DatabaseStoreData::MetaLS2(_) => {
+                                    debug!(
+                                        "Received MetaLeaseSet2 in msg {} from {}",
+                                        msg.id, from
+                                    );
+                                }
                             },
                             MessagePayload::DatabaseSearchReply(dsr) => {
                                 if let Some(pending) = self
