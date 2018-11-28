@@ -1,9 +1,13 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use super::{Destination, Hash, Mapping, TunnelId};
-use crate::constants::{NETDB_STORE_LS, NETDB_STORE_LS2, NETDB_STORE_META_LS2};
+use crate::constants::{
+    NETDB_STORE_ENC_LS2, NETDB_STORE_LS, NETDB_STORE_LS2, NETDB_STORE_META_LS2,
+};
 use crate::crypto::{self, CryptoKey, Signature, SigningPrivateKey, SigningPublicKey};
 use crate::util::serialize;
+
+pub mod enc;
 
 #[allow(clippy::needless_pass_by_value)]
 pub(crate) mod frame;
@@ -208,6 +212,7 @@ pub enum MetaEntryType {
     Unknown,
     LeaseSet,
     LeaseSet2,
+    EncryptedLS2,
     MetaLeaseSet2,
 }
 
@@ -216,6 +221,7 @@ impl MetaEntryType {
         match entry_type {
             NETDB_STORE_LS => MetaEntryType::LeaseSet,
             NETDB_STORE_LS2 => MetaEntryType::LeaseSet2,
+            NETDB_STORE_ENC_LS2 => MetaEntryType::EncryptedLS2,
             NETDB_STORE_META_LS2 => MetaEntryType::MetaLeaseSet2,
             _ => MetaEntryType::Unknown,
         }
@@ -226,6 +232,7 @@ impl MetaEntryType {
             MetaEntryType::Unknown => 0,
             MetaEntryType::LeaseSet => NETDB_STORE_LS,
             MetaEntryType::LeaseSet2 => NETDB_STORE_LS2,
+            MetaEntryType::EncryptedLS2 => NETDB_STORE_ENC_LS2,
             MetaEntryType::MetaLeaseSet2 => NETDB_STORE_META_LS2,
         }
     }

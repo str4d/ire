@@ -91,4 +91,5 @@ pub const KEY_CERT: u8 = 5;
 pub const NETDB_STORE_RI: u8 = 0;
 pub const NETDB_STORE_LS: u8 = 1;
 pub const NETDB_STORE_LS2: u8 = 3;
+pub const NETDB_STORE_ENC_LS2: u8 = 5;
 pub const NETDB_STORE_META_LS2: u8 = 7;
