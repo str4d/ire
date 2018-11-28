@@ -11,7 +11,9 @@ use sha2::{
 use std::io::{Read, Write};
 
 use super::*;
-use crate::constants::{NETDB_STORE_LS, NETDB_STORE_LS2, NETDB_STORE_META_LS2, NETDB_STORE_RI};
+use crate::constants::{
+    NETDB_STORE_ENC_LS2, NETDB_STORE_LS, NETDB_STORE_LS2, NETDB_STORE_META_LS2, NETDB_STORE_RI,
+};
 use crate::crypto::frame::{gen_session_key, session_key};
 use crate::data::{
     dest::frame::{gen_lease_set, lease_set},
@@ -20,7 +22,10 @@ use crate::data::{
         gen_short_expiry, gen_tunnel_id, hash, i2p_date, router_info, session_tag, short_expiry,
         tunnel_id,
     },
-    ls2::frame::{gen_lease_set_2, gen_meta_ls2, lease_set_2, meta_ls2},
+    ls2::{
+        enc::frame::{encrypted_ls2, gen_encrypted_ls2},
+        frame::{gen_lease_set_2, gen_meta_ls2, lease_set_2, meta_ls2},
+    },
 };
 
 //
@@ -242,6 +247,7 @@ named!(
                 NETDB_STORE_RI => do_parse!(ri: compressed_ri >> (DatabaseStoreData::RI(ri))) |
                 NETDB_STORE_LS => do_parse!(ls: lease_set >> (DatabaseStoreData::LS(ls))) |
                 NETDB_STORE_LS2 => do_parse!(ls2: lease_set_2 >> (DatabaseStoreData::LS2(ls2))) |
+                NETDB_STORE_ENC_LS2 => do_parse!(enc_ls2: encrypted_ls2 >> (DatabaseStoreData::EncLS2(enc_ls2))) |
                 NETDB_STORE_META_LS2 => do_parse!(meta_ls2: meta_ls2 >> (DatabaseStoreData::MetaLS2(meta_ls2)))
             )
             >> (MessagePayload::DatabaseStore(DatabaseStore {
@@ -261,6 +267,7 @@ fn gen_database_store_data<'a>(
         DatabaseStoreData::RI(ref ri) => gen_compressed_ri(input, &ri),
         DatabaseStoreData::LS(ref ls) => gen_lease_set(input, &ls),
         DatabaseStoreData::LS2(ref ls2) => gen_lease_set_2(input, &ls2),
+        DatabaseStoreData::EncLS2(ref enc_ls2) => gen_encrypted_ls2(input, &enc_ls2),
         DatabaseStoreData::MetaLS2(ref meta_ls2) => gen_meta_ls2(input, &meta_ls2),
     }
 }

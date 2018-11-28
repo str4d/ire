@@ -16,7 +16,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use crate::constants;
 use crate::crypto::{self, elgamal, SessionKey};
 use crate::data::{
-    ls2::{LeaseSet2, MetaLeaseSet2},
+    ls2::{enc::EncryptedLS2, LeaseSet2, MetaLeaseSet2},
     Certificate, Hash, I2PDate, LeaseSet, ReadError, RouterInfo, SessionTag, TunnelId,
 };
 use crate::util::serialize;
@@ -151,6 +151,7 @@ pub enum DatabaseStoreData {
     RI(RouterInfo),
     LS(LeaseSet),
     LS2(LeaseSet2),
+    EncLS2(EncryptedLS2),
     MetaLS2(MetaLeaseSet2),
 }
 

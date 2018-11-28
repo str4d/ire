@@ -234,6 +234,12 @@ impl Future for Engine {
                                 DatabaseStoreData::LS2(_) => {
                                     debug!("Received LeaseSet2 in msg {} from {}", msg.id, from);
                                 }
+                                DatabaseStoreData::EncLS2(_) => {
+                                    debug!(
+                                        "Received EncryptedLeaseSet2 in msg {} from {}",
+                                        msg.id, from
+                                    );
+                                }
                                 DatabaseStoreData::MetaLS2(_) => {
                                     debug!(
                                         "Received MetaLeaseSet2 in msg {} from {}",
