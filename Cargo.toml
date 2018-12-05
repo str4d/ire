@@ -18,6 +18,7 @@ block-modes = "0.2"
 bloom-filter-rs = "0.1"
 byteorder = "1.2"
 bytes = "0.4"
+c2-chacha = "0.1"
 chrono = "0.4"
 clap = { version = "2.32", optional = true }
 config = { version = "0.9", default-features = false, features = ["toml"] }
@@ -26,6 +27,7 @@ data-encoding = "2.1"
 env_logger = { version = "0.6", optional = true }
 flate2 = "1.0"
 futures = "0.1"
+hkdf = "0.7"
 i2p_ring = { git = "https://github.com/str4d/ring.git", rev = "7fe5a141201e4931ea2bbcd7eb3302fbf22867e9" }
 i2p_snow = "0.5.1"
 itertools = "0.8"
