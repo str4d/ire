@@ -219,6 +219,33 @@ impl Certificate {
     }
 }
 
+fn cert_and_padding_from_keys(
+    _public_key: &PublicKey,
+    signing_key: &SigningPublicKey,
+) -> (Certificate, Option<Vec<u8>>) {
+    let certificate = match signing_key.sig_type() {
+        SigType::DsaSha1 => Certificate::Null,
+        SigType::Ed25519 => Certificate::Key(KeyCertificate {
+            sig_type: SigType::Ed25519,
+            enc_type: EncType::ElGamal2048,
+            sig_data: vec![],
+            enc_data: vec![],
+        }),
+        _ => panic!("Not implemented!"),
+    };
+    let padding = match signing_key.sig_type().pad_len(EncType::ElGamal2048) {
+        0 => None,
+        sz => {
+            let mut rng = OsRng::new().expect("should be able to construct RNG");
+            let mut padding = Vec::new();
+            padding.resize(sz, 0);
+            rng.fill(&mut padding[..]);
+            Some(padding)
+        }
+    };
+    (certificate, padding)
+}
+
 /// Defines the way to uniquely identify a particular router.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RouterIdentity {
@@ -238,26 +265,7 @@ impl RouterIdentity {
     }
 
     fn from_keys(public_key: PublicKey, signing_key: SigningPublicKey) -> Self {
-        let certificate = match signing_key.sig_type() {
-            SigType::DsaSha1 => Certificate::Null,
-            SigType::Ed25519 => Certificate::Key(KeyCertificate {
-                sig_type: SigType::Ed25519,
-                enc_type: EncType::ElGamal2048,
-                sig_data: vec![],
-                enc_data: vec![],
-            }),
-            _ => panic!("Not implemented!"),
-        };
-        let padding = match signing_key.sig_type().pad_len(EncType::ElGamal2048) {
-            0 => None,
-            sz => {
-                let mut rng = OsRng::new().expect("should be able to construct RNG");
-                let mut padding = Vec::new();
-                padding.resize(sz, 0);
-                rng.fill(&mut padding[..]);
-                Some(padding)
-            }
-        };
+        let (certificate, padding) = cert_and_padding_from_keys(&public_key, &signing_key);
         RouterIdentity {
             public_key,
             padding,
@@ -358,6 +366,18 @@ pub struct Destination {
     padding: Option<Vec<u8>>,
     signing_key: SigningPublicKey,
     certificate: Certificate,
+}
+
+impl Destination {
+    pub fn from_keys(public_key: PublicKey, signing_key: SigningPublicKey) -> Self {
+        let (certificate, padding) = cert_and_padding_from_keys(&public_key, &signing_key);
+        Destination {
+            public_key,
+            padding,
+            signing_key,
+            certificate,
+        }
+    }
 }
 
 /// Defines the authorization for a particular tunnel to receive messages
