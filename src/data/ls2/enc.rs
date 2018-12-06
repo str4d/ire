@@ -324,7 +324,13 @@ impl EncryptedLS2 {
 
 #[cfg(test)]
 mod tests {
-    use super::{EncLS2Payload, EncryptedLS2, Encryptor};
+    use rand::{thread_rng, RngCore};
+    use x25519_dalek::{x25519, X25519_BASEPOINT_BYTES};
+
+    use super::{
+        auth::{ClientInfo, ClientSecretKey, X25519ClientInfo},
+        EncLS2Payload, EncryptedLS2, Encryptor,
+    };
     use crate::crypto::{SigningPrivateKey, SigningPublicKey};
     use crate::data::{dest::DestinationSecretKeys, ls2::LeaseSet2};
 
@@ -377,6 +383,64 @@ mod tests {
 
         // Can decrypt without any client key
         match enc_ls2.decrypt(credential, None).unwrap() {
+            EncLS2Payload::LS2(decrypted_ls2) => {
+                assert_eq!(decrypted_ls2.header.created, 123_456_789);
+                assert_eq!(decrypted_ls2.header.expires, 2345);
+                assert!(decrypted_ls2.header.transient.is_none());
+                assert!(!decrypted_ls2.header.published);
+                assert!(decrypted_ls2.enc_keys.is_empty());
+                assert!(decrypted_ls2.leases.is_empty());
+                assert!(decrypted_ls2.signature.is_some());
+            }
+            _ => panic!(),
+        }
+
+        // Decryption ignores a client key (e.g. if the Destination turns off client auth)
+        assert!(enc_ls2
+            .decrypt(credential, Some(&ClientSecretKey::X25519([0; 32])))
+            .is_ok());
+    }
+
+    #[test]
+    fn enc_ls2_client_auth_round_trip() {
+        let mut rng = thread_rng();
+        let ls2 = fake_ls2(123_456_789, 2345);
+
+        let payload = EncLS2Payload::LS2(ls2);
+        let credential = b"credential";
+
+        let blinded_privkey = SigningPrivateKey::new();
+        let blinded_pubkey = SigningPublicKey::from_secret(&blinded_privkey).unwrap();
+
+        let mut x25519_sk = [0u8; 32];
+        rng.fill_bytes(&mut x25519_sk[..]);
+        let x25519_pk = x25519(x25519_sk, X25519_BASEPOINT_BYTES);
+
+        let auth_key = ClientSecretKey::X25519(x25519_sk);
+        let client_info = ClientInfo::X25519(vec![X25519ClientInfo(x25519_pk)]);
+
+        // Encrypt the payload with a list of authorized clients
+        let enc_ls2 = EncryptedLS2::encrypt_payload(
+            &payload,
+            credential,
+            blinded_pubkey,
+            None,
+            &blinded_privkey,
+            Some(client_info),
+        )
+        .unwrap();
+
+        // Cannot decrypt without a valid client key
+        assert!(enc_ls2.decrypt(credential, None).is_err());
+
+        // Cannot decrypt with an unauthorized client key
+        let mut x25519_sk2 = [0u8; 32];
+        rng.fill_bytes(&mut x25519_sk2[..]);
+        let unauthorized = ClientSecretKey::X25519(x25519_sk2);
+        assert!(enc_ls2.decrypt(credential, Some(&unauthorized)).is_err());
+
+        // Can decrypt with the correct client key
+        match enc_ls2.decrypt(credential, Some(&auth_key)).unwrap() {
             EncLS2Payload::LS2(decrypted_ls2) => {
                 assert_eq!(decrypted_ls2.header.created, 123_456_789);
                 assert_eq!(decrypted_ls2.header.expires, 2345);
