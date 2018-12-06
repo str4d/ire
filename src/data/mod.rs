@@ -5,7 +5,7 @@
 use chrono::{DateTime, Utc};
 use cookie_factory::GenError;
 use nom::{self, Needed};
-use rand::{OsRng, Rng};
+use rand::{rngs::OsRng, Rng};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::fmt;

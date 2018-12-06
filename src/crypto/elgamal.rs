@@ -8,7 +8,7 @@
 
 use num_bigint::{BigUint, RandBigInt};
 use num_traits::Zero;
-use rand::{OsRng, Rng};
+use rand::{rngs::OsRng, Rng};
 use sha2::{Digest, Sha256};
 use std::ops::{Mul, Rem, Sub};
 

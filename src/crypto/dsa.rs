@@ -7,7 +7,7 @@
 
 use num_bigint::{BigUint, RandBigInt};
 use num_traits::Zero;
-use rand::OsRng;
+use rand::rngs::OsRng;
 use sha1::Sha1;
 
 use super::math::rectify;

@@ -32,7 +32,7 @@ use cookie_factory::GenError;
 use futures::{sync::mpsc, task, Async, Future, Poll, Sink, Stream};
 use i2p_snow::{self, Builder};
 use nom::Err;
-use rand::{OsRng, Rng};
+use rand::{rngs::OsRng, Rng};
 use siphasher::sip::SipHasher;
 use std::fmt;
 use std::fs::File;

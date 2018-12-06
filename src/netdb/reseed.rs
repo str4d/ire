@@ -1,6 +1,6 @@
 use futures::{Async, Future, Poll};
 use native_tls::{Certificate, TlsConnector};
-use rand::{thread_rng, Rng};
+use rand::{seq::SliceRandom, thread_rng};
 use std::collections::HashMap;
 use std::io;
 use std::net::ToSocketAddrs;
@@ -178,7 +178,7 @@ impl HttpsReseeder {
         let cx = cx.build().unwrap();
 
         let mut hosts: Vec<_> = DEFAULT_RESEED_HOSTS.to_vec();
-        thread_rng().shuffle(&mut hosts);
+        hosts.shuffle(&mut thread_rng());
         let active = reseed_from_host(&cx, hosts.swap_remove(0));
 
         HttpsReseeder {

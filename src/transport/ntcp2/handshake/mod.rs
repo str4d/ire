@@ -3,7 +3,7 @@ use cookie_factory::GenError;
 use futures::{Async, Future, Poll};
 use i2p_snow::{Builder, Session};
 use nom::Err;
-use rand::{OsRng, Rng};
+use rand::{rngs::OsRng, Rng};
 use siphasher::sip::SipHasher;
 use std::io;
 use std::net::SocketAddr;

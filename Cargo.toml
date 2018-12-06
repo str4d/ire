@@ -33,7 +33,7 @@ native-tls = "0.2"
 nom = "4.0"
 num-bigint = { version = "0.2", features = ["rand"] }
 num-traits = "0.2"
-rand = "0.5"
+rand = "0.6"
 ring = "0.13"
 sha1 = "0.6"
 sha2 = "0.8"
