@@ -42,7 +42,8 @@ macro_rules! reseed_cert {
             OfflineSigningPublicKey::from_bytes(
                 SigType::$sig_type,
                 include_bytes!(concat!("../../assets/certificates/reseed/", $der_file)),
-            ).unwrap(),
+            )
+            .unwrap(),
         );
     };
 }
@@ -102,7 +103,8 @@ fn reseed_from_host(
         .and_then(move |socket| {
             cx.connect(host.0, socket)
                 .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
-        }).and_then(move |socket| {
+        })
+        .and_then(move |socket| {
             tokio_io::io::write_all(
                 socket,
                 format!(
@@ -115,7 +117,8 @@ fn reseed_from_host(
                     path, host.0
                 ),
             )
-        }).and_then(|(socket, _)| tokio_io::io::read_to_end(socket, Vec::new()))
+        })
+        .and_then(|(socket, _)| tokio_io::io::read_to_end(socket, Vec::new()))
         .and_then(|(_, data)| {
             Su3File::from_http_data(&data, &RESEED_SIGNERS).map_err(|e| match e {
                 FileError::Http(status) => match status {

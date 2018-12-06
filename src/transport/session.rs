@@ -72,7 +72,8 @@ impl<F> SessionState<F> {
                 // No pending session, let's create one
                 connect_to_peer();
                 vec![]
-            }).push(frame);
+            })
+            .push(frame);
     }
 }
 

@@ -292,9 +292,11 @@ where
     {
         let filter = |ra: &RouterAddress| {
             match ra.option(&NTCP2_OPT_V) {
-                Some(v) => if !v.to_csv().contains(&NTCP2_VERSION) {
-                    return false;
-                },
+                Some(v) => {
+                    if !v.to_csv().contains(&NTCP2_VERSION) {
+                        return false;
+                    }
+                }
                 None => return false,
             };
             ra.option(&NTCP2_OPT_S).is_some() && ra.option(&NTCP2_OPT_I).is_some()
@@ -407,7 +409,8 @@ where
                         padlen,
                         self.sc_len as u16,
                         ts_a,
-                    ).map(|tup| tup.1)
+                    )
+                    .map(|tup| tup.1)
                     {
                         Ok(sz) if sz == sr_buf.len() => (),
                         Ok(_) => panic!("Size mismatch"),
@@ -597,7 +600,8 @@ mod tests {
             &bob_static_public_key,
             &alice_ri,
             bob_ri,
-        ).unwrap();
+        )
+        .unwrap();
         let mut bob = IBHandshake::new(
             bob_net,
             &bob_static_private_key,
@@ -753,7 +757,8 @@ mod tests {
                             &bob_aesobfse_key,
                             &bob_aesobfse_iv,
                         )
-                    }).and_then(|(ri, conn)| {
+                    })
+                    .and_then(|(ri, conn)| {
                         let drain = Drain { sock: conn };
                         drain
                             .map(|_| ())
@@ -765,13 +770,15 @@ mod tests {
                     &bob_static_public_key,
                     alice_ri.clone(),
                     bob_ri.clone(),
-                ).unwrap()
+                )
+                .unwrap()
                 .and_then(move |(ri, conn)| Transfer {
                     sock: conn,
                     rem: MB,
                     chunk: write_size,
                     frame_size,
-                }).map_err(|e| panic!("client err: {:?}", e));
+                })
+                .map_err(|e| panic!("client err: {:?}", e));
 
                 server.join(client).wait().unwrap();
             });

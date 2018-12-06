@@ -495,7 +495,8 @@ impl RouterInfo {
             .filter(|a| match a.addr() {
                 Some(addr) => addr.is_ipv4(),
                 None => false,
-            }).find(|a| filter(a))
+            })
+            .find(|a| filter(a))
             .map(|a| (*a).clone())
     }
 

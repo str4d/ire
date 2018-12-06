@@ -142,7 +142,8 @@ impl Engine {
             sleep(Duration::from_secs(ENGINE_DOWNTIME))
                 .map_err(|e| {
                     error!("NetDB timer error: {}", e);
-                }).and_then(|_| future::ok((self, false))),
+                })
+                .and_then(|_| future::ok((self, false))),
         )
     }
 }
@@ -261,22 +262,24 @@ impl NetworkDatabase for LocalNetworkDatabase {
 
         match local {
             Some(f) => f,
-            None => if let Some(ctx) = ctx {
-                // TODO: Handle case where we don't know any floodfills
-                match from_peer.or_else(|| self.select_closest_ff(key)) {
-                    Some(ff) => lookup::lookup_db_entry(
-                        ctx,
-                        key.clone(),
-                        DatabaseLookupType::RouterInfo,
-                        ff,
-                        &mut self.pending_ri,
-                        timeout_ms,
-                    ),
-                    None => Box::new(future::err(LookupError::NotFound)),
+            None => {
+                if let Some(ctx) = ctx {
+                    // TODO: Handle case where we don't know any floodfills
+                    match from_peer.or_else(|| self.select_closest_ff(key)) {
+                        Some(ff) => lookup::lookup_db_entry(
+                            ctx,
+                            key.clone(),
+                            DatabaseLookupType::RouterInfo,
+                            ff,
+                            &mut self.pending_ri,
+                            timeout_ms,
+                        ),
+                        None => Box::new(future::err(LookupError::NotFound)),
+                    }
+                } else {
+                    Box::new(future::err(LookupError::NotFound))
                 }
-            } else {
-                Box::new(future::err(LookupError::NotFound))
-            },
+            }
         }
     }
 
@@ -304,23 +307,25 @@ impl NetworkDatabase for LocalNetworkDatabase {
 
         match local {
             Some(f) => f,
-            None => if let Some(ctx) = ctx {
-                // TODO: Handle case where we don't know any floodfills
-                // TODO: Handle from_local_dest case
-                match self.select_closest_ff(key) {
-                    Some(ff) => lookup::lookup_db_entry(
-                        ctx,
-                        key.clone(),
-                        DatabaseLookupType::LeaseSet,
-                        ff,
-                        &mut self.pending_ls,
-                        timeout_ms,
-                    ),
-                    None => Box::new(future::err(LookupError::NotFound)),
+            None => {
+                if let Some(ctx) = ctx {
+                    // TODO: Handle case where we don't know any floodfills
+                    // TODO: Handle from_local_dest case
+                    match self.select_closest_ff(key) {
+                        Some(ff) => lookup::lookup_db_entry(
+                            ctx,
+                            key.clone(),
+                            DatabaseLookupType::LeaseSet,
+                            ff,
+                            &mut self.pending_ls,
+                            timeout_ms,
+                        ),
+                        None => Box::new(future::err(LookupError::NotFound)),
+                    }
+                } else {
+                    Box::new(future::err(LookupError::NotFound))
                 }
-            } else {
-                Box::new(future::err(LookupError::NotFound))
-            },
+            }
         }
     }
 

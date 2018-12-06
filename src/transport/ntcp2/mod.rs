@@ -113,7 +113,8 @@ impl fmt::Debug for Block {
                 "RouterInfo ({}, flood: {})",
                 ri.router_id.hash(),
                 flags.flood
-            ).fmt(formatter),
+            )
+            .fmt(formatter),
             Block::Message(_) => "I2NP message".fmt(formatter),
             Block::Termination(_, rsn, _) => {
                 format!("Termination (reason: {})", rsn).fmt(formatter)
@@ -594,9 +595,11 @@ impl Transport for Manager {
 
         let filter = |ra: &RouterAddress| {
             match ra.option(&NTCP2_OPT_V) {
-                Some(v) => if !v.to_csv().contains(&NTCP2_VERSION) {
-                    return false;
-                },
+                Some(v) => {
+                    if !v.to_csv().contains(&NTCP2_VERSION) {
+                        return false;
+                    }
+                }
                 None => return false,
             };
             ra.option(&NTCP2_OPT_S).is_some() && ra.option(&NTCP2_OPT_I).is_some()
@@ -781,7 +784,8 @@ mod tests {
                     Block::Message,
                     |_| panic!(),
                     |_, peer| assert_eq!(peer, ri),
-                ).unwrap();
+                )
+                .unwrap();
 
             // Still not received
             received.clear();
@@ -798,7 +802,8 @@ mod tests {
             assert_eq!(&received, &DUMMY_MSG_NTCP2_DATA);
 
             Ok::<(), ()>(())
-        }).wait()
+        })
+        .wait()
         .unwrap();
     }
 
@@ -846,7 +851,8 @@ mod tests {
             }
 
             Ok::<(), ()>(())
-        }).wait()
+        })
+        .wait()
         .unwrap();
     }
 }

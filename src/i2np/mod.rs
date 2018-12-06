@@ -145,7 +145,8 @@ impl fmt::Display for DatabaseLookup {
                 } else {
                     acc + &"\n" + &peer
                 })
-        ).fmt(f)
+        )
+        .fmt(f)
     }
 }
 
@@ -171,7 +172,8 @@ impl fmt::Display for DatabaseSearchReply {
                 }
             ),
             self.from
-        ).fmt(f)
+        )
+        .fmt(f)
     }
 }
 
@@ -188,7 +190,8 @@ impl fmt::Display for DeliveryStatus {
         format!(
             "DeliveryStatus\n- mid: {}\n- ts: {}",
             self.msg_id, self.time_stamp
-        ).fmt(f)
+        )
+        .fmt(f)
     }
 }
 
@@ -272,7 +275,8 @@ impl fmt::Debug for MessagePayload {
             MessagePayload::DeliveryStatus(ref ds) => format!(
                 "DeliveryStatus (mid: {:?}, ts: {:?})",
                 ds.msg_id, ds.time_stamp
-            ).fmt(formatter),
+            )
+            .fmt(formatter),
             MessagePayload::Garlic(_) => "Garlic".fmt(formatter),
             MessagePayload::TunnelData(ref td) => {
                 format!("TunnelData (tid: {:?})", td.tid).fmt(formatter)
@@ -328,7 +332,8 @@ impl fmt::Display for Message {
         format!(
             "Message ID: {}\nExpiration: {}\nPayload: {}",
             self.id, self.expiration, self.payload
-        ).fmt(f)
+        )
+        .fmt(f)
     }
 }
 
@@ -403,7 +408,8 @@ mod tests {
                 Message::from_payload(MessagePayload::DeliveryStatus(DeliveryStatus {
                     msg_id: 0,
                     time_stamp: I2PDate::from_system_time(SystemTime::now())
-                })).$size_func(),
+                }))
+                .$size_func(),
                 $header_size + 12
             );
         }};
