@@ -21,7 +21,7 @@ clap = { version = "2.32", optional = true }
 config = { version = "0.9", default-features = false, features = ["toml"] }
 cookie-factory = "0.2"
 data-encoding = "2.1"
-env_logger = { version = "0.5", optional = true }
+env_logger = { version = "0.6", optional = true }
 flate2 = "1.0"
 futures = "0.1"
 i2p_ring = { git = "https://github.com/str4d/ring.git", rev = "b389a90d0e1097c6703b241dc5c67b9b1d699551" }
