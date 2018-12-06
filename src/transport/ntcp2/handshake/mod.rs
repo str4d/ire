@@ -641,14 +641,14 @@ mod tests {
         use std::io;
         use std::time::Duration;
         use test::Bencher;
-        use tokio::net::{TcpListener, TcpStream};
         use tokio_codec::Framed;
+        use tokio_tcp::{TcpListener, TcpStream};
 
         use data::{RouterInfo, RouterSecretKeys};
         use i2np::{Message, MessagePayload};
         use transport::ntcp2::{
             handshake::{IBHandshake, OBHandshake},
-            Block, Codec, Engine,
+            Block, Codec, Manager,
         };
 
         const MB: usize = 3 * 1024 * 1024;
@@ -726,16 +726,16 @@ mod tests {
                 bob_aesobfse_iv,
             ) = {
                 let sk = RouterSecretKeys::new();
-                let engine = Engine::new("127.0.0.1:0".parse().unwrap());
+                let (mgr, engine) = Manager::new("127.0.0.1:0".parse().unwrap());
                 let mut ri = RouterInfo::new(sk.rid.clone());
-                ri.set_addresses(vec![engine.address()]);
+                ri.set_addresses(vec![mgr.address()]);
                 ri.sign(&sk.signing_private_key);
                 (
                     ri,
-                    engine.static_public_key,
-                    engine.static_private_key,
+                    mgr.static_public_key,
+                    mgr.static_private_key,
                     sk.rid.hash().0,
-                    engine.aesobfse_iv,
+                    mgr.aesobfse_iv,
                 )
             };
 
@@ -768,7 +768,7 @@ mod tests {
                 let client = OBHandshake::new(
                     |sa| Box::new(TcpStream::connect(&addr)),
                     &bob_static_public_key,
-                    alice_ri.clone(),
+                    &alice_ri,
                     bob_ri.clone(),
                 )
                 .unwrap()
