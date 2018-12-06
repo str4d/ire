@@ -49,7 +49,7 @@ tokio-tcp = "0.1"
 tokio-timer = "0.2"
 tokio-tls = "0.2"
 untrusted = "0.6"
-zip = { version = "0.4", default-features = false, features = ["deflate"] }
+zip = { version = "0.5", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
 pretty_assertions = "0.5"
