@@ -367,7 +367,8 @@ mod tests {
             );
 
             Ok::<(), ()>(())
-        }).wait()
+        })
+        .wait()
         .unwrap();
     }
 
@@ -402,7 +403,8 @@ mod tests {
             );
 
             Ok::<(), ()>(())
-        }).wait()
+        })
+        .wait()
         .unwrap();
     }
 

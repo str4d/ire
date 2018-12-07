@@ -33,7 +33,8 @@ fn inner_main() -> i32 {
                     .help("Path to the router's TOML config file")
                     .required(true),
             ),
-        ).subcommand(
+        )
+        .subcommand(
             SubCommand::with_name("cli")
                 .subcommand(
                     SubCommand::with_name("gen").arg(
@@ -41,24 +42,29 @@ fn inner_main() -> i32 {
                             .help("Path to write the router.keys.dat to")
                             .required(true),
                     ),
-                ).subcommand(
+                )
+                .subcommand(
                     SubCommand::with_name("client")
                         .arg(
                             Arg::with_name("routerKeys")
                                 .help("Path to the client's router.keys.dat")
                                 .required(true),
-                        ).arg(
+                        )
+                        .arg(
                             Arg::with_name("peerInfo")
                                 .help("Path to the peer's router.info file")
                                 .required(true),
-                        ).arg(
+                        )
+                        .arg(
                             Arg::with_name("transport")
                                 .help("Transport to test")
                                 .possible_values(&["NTCP", "NTCP2"])
                                 .required(true),
                         ),
-                ).subcommand(SubCommand::with_name("reseed")),
-        ).get_matches();
+                )
+                .subcommand(SubCommand::with_name("reseed")),
+        )
+        .get_matches();
 
     match matches.subcommand() {
         ("router", Some(matches)) => cli_router(matches),
@@ -114,11 +120,13 @@ fn cli_client(args: &ArgMatches) -> i32 {
                     handle
                         .timestamp(peer_ri.clone(), 42)
                         .map(|_| (handle, peer_ri))
-                }).and_then(|(handle, peer)| handle.send(peer, i2np::Message::dummy_data()))
+                })
+                .and_then(|(handle, peer)| handle.send(peer, i2np::Message::dummy_data()))
                 .and_then(|_| {
                     info!("Dummy data sent!");
                     Ok(())
-                }).map_err(|e| error!("Connection error: {}", e));
+                })
+                .map_err(|e| error!("Connection error: {}", e));
             tokio::run(
                 engine
                     .into_future()
@@ -141,11 +149,13 @@ fn cli_client(args: &ArgMatches) -> i32 {
                     handle
                         .timestamp(peer_ri.clone(), 42)
                         .map(|_| (handle, peer_ri))
-                }).and_then(|(handle, peer)| handle.send(peer, i2np::Message::dummy_data()))
+                })
+                .and_then(|(handle, peer)| handle.send(peer, i2np::Message::dummy_data()))
                 .and_then(|_| {
                     info!("Dummy data sent!");
                     Ok(())
-                }).map_err(|e| error!("Connection error: {}", e));
+                })
+                .map_err(|e| error!("Connection error: {}", e));
             tokio::run(
                 engine
                     .into_future()

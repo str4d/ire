@@ -99,7 +99,7 @@ mod tests {
             (&b"HTTP/1.1"[..], 1),
             (&b"HTTP/1.0 "[..], 3),
         ]
-            .iter()
+        .iter()
         {
             match Su3File::from_http_data(incomplete, &signers) {
                 Ok(_) => panic!("Wat"),
@@ -117,7 +117,7 @@ mod tests {
             &b"HTTP/1.0 12b"[..],
             &b"Spam/1.0 123"[..],
         ]
-            .iter()
+        .iter()
         {
             match Su3File::from_http_data(bad, &signers) {
                 Ok(_) => panic!("Wat"),
@@ -132,7 +132,7 @@ mod tests {
             (&b"HTTP/1.1 429"[..], 429),
             (&b"HTTP/1.0 429"[..], 429),
         ]
-            .iter()
+        .iter()
         {
             match Su3File::from_http_data(input, &signers) {
                 Ok(_) => panic!("Wat"),

@@ -1,5 +1,5 @@
 use num_bigint::{BigUint, RandBigInt};
-use rand::OsRng;
+use rand::rngs::OsRng;
 use std::iter::repeat;
 
 use constants::{ELGAMAL_G, ELGAMAL_P};

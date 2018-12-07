@@ -1,6 +1,6 @@
 use cookie_factory::*;
 use nom::{be_u16, be_u32, be_u64, be_u8};
-use rand::{OsRng, Rng};
+use rand::{rngs::OsRng, Rng};
 
 use data::frame::{gen_router_info, router_info};
 use data::RouterInfo;

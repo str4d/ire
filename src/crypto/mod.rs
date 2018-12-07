@@ -445,7 +445,8 @@ impl OfflineSigningPublicKey {
                     untrusted::Input::from(pk),
                     untrusted::Input::from(message),
                     untrusted::Input::from(s),
-                ).map_err(|_| Error::InvalidSignature)
+                )
+                .map_err(|_| Error::InvalidSignature)
             }
             (&OfflineSigningPublicKey::Rsa3072Sha384(ref pk), &Signature::Rsa3072Sha384(ref s)) => {
                 ring_signature::verify(
@@ -453,7 +454,8 @@ impl OfflineSigningPublicKey {
                     untrusted::Input::from(pk),
                     untrusted::Input::from(message),
                     untrusted::Input::from(s),
-                ).map_err(|_| Error::InvalidSignature)
+                )
+                .map_err(|_| Error::InvalidSignature)
             }
             (&OfflineSigningPublicKey::Rsa4096Sha512(ref pk), &Signature::Rsa4096Sha512(ref s)) => {
                 ring_signature::verify(
@@ -461,7 +463,8 @@ impl OfflineSigningPublicKey {
                     untrusted::Input::from(pk),
                     untrusted::Input::from(message),
                     untrusted::Input::from(s),
-                ).map_err(|_| Error::InvalidSignature)
+                )
+                .map_err(|_| Error::InvalidSignature)
             }
             _ => Err(Error::TypeMismatch),
         }

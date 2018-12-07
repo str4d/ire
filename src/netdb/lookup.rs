@@ -94,7 +94,8 @@ fn process_dsr(
                         SINGLE_LOOKUP_TIMEOUT * 1000,
                         Some(from.clone()),
                     )
-                }).collect();
+                })
+                .collect();
 
             // Collect all lookups that succeed
             future::loop_fn((vec![], peer_lookups), |(mut found, peer_lookups)| {

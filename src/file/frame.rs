@@ -42,7 +42,8 @@ fn su3_zip_reseed<'a>(input: &'a [u8], content_len: u64) -> IResult<&'a [u8], Su
                     None
                 }
             }
-        }).collect::<Result<_, _>>()?;
+        })
+        .collect::<Result<_, _>>()?;
 
     Ok((i, Su3Content::Reseed(ri)))
 }

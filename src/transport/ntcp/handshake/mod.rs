@@ -508,7 +508,8 @@ fn gen_session_confirm_sig_msg(state: &SharedHandshakeState, own_ri: bool) -> Ve
             ri,
             state.ts_a,
             state.ts_b,
-        ).map(|tup| tup.1)
+        )
+        .map(|tup| tup.1)
         {
             Ok(sz) => {
                 buf.truncate(sz);

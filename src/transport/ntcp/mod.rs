@@ -73,9 +73,11 @@ impl Decoder for Codec {
         // Encrypt message in-place
         match self.aes.decrypt_blocks(&mut buf[self.decrypted..]) {
             Some(end) => self.decrypted += end,
-            None => if self.decrypted == 0 {
-                return Ok(None);
-            },
+            None => {
+                if self.decrypted == 0 {
+                    return Ok(None);
+                }
+            }
         };
 
         // Parse a frame
@@ -505,7 +507,8 @@ mod tests {
                     Frame::Standard,
                     |_| panic!(),
                     |_, peer| assert_eq!(peer, ri),
-                ).unwrap();
+                )
+                .unwrap();
 
             // Still not received
             received.clear();
@@ -522,7 +525,8 @@ mod tests {
             assert_eq!(&received, &DUMMY_MSG_NTCP_DATA);
 
             Ok::<(), ()>(())
-        }).wait()
+        })
+        .wait()
         .unwrap();
     }
 
@@ -570,7 +574,8 @@ mod tests {
             }
 
             Ok::<(), ()>(())
-        }).wait()
+        })
+        .wait()
         .unwrap();
     }
 }
