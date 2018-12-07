@@ -9,7 +9,6 @@
 //! [I2NP specification](https://geti2p.net/spec/i2np)
 
 use cookie_factory::GenError;
-use nom::IResult;
 use rand::{thread_rng, Rng};
 use std::fmt;
 use std::iter::repeat;

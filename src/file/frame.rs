@@ -1,4 +1,4 @@
-use nom::{be_u16, be_u64, be_u8, Err, ErrorKind, IResult};
+use nom::*;
 use std::io::{Cursor, Read};
 use std::str::from_utf8;
 use zip;

@@ -11,8 +11,6 @@ extern crate futures;
 extern crate lazy_static;
 #[macro_use]
 extern crate log;
-#[macro_use]
-extern crate nom;
 
 #[cfg(all(test, feature = "nightly"))]
 extern crate test;

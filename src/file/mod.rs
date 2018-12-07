@@ -1,4 +1,4 @@
-use nom;
+use nom::{self, take_until};
 use std::collections::HashMap;
 
 use crate::crypto::{self, OfflineSigningPublicKey, SigType, Signature};

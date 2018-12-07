@@ -2,7 +2,7 @@ use cookie_factory::*;
 use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
-use nom::{be_u16, be_u32, be_u8, Context, Err, ErrorKind};
+use nom::*;
 use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
 
