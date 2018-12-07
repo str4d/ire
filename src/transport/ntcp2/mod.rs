@@ -55,10 +55,10 @@ use super::{
     },
     Bid, Handle, Transport,
 };
-use constants::I2P_BASE64;
-use data::{Hash, I2PString, RouterAddress, RouterIdentity, RouterInfo};
-use i2np::{DatabaseStore, Message, MessagePayload};
-use router::Context;
+use crate::constants::I2P_BASE64;
+use crate::data::{Hash, I2PString, RouterAddress, RouterIdentity, RouterInfo};
+use crate::i2np::{DatabaseStore, Message, MessagePayload};
+use crate::router::Context;
 
 #[allow(needless_pass_by_value)]
 mod frame;
@@ -105,7 +105,7 @@ pub enum Block {
 }
 
 impl fmt::Debug for Block {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
             Block::DateTime(ts) => format!("DateTime ({})", ts).fmt(formatter),
             Block::Options(_) => "Options".fmt(formatter),
@@ -201,7 +201,7 @@ impl Encoder for Codec {
     fn encode(&mut self, frame: Frame, buf: &mut BytesMut) -> io::Result<()> {
         match frame::gen_frame((&mut self.noise_buf, 0), &frame).map(|tup| tup.1) {
             Ok(sz) => {
-                let mut msg_len = sz + 16;
+                let msg_len = sz + 16;
 
                 let start = buf.len();
                 buf.extend(repeat(0).take(2 + msg_len));
@@ -406,7 +406,7 @@ pub struct Engine {
 
 impl Manager {
     pub fn new(addr: SocketAddr) -> (Self, Engine) {
-        let builder: Builder = Builder::new(NTCP2_NOISE_PROTOCOL_NAME.parse().unwrap());
+        let builder: Builder<'_> = Builder::new(NTCP2_NOISE_PROTOCOL_NAME.parse().unwrap());
         let dh = builder.generate_keypair().unwrap();
 
         let mut aesobfse_iv = [0; 16];
@@ -685,9 +685,9 @@ mod tests {
     use tokio_codec::{Decoder, Encoder};
 
     use super::{frame, session, Block, Frame, Session, NTCP2_MTU};
-    use i2np::Message;
-    use router::mock::mock_context;
-    use transport::tests::{AliceNet, BobNet, NetworkCable};
+    use crate::i2np::Message;
+    use crate::router::mock::mock_context;
+    use crate::transport::tests::{AliceNet, BobNet, NetworkCable};
 
     struct TestCodec;
 

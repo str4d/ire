@@ -1,10 +1,10 @@
 use cookie_factory::*;
 use itertools::Itertools;
-use nom::{be_u16, be_u32, be_u64, be_u8, Err, ErrorKind, IResult};
+use nom::*;
 
 use super::*;
-use constants;
-use crypto::frame::{
+use crate::constants;
+use crate::crypto::frame::{
     enc_type, gen_enc_type, gen_private_key, gen_public_key, gen_sig_type, gen_signature,
     gen_signing_key, gen_signing_private_key, private_key, public_key, sig_type, signature,
     signing_key, signing_private_key,
@@ -521,7 +521,7 @@ pub fn gen_router_info<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tests::ROUTER_INFO;
+    use crate::tests::ROUTER_INFO;
 
     use nom::HexDisplay;
 

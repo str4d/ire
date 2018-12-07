@@ -1,14 +1,14 @@
-use nom::{be_u16, be_u64, be_u8, Err, ErrorKind, IResult};
+use nom::*;
 use std::io::{Cursor, Read};
 use std::str::from_utf8;
 use zip;
 
 use super::{Error, Su3Content, Su3File, SU3_MAGIC};
-use crypto::{
+use crate::crypto::{
     frame::{sig_type, signature},
     SigType,
 };
-use data::{frame::router_info, ReadError};
+use crate::data::{frame::router_info, ReadError};
 
 named_args!(su3_sig_len(sig_type: SigType)<u16>,
     verify!(be_u16, |sig_len| sig_len as u32 == sig_type.sig_len())

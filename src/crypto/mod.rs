@@ -17,7 +17,7 @@ use signatory_ring::ecdsa::{P256Verifier, P384Verifier};
 use std::fmt;
 use untrusted;
 
-use constants;
+use crate::constants;
 
 #[allow(needless_pass_by_value)]
 pub(crate) mod frame;
@@ -42,7 +42,7 @@ pub enum Error {
 }
 
 impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Error::InvalidCiphertext => "Invalid ciphertext".fmt(f),
             Error::InvalidKey => "Invalid cryptographic key".fmt(f),
@@ -202,7 +202,7 @@ impl Clone for PublicKey {
 }
 
 impl fmt::Debug for PublicKey {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         self.0[..].fmt(formatter)
     }
 }
@@ -234,7 +234,7 @@ impl Clone for PrivateKey {
 }
 
 impl fmt::Debug for PrivateKey {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> Result<(), fmt::Error> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         self.0[..].fmt(formatter)
     }
 }

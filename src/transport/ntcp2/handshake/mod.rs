@@ -20,9 +20,9 @@ use super::{
     frame, Block, Codec, NTCP2_MTU, NTCP2_NOISE_PROTOCOL_NAME, NTCP2_OPT_I, NTCP2_OPT_S,
     NTCP2_OPT_V, NTCP2_STYLE, NTCP2_VERSION,
 };
-use constants::I2P_BASE64;
-use data::{RouterAddress, RouterIdentity, RouterInfo};
-use transport::ntcp::NTCP_STYLE;
+use crate::constants::I2P_BASE64;
+use crate::data::{RouterAddress, RouterIdentity, RouterInfo};
+use crate::transport::ntcp::NTCP_STYLE;
 
 const SESSION_REQUEST_PT_LEN: usize = 16;
 const SESSION_REQUEST_CT_LEN: usize = 32 + SESSION_REQUEST_PT_LEN + 16;
@@ -72,7 +72,7 @@ where
 {
     pub fn new(conn: T, static_key: &[u8], aesobfse_key: &[u8], aesobfse_iv: &[u8; 16]) -> Self {
         // Initialize our responder NoiseSession using a builder.
-        let builder: Builder = Builder::new(NTCP2_NOISE_PROTOCOL_NAME.parse().unwrap());
+        let builder: Builder<'_> = Builder::new(NTCP2_NOISE_PROTOCOL_NAME.parse().unwrap());
         let noise = builder
             .local_private_key(&static_key)
             .aesobfse(&aesobfse_key, &aesobfse_iv)
@@ -112,7 +112,7 @@ where
                     noise.read_message(&msg, &mut buf).unwrap();
 
                     // SessionRequest
-                    let (padlen, sclen, ts_a) = match frame::session_request(&buf) {
+                    let (padlen, sclen, _ts_a) = match frame::session_request(&buf) {
                         Err(e) => {
                             return io_err!(Other, format!("SessionRequest parse error: {:?}", e))
                         }
@@ -357,7 +357,7 @@ where
         let sc_len = sc_len + 16;
 
         // Initialize our initiator NoiseSession using a builder.
-        let builder: Builder = Builder::new(NTCP2_NOISE_PROTOCOL_NAME.parse().unwrap());
+        let builder: Builder<'_> = Builder::new(NTCP2_NOISE_PROTOCOL_NAME.parse().unwrap());
         let noise = builder
             .local_private_key(&static_key)
             .remote_public_key(&remote_key)
@@ -451,7 +451,7 @@ where
                     noise.read_message(&msg, &mut buf).unwrap();
 
                     // SessionCreated
-                    let (padlen, ts_b) = match frame::session_created(&buf) {
+                    let (padlen, _ts_b) = match frame::session_created(&buf) {
                         Err(e) => {
                             return io_err!(Other, format!("SessionCreated parse error: {:?}", e))
                         }
@@ -531,14 +531,14 @@ where
 #[cfg(test)]
 mod tests {
     use super::{IBHandshake, IBHandshakeState, OBHandshake, OBHandshakeState};
-    use transport::{
+    use crate::transport::{
         ntcp2::Manager,
         tests::{AliceNet, BobNet, NetworkCable},
     };
 
     use futures::{done, Async, Future};
 
-    use data::{RouterInfo, RouterSecretKeys};
+    use crate::data::{RouterInfo, RouterSecretKeys};
 
     macro_rules! test_poll {
         ($node:expr) => {
@@ -644,9 +644,9 @@ mod tests {
         use tokio_codec::Framed;
         use tokio_tcp::{TcpListener, TcpStream};
 
-        use data::{RouterInfo, RouterSecretKeys};
-        use i2np::{Message, MessagePayload};
-        use transport::ntcp2::{
+        use crate::data::{RouterInfo, RouterSecretKeys};
+        use crate::i2np::{Message, MessagePayload};
+        use crate::transport::ntcp2::{
             handshake::{IBHandshake, OBHandshake},
             Block, Codec, Manager,
         };

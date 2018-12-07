@@ -1,11 +1,10 @@
-use config::Config;
 use futures::{future::join_all, sync::oneshot, Future};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
 
-use data::{Hash, RouterInfo, RouterSecretKeys};
-use i2np::{DatabaseSearchReply, DatabaseStoreData, Message, MessagePayload};
-use netdb::netdb_engine;
+use crate::data::{Hash, RouterInfo, RouterSecretKeys};
+use crate::i2np::{DatabaseSearchReply, DatabaseStoreData, Message, MessagePayload};
+use crate::netdb::netdb_engine;
 
 mod builder;
 pub mod config;
@@ -13,16 +12,17 @@ pub mod mock;
 pub mod types;
 
 pub use self::builder::Builder;
+use self::config::Config;
 
 type PendingLookups = HashMap<(Hash, Hash), oneshot::Sender<DatabaseSearchReply>>;
 
 pub struct MessageHandler {
-    netdb: Arc<RwLock<types::NetworkDatabase>>,
+    netdb: Arc<RwLock<dyn types::NetworkDatabase>>,
     pending_lookups: Mutex<PendingLookups>,
 }
 
 impl MessageHandler {
-    pub fn new(netdb: Arc<RwLock<types::NetworkDatabase>>) -> Self {
+    pub fn new(netdb: Arc<RwLock<dyn types::NetworkDatabase>>) -> Self {
         MessageHandler {
             netdb,
             pending_lookups: Mutex::new(HashMap::new()),
@@ -88,9 +88,9 @@ pub struct Context {
     pub config: RwLock<Config>,
     pub keys: RouterSecretKeys,
     pub ri: Arc<RwLock<RouterInfo>>,
-    pub netdb: Arc<RwLock<types::NetworkDatabase>>,
-    pub comms: Arc<RwLock<types::CommSystem>>,
-    pub msg_handler: Arc<types::InboundMessageHandler>,
+    pub netdb: Arc<RwLock<dyn types::NetworkDatabase>>,
+    pub comms: Arc<RwLock<dyn types::CommSystem>>,
+    pub msg_handler: Arc<dyn types::InboundMessageHandler>,
 }
 
 impl Router {
@@ -100,7 +100,7 @@ impl Router {
     pub fn start(&mut self) -> impl Future<Item = (), Error = ()> {
         info!("Our router hash is {}", self.ctx.keys.rid.hash());
 
-        let components: Vec<Box<Future<Item = (), Error = ()> + Send>> = vec![
+        let components: Vec<Box<dyn Future<Item = (), Error = ()> + Send>> = vec![
             Box::new(
                 self.ctx
                     .comms

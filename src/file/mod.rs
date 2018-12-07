@@ -1,8 +1,8 @@
-use nom;
+use nom::{self, take_until};
 use std::collections::HashMap;
 
-use crypto::{self, OfflineSigningPublicKey, SigType, Signature};
-use data::{ReadError, RouterInfo};
+use crate::crypto::{self, OfflineSigningPublicKey, SigType, Signature};
+use crate::data::{ReadError, RouterInfo};
 
 mod frame;
 
@@ -81,10 +81,10 @@ mod tests {
     use std::collections::HashMap;
 
     use super::{Error, Su3Content, Su3File};
-    use crypto::SigType;
-    use data::ReadError;
-    use netdb::reseed::RESEED_SIGNERS;
-    use tests::I2PSEEDS_SU3;
+    use crate::crypto::SigType;
+    use crate::data::ReadError;
+    use crate::netdb::reseed::RESEED_SIGNERS;
+    use crate::tests::I2PSEEDS_SU3;
 
     #[test]
     fn reseed_http_errors() {

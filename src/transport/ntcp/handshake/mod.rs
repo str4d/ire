@@ -1,6 +1,6 @@
 use bytes::BytesMut;
 use cookie_factory::GenError;
-use futures::{sink, stream::StreamFuture, Async, Future, Poll, Sink, Stream};
+use futures::{sink, stream::StreamFuture, try_ready, Async, Future, Poll, Sink, Stream};
 use nom::{Err, Offset};
 use std::io;
 use std::iter::repeat;
@@ -10,9 +10,9 @@ use tokio_codec::{Decoder, Encoder, Framed, FramedParts};
 use tokio_io::{AsyncRead, AsyncWrite};
 
 use super::{Codec, NTCP_MTU};
-use crypto::{Aes256, Signature, SigningPrivateKey, AES_BLOCK_SIZE};
-use data::{Hash, RouterIdentity};
-use transport::DHSessionKeyBuilder;
+use crate::crypto::{Aes256, Signature, SigningPrivateKey, AES_BLOCK_SIZE};
+use crate::data::{Hash, RouterIdentity};
+use crate::transport::DHSessionKeyBuilder;
 
 #[allow(double_parens)]
 #[allow(needless_pass_by_value)]
@@ -878,11 +878,11 @@ where
 #[cfg(test)]
 mod tests {
     use super::{IBHandshake, IBHandshakeState, OBHandshake, OBHandshakeState};
-    use transport::tests::{AliceNet, BobNet, NetworkCable};
+    use crate::transport::tests::{AliceNet, BobNet, NetworkCable};
 
     use futures::{Async, Future};
 
-    use data::RouterSecretKeys;
+    use crate::data::RouterSecretKeys;
 
     macro_rules! test_poll {
         ($node:expr) => {

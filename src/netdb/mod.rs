@@ -10,9 +10,9 @@ use std::time::{Duration, SystemTime};
 use tokio_executor::spawn;
 use tokio_timer::{sleep, Delay};
 
-use data::{Hash, LeaseSet, RouterInfo, NET_ID};
-use i2np::DatabaseLookupType;
-use router::{
+use crate::data::{Hash, LeaseSet, RouterInfo, NET_ID};
+use crate::i2np::DatabaseLookupType;
+use crate::router::{
     config,
     types::{LookupError, NetworkDatabase, StoreError},
     Context,
@@ -64,7 +64,7 @@ impl Engine {
         future::ok(self)
     }
 
-    fn check_reseed(self) -> Box<Future<Item = Self, Error = ()> + Send> {
+    fn check_reseed(self) -> Box<dyn Future<Item = Self, Error = ()> + Send> {
         let enabled = self
             .ctx
             .config
@@ -80,7 +80,7 @@ impl Engine {
         }
     }
 
-    fn expire_router_infos(mut self) -> Box<Future<Item = Self, Error = ()> + Send> {
+    fn expire_router_infos(mut self) -> Box<dyn Future<Item = Self, Error = ()> + Send> {
         if let Ok(Async::Ready(())) = self.expire_ri_timer.poll() {
             // Expire RouterInfos
             if self.ctx.netdb.read().unwrap().known_routers() >= KEEP_ROUTERS {
@@ -96,7 +96,7 @@ impl Engine {
         Box::new(future::ok(self))
     }
 
-    fn expire_lease_sets(mut self) -> Box<Future<Item = Self, Error = ()> + Send> {
+    fn expire_lease_sets(mut self) -> Box<dyn Future<Item = Self, Error = ()> + Send> {
         if let Ok(Async::Ready(())) = self.expire_ls_timer.poll() {
             // Expire LeaseSets
             self.ctx.netdb.write().unwrap().expire_lease_sets();
@@ -106,7 +106,7 @@ impl Engine {
         Box::new(future::ok(self))
     }
 
-    fn explore(mut self) -> Box<Future<Item = Self, Error = ()> + Send> {
+    fn explore(mut self) -> Box<dyn Future<Item = Self, Error = ()> + Send> {
         if let Ok(Async::Ready(())) = self.explore_timer.poll() {
             let netdb = self.ctx.netdb.read().unwrap();
             debug!("Known routers before exploring: {}", netdb.known_routers());
@@ -136,7 +136,7 @@ impl Engine {
         Box::new(future::ok(self))
     }
 
-    fn finish_cycle(self) -> Box<Future<Item = (Self, bool), Error = ()> + Send> {
+    fn finish_cycle(self) -> Box<dyn Future<Item = (Self, bool), Error = ()> + Send> {
         trace!("Finished NetDB engine cycle");
         Box::new(
             sleep(Duration::from_secs(ENGINE_DOWNTIME))
@@ -148,7 +148,7 @@ impl Engine {
     }
 }
 
-pub fn netdb_engine(ctx: Arc<Context>) -> Box<Future<Item = (), Error = ()> + Send> {
+pub fn netdb_engine(ctx: Arc<Context>) -> Box<dyn Future<Item = (), Error = ()> + Send> {
     Box::new(future::loop_fn(Engine::new(ctx), |engine| {
         engine
             .start_cycle()
@@ -244,9 +244,9 @@ impl NetworkDatabase for LocalNetworkDatabase {
         key: &Hash,
         timeout_ms: u64,
         from_peer: Option<RouterInfo>,
-    ) -> Box<Future<Item = RouterInfo, Error = LookupError> + Send> {
+    ) -> Box<dyn Future<Item = RouterInfo, Error = LookupError> + Send> {
         // First look for it locally, either available or pending
-        let local: Option<Box<Future<Item = RouterInfo, Error = LookupError> + Send>> =
+        let local: Option<Box<dyn Future<Item = RouterInfo, Error = LookupError> + Send>> =
             match self.ri_ds.get(key) {
                 Some(ri) => Some(Box::new(future::ok(ri.clone()))),
                 None => match self.pending_ri.get_mut(key) {
@@ -288,10 +288,10 @@ impl NetworkDatabase for LocalNetworkDatabase {
         ctx: Option<Arc<Context>>,
         key: &Hash,
         timeout_ms: u64,
-        from_local_dest: Option<Hash>,
-    ) -> Box<Future<Item = LeaseSet, Error = LookupError>> {
+        _from_local_dest: Option<Hash>,
+    ) -> Box<dyn Future<Item = LeaseSet, Error = LookupError>> {
         // First look for it locally, either available or pending
-        let local: Option<Box<Future<Item = LeaseSet, Error = LookupError>>> =
+        let local: Option<Box<dyn Future<Item = LeaseSet, Error = LookupError>>> =
             match self.ls_ds.get(key) {
                 Some(ls) => Some(Box::new(future::ok(ls.clone()))),
                 None => match self.pending_ls.get_mut(key) {
@@ -411,9 +411,9 @@ mod tests {
     use std::time::{Duration, SystemTime};
 
     use super::{router_info_is_current, LocalNetworkDatabase, XorMetric, ROUTER_INFO_EXPIRATION};
-    use crypto;
-    use data::{Hash, I2PDate, RouterInfo, RouterSecretKeys, OPT_NET_ID};
-    use router::types::{NetworkDatabase, StoreError};
+    use crate::crypto;
+    use crate::data::{Hash, I2PDate, RouterInfo, RouterSecretKeys, OPT_NET_ID};
+    use crate::router::types::{NetworkDatabase, StoreError};
 
     #[test]
     fn xor_metric() {

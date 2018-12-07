@@ -6,10 +6,10 @@ use std::iter::once;
 use std::sync::Arc;
 use tokio_io::IoFuture;
 
-use crypto::dh::DHSessionKeyBuilder;
-use data::{Hash, RouterAddress, RouterInfo};
-use i2np::Message;
-use router::{
+use crate::crypto::dh::DHSessionKeyBuilder;
+use crate::data::{Hash, RouterAddress, RouterInfo};
+use crate::i2np::Message;
+use crate::router::{
     config,
     types::{CommSystem, InboundMessageHandler, OutboundMessageHandler},
     Context,
@@ -87,7 +87,7 @@ pub struct Manager {
 
 pub struct Engine {
     engines: Select<ntcp::Engine, ntcp2::Engine>,
-    msg_handler: Arc<InboundMessageHandler>,
+    msg_handler: Arc<dyn InboundMessageHandler>,
 }
 
 trait Transport {
@@ -218,7 +218,7 @@ mod tests {
     use tokio_io::{AsyncRead, AsyncWrite};
 
     use super::*;
-    use data::{Hash, RouterSecretKeys};
+    use crate::data::{Hash, RouterSecretKeys};
 
     pub struct NetworkCable {
         alice_to_bob: Vec<u8>,
@@ -336,7 +336,7 @@ mod tests {
         let (timestamp, mut timestamp_rx) = mpsc::unbounded();
         let handle = Handle { message, timestamp };
 
-        let hash = Hash::from_bytes(&[0; 32]);
+        let _hash = Hash::from_bytes(&[0; 32]);
         let msg = Message::dummy_data();
         let mut msg2 = Message::dummy_data();
         // Ensure the two messages are identical

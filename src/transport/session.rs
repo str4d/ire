@@ -6,9 +6,9 @@ use std::io;
 use std::sync::{Arc, Mutex};
 
 use super::{Handle, MessageRx, TimestampRx};
-use data::{Hash, RouterInfo};
-use i2np::Message;
-use router::Context;
+use crate::data::{Hash, RouterInfo};
+use crate::i2np::Message;
+use crate::router::Context;
 
 //
 // Session state
