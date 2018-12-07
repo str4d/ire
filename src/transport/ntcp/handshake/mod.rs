@@ -1,6 +1,6 @@
 use bytes::BytesMut;
 use cookie_factory::GenError;
-use futures::{sink, stream::StreamFuture, Async, Future, Poll, Sink, Stream};
+use futures::{sink, stream::StreamFuture, try_ready, Async, Future, Poll, Sink, Stream};
 use nom::{Err, Offset};
 use std::io;
 use std::iter::repeat;

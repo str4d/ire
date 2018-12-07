@@ -6,8 +6,6 @@
 #[macro_use]
 extern crate arrayref;
 #[macro_use]
-extern crate futures;
-#[macro_use]
 extern crate lazy_static;
 #[macro_use]
 extern crate log;
