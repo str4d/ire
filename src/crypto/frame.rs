@@ -1,8 +1,8 @@
 use cookie_factory::*;
 use nom::{be_u16, Err, ErrorKind, IResult};
 
-use constants;
-use crypto::{
+use crate::constants;
+use crate::crypto::{
     EncType, PrivateKey, PublicKey, SessionKey, SigType, Signature, SigningPrivateKey,
     SigningPublicKey,
 };

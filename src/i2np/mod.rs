@@ -15,8 +15,8 @@ use std::fmt;
 use std::iter::repeat;
 use std::time::{Duration, SystemTime};
 
-use crypto::SessionKey;
-use data::{Certificate, Hash, I2PDate, LeaseSet, RouterInfo, SessionTag, TunnelId};
+use crate::crypto::SessionKey;
+use crate::data::{Certificate, Hash, I2PDate, LeaseSet, RouterInfo, SessionTag, TunnelId};
 
 #[allow(double_parens)]
 #[allow(needless_pass_by_value)]

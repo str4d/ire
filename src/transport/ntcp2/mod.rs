@@ -55,10 +55,10 @@ use super::{
     },
     Bid, Handle, Transport,
 };
-use constants::I2P_BASE64;
-use data::{Hash, I2PString, RouterAddress, RouterIdentity, RouterInfo};
-use i2np::{DatabaseStore, Message, MessagePayload};
-use router::Context;
+use crate::constants::I2P_BASE64;
+use crate::data::{Hash, I2PString, RouterAddress, RouterIdentity, RouterInfo};
+use crate::i2np::{DatabaseStore, Message, MessagePayload};
+use crate::router::Context;
 
 #[allow(needless_pass_by_value)]
 mod frame;
@@ -685,9 +685,9 @@ mod tests {
     use tokio_codec::{Decoder, Encoder};
 
     use super::{frame, session, Block, Frame, Session, NTCP2_MTU};
-    use i2np::Message;
-    use router::mock::mock_context;
-    use transport::tests::{AliceNet, BobNet, NetworkCable};
+    use crate::i2np::Message;
+    use crate::router::mock::mock_context;
+    use crate::transport::tests::{AliceNet, BobNet, NetworkCable};
 
     struct TestCodec;
 

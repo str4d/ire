@@ -15,8 +15,8 @@ use std::iter::repeat;
 use std::net::SocketAddr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use constants;
-use crypto::{
+use crate::constants;
+use crate::crypto::{
     self, elgamal, EncType, PrivateKey, PublicKey, SigType, Signature, SigningPrivateKey,
     SigningPublicKey,
 };
@@ -585,7 +585,7 @@ impl RouterInfo {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tests::{RI_SIGTYPE_1, RI_SIGTYPE_2, ROUTER_INFO};
+    use crate::tests::{RI_SIGTYPE_1, RI_SIGTYPE_2, ROUTER_INFO};
 
     #[test]
     fn hash_xor() {

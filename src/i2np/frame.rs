@@ -7,8 +7,8 @@ use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
 
 use super::*;
-use crypto::frame::{gen_session_key, session_key};
-use data::frame::{
+use crate::crypto::frame::{gen_session_key, session_key};
+use crate::data::frame::{
     certificate, gen_certificate, gen_hash, gen_i2p_date, gen_lease_set, gen_router_info,
     gen_session_tag, gen_short_expiry, gen_tunnel_id, hash, i2p_date, lease_set, router_info,
     session_tag, short_expiry, tunnel_id,

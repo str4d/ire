@@ -8,10 +8,10 @@ use super::{
     types::{CommSystem, NetworkDatabase},
     Context, MessageHandler, Router,
 };
-use data::{ReadError, RouterInfo, RouterSecretKeys};
-use netdb::LocalNetworkDatabase;
-use router::config;
-use transport;
+use crate::data::{ReadError, RouterInfo, RouterSecretKeys};
+use crate::netdb::LocalNetworkDatabase;
+use crate::router::config;
+use crate::transport;
 
 /// Builder errors
 #[derive(Clone, Debug, PartialEq, Eq)]

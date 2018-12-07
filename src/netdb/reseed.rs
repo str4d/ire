@@ -11,9 +11,9 @@ use tokio_tcp::TcpStream;
 use tokio_timer::Timeout;
 use tokio_tls;
 
-use crypto::{OfflineSigningPublicKey, SigType};
-use file::{Error as FileError, Su3Content, Su3File};
-use router::Context;
+use crate::crypto::{OfflineSigningPublicKey, SigType};
+use crate::file::{Error as FileError, Su3Content, Su3File};
+use crate::router::Context;
 
 // newest first, please add new ones at the top
 //

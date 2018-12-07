@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 use std::ops::{Mul, Rem, Sub};
 
 use super::{math::rectify, Error, PrivateKey, PublicKey};
-use constants::{ELGAMAL_G, ELGAMAL_P, ELGAMAL_PM1, ELGAMAL_PM2};
+use crate::constants::{ELGAMAL_G, ELGAMAL_P, ELGAMAL_PM1, ELGAMAL_PM2};
 
 fn gen_gamma_k() -> (BigUint, BigUint) {
     let mut rng = OsRng::new().expect("should be able to construct RNG");
@@ -181,8 +181,8 @@ impl Decryptor {
 #[cfg(test)]
 mod tests {
     use super::{Decryptor, Encryptor, KeyPairGenerator};
-    use constants::I2P_BASE64;
-    use crypto::{PrivateKey, PublicKey};
+    use crate::constants::I2P_BASE64;
+    use crate::crypto::{PrivateKey, PublicKey};
 
     #[test]
     fn round_trip_basic() {

@@ -2,9 +2,9 @@ use num_bigint::{BigUint, RandBigInt};
 use rand::rngs::OsRng;
 use std::iter::repeat;
 
-use constants::{ELGAMAL_G, ELGAMAL_P};
-use crypto::math::rectify;
-use crypto::SessionKey;
+use crate::constants::{ELGAMAL_G, ELGAMAL_P};
+use crate::crypto::math::rectify;
+use crate::crypto::SessionKey;
 
 pub struct DHSessionKeyBuilder {
     dh_priv: BigUint,
@@ -52,7 +52,7 @@ mod tests {
     use num_traits::Num;
 
     use super::DHSessionKeyBuilder;
-    use crypto::SessionKey;
+    use crate::crypto::SessionKey;
 
     #[test]
     fn build_session_key() {

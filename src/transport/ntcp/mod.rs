@@ -23,10 +23,10 @@ use super::{
     },
     Bid, Handle, Transport,
 };
-use crypto::{Aes256, SigningPrivateKey};
-use data::{Hash, I2PString, RouterAddress, RouterIdentity, RouterInfo};
-use i2np::Message;
-use router::Context;
+use crate::crypto::{Aes256, SigningPrivateKey};
+use crate::data::{Hash, I2PString, RouterAddress, RouterIdentity, RouterInfo};
+use crate::i2np::Message;
+use crate::router::Context;
 
 #[allow(needless_pass_by_value)]
 mod frame;
@@ -408,9 +408,9 @@ mod tests {
     use tokio_codec::{Decoder, Encoder};
 
     use super::{frame, session, Frame, Session, NTCP_MTU};
-    use i2np::Message;
-    use router::mock::mock_context;
-    use transport::tests::{AliceNet, BobNet, NetworkCable};
+    use crate::i2np::Message;
+    use crate::router::mock::mock_context;
+    use crate::transport::tests::{AliceNet, BobNet, NetworkCable};
 
     struct TestCodec;
 

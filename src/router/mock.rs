@@ -9,10 +9,10 @@ use std::sync::{Arc, RwLock};
 use tokio_io::IoFuture;
 
 use super::types::{CommSystem, InboundMessageHandler, OutboundMessageHandler};
-use data::{Hash, RouterAddress, RouterInfo, RouterSecretKeys};
-use i2np::{DatabaseSearchReply, Message};
-use netdb::LocalNetworkDatabase;
-use router::Context;
+use crate::data::{Hash, RouterAddress, RouterInfo, RouterSecretKeys};
+use crate::i2np::{DatabaseSearchReply, Message};
+use crate::netdb::LocalNetworkDatabase;
+use crate::router::Context;
 
 struct MockMessageHandler;
 

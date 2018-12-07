@@ -10,9 +10,9 @@ use std::time::{Duration, SystemTime};
 use tokio_executor::spawn;
 use tokio_timer::{sleep, Delay};
 
-use data::{Hash, LeaseSet, RouterInfo, NET_ID};
-use i2np::DatabaseLookupType;
-use router::{
+use crate::data::{Hash, LeaseSet, RouterInfo, NET_ID};
+use crate::i2np::DatabaseLookupType;
+use crate::router::{
     config,
     types::{LookupError, NetworkDatabase, StoreError},
     Context,
@@ -411,9 +411,9 @@ mod tests {
     use std::time::{Duration, SystemTime};
 
     use super::{router_info_is_current, LocalNetworkDatabase, XorMetric, ROUTER_INFO_EXPIRATION};
-    use crypto;
-    use data::{Hash, I2PDate, RouterInfo, RouterSecretKeys, OPT_NET_ID};
-    use router::types::{NetworkDatabase, StoreError};
+    use crate::crypto;
+    use crate::data::{Hash, I2PDate, RouterInfo, RouterSecretKeys, OPT_NET_ID};
+    use crate::router::types::{NetworkDatabase, StoreError};
 
     #[test]
     fn xor_metric() {

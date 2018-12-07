@@ -11,7 +11,7 @@ use rand::rngs::OsRng;
 use sha1::Sha1;
 
 use super::math::rectify;
-use constants::{DSA_G, DSA_P, DSA_Q, DSA_QM2};
+use crate::constants::{DSA_G, DSA_P, DSA_Q, DSA_QM2};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct DsaSignature {

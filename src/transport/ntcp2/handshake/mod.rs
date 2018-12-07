@@ -20,9 +20,9 @@ use super::{
     frame, Block, Codec, NTCP2_MTU, NTCP2_NOISE_PROTOCOL_NAME, NTCP2_OPT_I, NTCP2_OPT_S,
     NTCP2_OPT_V, NTCP2_STYLE, NTCP2_VERSION,
 };
-use constants::I2P_BASE64;
-use data::{RouterAddress, RouterIdentity, RouterInfo};
-use transport::ntcp::NTCP_STYLE;
+use crate::constants::I2P_BASE64;
+use crate::data::{RouterAddress, RouterIdentity, RouterInfo};
+use crate::transport::ntcp::NTCP_STYLE;
 
 const SESSION_REQUEST_PT_LEN: usize = 16;
 const SESSION_REQUEST_CT_LEN: usize = 32 + SESSION_REQUEST_PT_LEN + 16;
@@ -531,14 +531,14 @@ where
 #[cfg(test)]
 mod tests {
     use super::{IBHandshake, IBHandshakeState, OBHandshake, OBHandshakeState};
-    use transport::{
+    use crate::transport::{
         ntcp2::Manager,
         tests::{AliceNet, BobNet, NetworkCable},
     };
 
     use futures::{done, Async, Future};
 
-    use data::{RouterInfo, RouterSecretKeys};
+    use crate::data::{RouterInfo, RouterSecretKeys};
 
     macro_rules! test_poll {
         ($node:expr) => {

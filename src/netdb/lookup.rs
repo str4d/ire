@@ -9,9 +9,9 @@ use std::time::Duration;
 use tokio_timer::Timeout;
 
 use super::{create_routing_key, PendingLookup, XorMetric};
-use data::{Hash, RouterInfo};
-use i2np::{DatabaseLookup, DatabaseLookupType, DatabaseSearchReply, Message};
-use router::{types::LookupError, Context};
+use crate::data::{Hash, RouterInfo};
+use crate::i2np::{DatabaseLookup, DatabaseLookupType, DatabaseSearchReply, Message};
+use crate::router::{types::LookupError, Context};
 
 /// The time before we give up on a peer and try the next one.
 ///

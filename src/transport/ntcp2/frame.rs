@@ -2,10 +2,10 @@ use cookie_factory::*;
 use nom::{be_u16, be_u32, be_u64, be_u8};
 use rand::{rngs::OsRng, Rng};
 
-use data::frame::{gen_router_info, router_info};
-use data::RouterInfo;
-use i2np::frame::{gen_ntcp2_message, ntcp2_message};
-use i2np::Message;
+use crate::data::frame::{gen_router_info, router_info};
+use crate::data::RouterInfo;
+use crate::i2np::frame::{gen_ntcp2_message, ntcp2_message};
+use crate::i2np::Message;
 
 use super::{Block, Frame, RouterInfoFlags};
 
@@ -299,9 +299,9 @@ pub fn gen_session_confirmed<'a>(
 mod tests {
     use std::time::{Duration, UNIX_EPOCH};
 
-    use data::I2PDate;
-    use i2np::MessagePayload;
-    use tests::ROUTER_INFO;
+    use crate::data::I2PDate;
+    use crate::i2np::MessagePayload;
+    use crate::tests::ROUTER_INFO;
 
     use super::*;
 

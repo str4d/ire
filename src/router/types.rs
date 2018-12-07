@@ -7,9 +7,9 @@ use std::time::Duration;
 use tokio_io::IoFuture;
 
 use super::Context;
-use crypto;
-use data::{Hash, LeaseSet, RouterAddress, RouterInfo};
-use i2np::{DatabaseSearchReply, Message};
+use crate::crypto;
+use crate::data::{Hash, LeaseSet, RouterAddress, RouterInfo};
+use crate::i2np::{DatabaseSearchReply, Message};
 
 pub trait InboundMessageHandler: Send + Sync {
     fn register_lookup(&self, from: Hash, key: Hash, tx: oneshot::Sender<DatabaseSearchReply>);

@@ -2,8 +2,8 @@ use cookie_factory::*;
 use nom::{be_u16, be_u32, IResult};
 
 use super::Frame;
-use i2np::frame::{gen_message, message};
-use i2np::Message;
+use crate::i2np::frame::{gen_message, message};
+use crate::i2np::Message;
 
 //
 // Utils

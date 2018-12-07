@@ -17,7 +17,7 @@ use signatory_ring::ecdsa::{P256Verifier, P384Verifier};
 use std::fmt;
 use untrusted;
 
-use constants;
+use crate::constants;
 
 #[allow(needless_pass_by_value)]
 pub(crate) mod frame;
