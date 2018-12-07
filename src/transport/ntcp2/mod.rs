@@ -201,7 +201,7 @@ impl Encoder for Codec {
     fn encode(&mut self, frame: Frame, buf: &mut BytesMut) -> io::Result<()> {
         match frame::gen_frame((&mut self.noise_buf, 0), &frame).map(|tup| tup.1) {
             Ok(sz) => {
-                let mut msg_len = sz + 16;
+                let msg_len = sz + 16;
 
                 let start = buf.len();
                 buf.extend(repeat(0).take(2 + msg_len));
