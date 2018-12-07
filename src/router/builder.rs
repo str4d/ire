@@ -1,4 +1,4 @@
-use config::{Config, ConfigError, File};
+use ::config::{Config, ConfigError, File};
 use std::fmt;
 use std::fs;
 use std::io;

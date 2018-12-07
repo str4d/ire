@@ -1,4 +1,3 @@
-use config::Config;
 use futures::{future::join_all, sync::oneshot, Future};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
@@ -13,6 +12,7 @@ pub mod mock;
 pub mod types;
 
 pub use self::builder::Builder;
+use self::config::Config;
 
 type PendingLookups = HashMap<(Hash, Hash), oneshot::Sender<DatabaseSearchReply>>;
 

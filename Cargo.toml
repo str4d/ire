@@ -9,6 +9,7 @@ repository = "https://github.com/str4d/ire"
 readme = "README.md"
 categories = ["cryptography"]
 keywords = ["i2p", "net", "network", "privacy", "security"]
+edition = "2018"
 
 [dependencies]
 aes = "0.3"
