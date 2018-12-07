@@ -644,9 +644,9 @@ mod tests {
         use tokio_codec::Framed;
         use tokio_tcp::{TcpListener, TcpStream};
 
-        use data::{RouterInfo, RouterSecretKeys};
-        use i2np::{Message, MessagePayload};
-        use transport::ntcp2::{
+        use crate::data::{RouterInfo, RouterSecretKeys};
+        use crate::i2np::{Message, MessagePayload};
+        use crate::transport::ntcp2::{
             handshake::{IBHandshake, OBHandshake},
             Block, Codec, Manager,
         };
