@@ -28,7 +28,7 @@ pub(crate) mod frame;
 
 pub(crate) mod dh;
 mod dsa;
-pub(crate) mod elgamal;
+pub mod elgamal;
 pub(crate) mod math;
 
 pub(crate) const AES_BLOCK_SIZE: usize = 16;

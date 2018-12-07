@@ -8,9 +8,11 @@ pub(super) const AUTH_COOKIE_LEN: usize = 32;
 
 const X25519_AUTH_INFO: &[u8; 8] = b"ELS2_XCA";
 
+#[derive(Clone)]
 pub struct X25519ClientInfo(pub [u8; 32]);
 
 /// Client information
+#[derive(Clone)]
 pub enum ClientInfo {
     X25519(Vec<X25519ClientInfo>),
 }

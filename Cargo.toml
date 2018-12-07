@@ -58,6 +58,7 @@ x25519-dalek = { version = "0.4", default-features = false, features = ["std", "
 zip = { version = "0.5", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
+criterion = "0.2"
 pretty_assertions = "0.5"
 tempfile = "3"
 
@@ -68,3 +69,7 @@ nightly = []
 [[bin]]
 name = "ire"
 required-features = ["cli"]
+
+[[bench]]
+name = "encls2_client_auth"
+harness = false
