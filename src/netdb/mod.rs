@@ -288,7 +288,7 @@ impl NetworkDatabase for LocalNetworkDatabase {
         ctx: Option<Arc<Context>>,
         key: &Hash,
         timeout_ms: u64,
-        from_local_dest: Option<Hash>,
+        _from_local_dest: Option<Hash>,
     ) -> Box<Future<Item = LeaseSet, Error = LookupError>> {
         // First look for it locally, either available or pending
         let local: Option<Box<Future<Item = LeaseSet, Error = LookupError>>> =

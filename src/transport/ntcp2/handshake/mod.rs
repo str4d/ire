@@ -112,7 +112,7 @@ where
                     noise.read_message(&msg, &mut buf).unwrap();
 
                     // SessionRequest
-                    let (padlen, sclen, ts_a) = match frame::session_request(&buf) {
+                    let (padlen, sclen, _ts_a) = match frame::session_request(&buf) {
                         Err(e) => {
                             return io_err!(Other, format!("SessionRequest parse error: {:?}", e))
                         }
@@ -451,7 +451,7 @@ where
                     noise.read_message(&msg, &mut buf).unwrap();
 
                     // SessionCreated
-                    let (padlen, ts_b) = match frame::session_created(&buf) {
+                    let (padlen, _ts_b) = match frame::session_created(&buf) {
                         Err(e) => {
                             return io_err!(Other, format!("SessionCreated parse error: {:?}", e))
                         }

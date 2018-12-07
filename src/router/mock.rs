@@ -17,8 +17,8 @@ use router::Context;
 struct MockMessageHandler;
 
 impl InboundMessageHandler for MockMessageHandler {
-    fn register_lookup(&self, from: Hash, key: Hash, tx: oneshot::Sender<DatabaseSearchReply>) {}
-    fn handle(&self, from: Hash, msg: Message) {}
+    fn register_lookup(&self, _from: Hash, _key: Hash, _tx: oneshot::Sender<DatabaseSearchReply>) {}
+    fn handle(&self, _from: Hash, _msg: Message) {}
 }
 
 pub(super) struct MockCommSystem;
@@ -48,7 +48,7 @@ impl CommSystem for MockCommSystem {
         Box::new(future::ok(()))
     }
 
-    fn is_established(&self, hash: &Hash) -> bool {
+    fn is_established(&self, _hash: &Hash) -> bool {
         false
     }
 }

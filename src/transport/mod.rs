@@ -336,7 +336,7 @@ mod tests {
         let (timestamp, mut timestamp_rx) = mpsc::unbounded();
         let handle = Handle { message, timestamp };
 
-        let hash = Hash::from_bytes(&[0; 32]);
+        let _hash = Hash::from_bytes(&[0; 32]);
         let msg = Message::dummy_data();
         let mut msg2 = Message::dummy_data();
         // Ensure the two messages are identical
