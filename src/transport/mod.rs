@@ -87,7 +87,7 @@ pub struct Manager {
 
 pub struct Engine {
     engines: Select<ntcp::Engine, ntcp2::Engine>,
-    msg_handler: Arc<InboundMessageHandler>,
+    msg_handler: Arc<dyn InboundMessageHandler>,
 }
 
 trait Transport {

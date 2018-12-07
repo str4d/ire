@@ -19,7 +19,7 @@ use crate::router::{types::LookupError, Context};
 /// 1.0 - 1.5 sec, but short enough that we move on to another peer quickly.
 const SINGLE_LOOKUP_TIMEOUT: u64 = 5;
 
-type LookupFuture<T, E> = Box<Future<Item = T, Error = E> + Send>;
+type LookupFuture<T, E> = Box<dyn Future<Item = T, Error = E> + Send>;
 
 fn wait_for_search_reply(
     ctx: &Arc<Context>,

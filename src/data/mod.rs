@@ -45,7 +45,7 @@ pub enum ReadError {
 }
 
 impl fmt::Display for ReadError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             ReadError::FileIo(e) => format!("File IO error: {}", e).fmt(f),
             ReadError::Incomplete(n) => format!("Data is incomplete (needed: {:?})", n).fmt(f),
@@ -99,7 +99,7 @@ impl Hash {
 }
 
 impl fmt::Display for Hash {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", constants::I2P_BASE64.encode(&self.0))
     }
 }
@@ -123,7 +123,7 @@ impl I2PDate {
 }
 
 impl fmt::Display for I2PDate {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         DateTime::<Utc>::from(self.to_system_time()).fmt(f)
     }
 }
@@ -170,7 +170,7 @@ impl SessionTag {
 pub struct TunnelId(pub u32);
 
 impl fmt::Display for TunnelId {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
     }
 }

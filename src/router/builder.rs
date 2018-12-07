@@ -21,7 +21,7 @@ pub enum Error {
 }
 
 impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Error::Read(e) => format!("{}", e).fmt(f),
             Error::Write(e) => e.fmt(f),
@@ -45,8 +45,8 @@ pub struct Builder {
     cfg_file: Option<String>,
     keys: Option<RouterSecretKeys>,
     ri_file: Option<String>,
-    netdb: Option<Arc<RwLock<NetworkDatabase>>>,
-    comms: Option<Arc<RwLock<CommSystem>>>,
+    netdb: Option<Arc<RwLock<dyn NetworkDatabase>>>,
+    comms: Option<Arc<RwLock<dyn CommSystem>>>,
 }
 
 impl Builder {
@@ -76,12 +76,12 @@ impl Builder {
         self
     }
 
-    pub fn network_database(mut self, netdb: Arc<RwLock<NetworkDatabase>>) -> Self {
+    pub fn network_database(mut self, netdb: Arc<RwLock<dyn NetworkDatabase>>) -> Self {
         self.netdb = Some(netdb);
         self
     }
 
-    pub fn comm_system(mut self, comms: Arc<RwLock<CommSystem>>) -> Self {
+    pub fn comm_system(mut self, comms: Arc<RwLock<dyn CommSystem>>) -> Self {
         self.comms = Some(comms);
         self
     }

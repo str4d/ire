@@ -52,7 +52,7 @@ pub enum Frame {
 use std::fmt;
 
 impl fmt::Debug for Frame {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
             Frame::Standard(_) => "Standard message".fmt(formatter),
             Frame::TimeSync(ts) => format!("Timesync ({})", ts).fmt(formatter),

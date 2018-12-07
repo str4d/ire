@@ -87,7 +87,7 @@ impl DatabaseStore {
 }
 
 impl fmt::Display for DatabaseStore {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         format!("DatabaseStore\n key: {}\ntype: {}", self.key, self.ds_type).fmt(f)
     }
 }
@@ -132,7 +132,7 @@ impl DatabaseLookup {
 }
 
 impl fmt::Display for DatabaseLookup {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         format!(
             "DatabaseLookup\n- key: {}\n- type: {:?}\n- excluded peers: [\n{}\n  ]",
             self.key,
@@ -159,7 +159,7 @@ pub struct DatabaseSearchReply {
 }
 
 impl fmt::Display for DatabaseSearchReply {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         format!(
             "DatabaseSearchReply\n- key: {}\n- peers: [\n{}\n  ]\n- from: {}",
             self.key,
@@ -186,7 +186,7 @@ pub struct DeliveryStatus {
 }
 
 impl fmt::Display for DeliveryStatus {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         format!(
             "DeliveryStatus\n- mid: {}\n- ts: {}",
             self.msg_id, self.time_stamp
@@ -261,7 +261,7 @@ pub enum MessagePayload {
 }
 
 impl fmt::Debug for MessagePayload {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
             MessagePayload::DatabaseStore(ref ds) => {
                 format!("DatabaseStore (key: {:?})", ds.key).fmt(formatter)
@@ -296,7 +296,7 @@ impl fmt::Debug for MessagePayload {
 }
 
 impl fmt::Display for MessagePayload {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
             MessagePayload::DatabaseStore(ref ds) => ds.fmt(formatter),
             MessagePayload::DatabaseLookup(ref dl) => dl.fmt(formatter),
@@ -328,7 +328,7 @@ pub struct Message {
 }
 
 impl fmt::Display for Message {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         format!(
             "Message ID: {}\nExpiration: {}\nPayload: {}",
             self.id, self.expiration, self.payload

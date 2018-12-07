@@ -105,7 +105,7 @@ pub enum Block {
 }
 
 impl fmt::Debug for Block {
-    fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
             Block::DateTime(ts) => format!("DateTime ({})", ts).fmt(formatter),
             Block::Options(_) => "Options".fmt(formatter),
@@ -406,7 +406,7 @@ pub struct Engine {
 
 impl Manager {
     pub fn new(addr: SocketAddr) -> (Self, Engine) {
-        let builder: Builder = Builder::new(NTCP2_NOISE_PROTOCOL_NAME.parse().unwrap());
+        let builder: Builder<'_> = Builder::new(NTCP2_NOISE_PROTOCOL_NAME.parse().unwrap());
         let dh = builder.generate_keypair().unwrap();
 
         let mut aesobfse_iv = [0; 16];

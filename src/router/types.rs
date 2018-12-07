@@ -50,7 +50,7 @@ pub enum LookupError {
 }
 
 impl fmt::Display for LookupError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             LookupError::NotFound => "Key not found".fmt(f),
             LookupError::SendFailure => "Send failure".fmt(f),
@@ -77,7 +77,7 @@ impl From<crypto::Error> for StoreError {
 }
 
 impl fmt::Display for StoreError {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             StoreError::Crypto(e) => e.fmt(f),
             StoreError::Expired(age) => {
@@ -106,7 +106,7 @@ pub trait NetworkDatabase: Send + Sync {
         key: &Hash,
         timeout_ms: u64,
         from_peer: Option<RouterInfo>,
-    ) -> Box<Future<Item = RouterInfo, Error = LookupError> + Send>;
+    ) -> Box<dyn Future<Item = RouterInfo, Error = LookupError> + Send>;
 
     /// Finds the LeaseSet stored at the given key. If not known locally, and a
     /// Context is provided, the LeaseSet is looked up using the client tunnels
@@ -117,7 +117,7 @@ pub trait NetworkDatabase: Send + Sync {
         key: &Hash,
         timeout_ms: u64,
         from_local_dest: Option<Hash>,
-    ) -> Box<Future<Item = LeaseSet, Error = LookupError>>;
+    ) -> Box<dyn Future<Item = LeaseSet, Error = LookupError>>;
 
     /// Stores a RouterInfo locally.
     ///

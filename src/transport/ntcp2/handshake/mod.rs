@@ -72,7 +72,7 @@ where
 {
     pub fn new(conn: T, static_key: &[u8], aesobfse_key: &[u8], aesobfse_iv: &[u8; 16]) -> Self {
         // Initialize our responder NoiseSession using a builder.
-        let builder: Builder = Builder::new(NTCP2_NOISE_PROTOCOL_NAME.parse().unwrap());
+        let builder: Builder<'_> = Builder::new(NTCP2_NOISE_PROTOCOL_NAME.parse().unwrap());
         let noise = builder
             .local_private_key(&static_key)
             .aesobfse(&aesobfse_key, &aesobfse_iv)
@@ -357,7 +357,7 @@ where
         let sc_len = sc_len + 16;
 
         // Initialize our initiator NoiseSession using a builder.
-        let builder: Builder = Builder::new(NTCP2_NOISE_PROTOCOL_NAME.parse().unwrap());
+        let builder: Builder<'_> = Builder::new(NTCP2_NOISE_PROTOCOL_NAME.parse().unwrap());
         let noise = builder
             .local_private_key(&static_key)
             .remote_public_key(&remote_key)
