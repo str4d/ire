@@ -11,15 +11,20 @@ const X25519_AUTH_INFO: &[u8; 8] = b"ELS2_XCA";
 #[derive(Clone)]
 pub struct X25519ClientInfo(pub [u8; 32]);
 
+#[derive(Clone)]
+pub struct PSKClientInfo(pub [u8; 32]);
+
 /// Client information
 #[derive(Clone)]
 pub enum ClientInfo {
     X25519(Vec<X25519ClientInfo>),
+    PSK(Vec<PSKClientInfo>),
 }
 
 // Client's secret authentication key
 pub enum ClientSecretKey {
     X25519([u8; 32]),
+    PSK([u8; 32]),
 }
 
 /// Per-client authentication data.
@@ -33,6 +38,7 @@ pub(super) struct ClientAuthData {
 #[derive(Debug, PartialEq)]
 pub(super) enum ClientAuthType {
     X25519([u8; 32], Vec<ClientAuthData>),
+    PSK([u8; 32], Vec<ClientAuthData>),
 }
 
 impl ClientAuthType {
@@ -43,27 +49,23 @@ impl ClientAuthType {
     ) -> (Vec<u8>, Option<Self>) {
         let mut rng = OsRng::new().unwrap();
 
-        match client_info {
-            Some(ClientInfo::X25519(clients)) => {
+        macro_rules! base_auth {
+            ($clients:ident, $gen_auth_seed:expr, $gen_secret_value:expr, $salt:expr, $auth_type:ident) => {{
                 let mut auth_cookie = vec![];
                 auth_cookie.resize(AUTH_COOKIE_LEN, 0);
                 rng.fill_bytes(&mut auth_cookie[..]);
 
-                let mut esk = [0u8; 32];
-                rng.fill_bytes(&mut esk[..]);
-                let epk = x25519(esk, X25519_BASEPOINT_BYTES);
+                let auth_seed = $gen_auth_seed;
 
-                let auth_data = clients
+                let auth_data = $clients
                     .into_iter()
                     .map(|client| {
-                        let shared_secret = x25519(esk, client.0);
-
                         let mut okm = [0; S_KEY_LEN + S_IV_LEN + AUTH_ID_LEN];
                         kdf(
-                            &shared_secret,
+                            &$gen_secret_value(auth_seed, client.0),
                             subcredential,
                             created,
-                            &epk,
+                            &$salt(auth_seed),
                             X25519_AUTH_INFO,
                             &mut okm,
                         );
@@ -86,8 +88,37 @@ impl ClientAuthType {
                     })
                     .collect();
 
-                (auth_cookie, Some(ClientAuthType::X25519(epk, auth_data)))
-            }
+                (
+                    auth_cookie,
+                    Some(ClientAuthType::$auth_type($salt(auth_seed), auth_data)),
+                )
+            }};
+        }
+
+        match client_info {
+            Some(ClientInfo::X25519(clients)) => base_auth!(
+                clients,
+                {
+                    let mut esk = [0u8; 32];
+                    rng.fill_bytes(&mut esk[..]);
+                    let epk = x25519(esk, X25519_BASEPOINT_BYTES);
+                    (esk, epk)
+                },
+                |(esk, _), client_info| x25519(esk, client_info),
+                |(_, epk)| epk,
+                X25519
+            ),
+            Some(ClientInfo::PSK(clients)) => base_auth!(
+                clients,
+                {
+                    let mut auth_salt = [0; 32];
+                    rng.fill_bytes(&mut auth_salt[..]);
+                    auth_salt
+                },
+                |_, client_info| client_info,
+                |auth_salt| auth_salt,
+                PSK
+            ),
             None => (vec![], None),
         }
     }
@@ -99,16 +130,14 @@ impl ClientAuthType {
         subcredential: &[u8],
         created: u32,
     ) -> Result<Vec<u8>, Error> {
-        match (self, key) {
-            (ClientAuthType::X25519(epk, auth_data), ClientSecretKey::X25519(sk)) => {
-                let shared_secret = x25519(*sk, *epk);
-
+        macro_rules! base_auth {
+            ($secret_value:expr, $salt:expr, $auth_data:ident) => {{
                 let mut okm = [0; S_KEY_LEN + S_IV_LEN + AUTH_ID_LEN];
                 kdf(
-                    &shared_secret,
+                    $secret_value,
                     subcredential,
                     created,
-                    &epk[..],
+                    $salt,
                     X25519_AUTH_INFO,
                     &mut okm,
                 );
@@ -117,7 +146,7 @@ impl ClientAuthType {
                 let client_id = &okm[S_KEY_LEN + S_IV_LEN..S_KEY_LEN + S_IV_LEN + AUTH_ID_LEN];
 
                 // Scan the list of clients to find ourselves
-                match auth_data
+                match $auth_data
                     .iter()
                     .filter_map(|data| {
                         if data.client_id == client_id {
@@ -140,7 +169,18 @@ impl ClientAuthType {
                     Some(auth_cookie) => Ok(auth_cookie),
                     None => Err(Error::NotAuthorised),
                 }
+            }};
+        }
+
+        match (self, key) {
+            (ClientAuthType::X25519(epk, auth_data), ClientSecretKey::X25519(sk)) => {
+                let shared_secret = x25519(*sk, *epk);
+                base_auth!(&shared_secret, &epk[..], auth_data)
             }
+            (ClientAuthType::PSK(auth_salt, auth_data), ClientSecretKey::PSK(sk)) => {
+                base_auth!(&sk[..], &auth_salt[..], auth_data)
+            }
+            _ => Err(Error::NotAuthorised),
         }
     }
 }

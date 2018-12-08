@@ -5,14 +5,14 @@ use ire::{
         dest::DestinationSecretKeys,
         ls2::{
             enc::{
-                auth::{ClientInfo, ClientSecretKey, X25519ClientInfo},
+                auth::{ClientInfo, ClientSecretKey, PSKClientInfo, X25519ClientInfo},
                 EncLS2Payload, EncryptedLS2,
             },
             LeaseSet2,
         },
     },
 };
-use rand::{thread_rng, RngCore};
+use rand::{thread_rng, Rng, RngCore};
 use x25519_dalek::{x25519, X25519_BASEPOINT_BYTES};
 
 fn fake_ls2(created: u32, expires: u16) -> LeaseSet2 {
@@ -104,5 +104,88 @@ fn client_x25519(c: &mut Criterion) {
     );
 }
 
-criterion_group!(benches, server_x25519, client_x25519);
+fn server_psk(c: &mut Criterion) {
+    let mut rng = thread_rng();
+    let ls2 = fake_ls2(123_456_789, 2345);
+
+    let payload = EncLS2Payload::LS2(ls2);
+    let credential = b"credential";
+
+    let blinded_privkey = SigningPrivateKey::new();
+    let blinded_pubkey = SigningPublicKey::from_secret(&blinded_privkey).unwrap();
+
+    c.bench_function_over_inputs(
+        "EncLS2_Server_PSK",
+        move |b, &&count| {
+            let mut client_info = Vec::with_capacity(count);
+            for _ in 0..count {
+                let mut psk = [0; 32];
+                rng.fill(&mut psk[..]);
+                client_info.push(PSKClientInfo(psk));
+            }
+            let client_info = ClientInfo::PSK(client_info);
+
+            b.iter(|| {
+                EncryptedLS2::encrypt_payload(
+                    &payload,
+                    credential,
+                    blinded_pubkey.clone(),
+                    None,
+                    &blinded_privkey,
+                    Some(client_info.clone()),
+                )
+            })
+        },
+        &[1, 10, 20, 50, 100],
+    );
+}
+
+fn client_psk(c: &mut Criterion) {
+    let mut rng = thread_rng();
+    let ls2 = fake_ls2(123_456_789, 2345);
+
+    let payload = EncLS2Payload::LS2(ls2);
+    let credential = b"credential";
+
+    let blinded_privkey = SigningPrivateKey::new();
+    let blinded_pubkey = SigningPublicKey::from_secret(&blinded_privkey).unwrap();
+
+    c.bench_function_over_inputs(
+        "EncLS2_Client_PSK",
+        move |b, &&count| {
+            let mut auth_keys = Vec::with_capacity(count);
+            let mut client_info = Vec::with_capacity(count);
+            for _ in 0..count {
+                let mut psk = [0; 32];
+                rng.fill(&mut psk[..]);
+                let mut client_psk = [0; 32];
+                client_psk.copy_from_slice(&psk[..]);
+                auth_keys.push(ClientSecretKey::PSK(client_psk));
+                client_info.push(PSKClientInfo(psk));
+            }
+            let client_info = ClientInfo::PSK(client_info);
+
+            let enc_ls2 = EncryptedLS2::encrypt_payload(
+                &payload,
+                credential,
+                blinded_pubkey.clone(),
+                None,
+                &blinded_privkey,
+                Some(client_info.clone()),
+            )
+            .unwrap();
+
+            b.iter(|| enc_ls2.decrypt(credential, Some(&auth_keys.last().unwrap())))
+        },
+        &[1, 10, 20, 50, 100],
+    );
+}
+
+criterion_group!(
+    benches,
+    server_x25519,
+    client_x25519,
+    server_psk,
+    client_psk
+);
 criterion_main!(benches);

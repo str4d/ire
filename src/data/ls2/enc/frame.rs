@@ -137,6 +137,15 @@ named!(
                                 point.copy_from_slice(epk);
                                 point
                             }, entries))
+                        ) |
+                        1 => do_parse!(
+                            auth_salt: take!(32) >>
+                            entries: length_count!(be_u16, client_auth_data) >>
+                            (ClientAuthType::PSK({
+                                let mut salt = [0; 32];
+                                salt.copy_from_slice(auth_salt);
+                                salt
+                            }, entries))
                         )
                     )
                 )
@@ -162,6 +171,14 @@ pub(crate) fn gen_enc_ls2_client_auth<'a>(
             input,
             gen_client_auth_flags(&ClientAuthFlags::with_type(0))
                 >> gen_slice!(epk.as_bytes())
+                >> gen_be_u16!(auth_data.len())
+                >> gen_many!(&auth_data, gen_client_auth_data)
+                >> gen_slice!(client_auth.inner_ciphertext)
+        ),
+        Some(ClientAuthType::PSK(auth_salt, auth_data)) => do_gen!(
+            input,
+            gen_client_auth_flags(&ClientAuthFlags::with_type(1))
+                >> gen_slice!(&auth_salt)
                 >> gen_be_u16!(auth_data.len())
                 >> gen_many!(&auth_data, gen_client_auth_data)
                 >> gen_slice!(client_auth.inner_ciphertext)
@@ -313,6 +330,18 @@ mod tests {
             },
             &[
                 0x01, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+                0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
+                0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x01, 0x02, 0x03, 0x04
+            ][..]
+        );
+
+        eval!(
+            EncLS2ClientAuth {
+                auth_data: Some(ClientAuthType::PSK([0xff; 32], vec![])),
+                inner_ciphertext: vec![1, 2, 3, 4],
+            },
+            &[
+                0x03, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
                 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
                 0xff, 0xff, 0xff, 0xff, 0xff, 0x00, 0x00, 0x01, 0x02, 0x03, 0x04
             ][..]
