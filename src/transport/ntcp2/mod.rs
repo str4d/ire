@@ -29,11 +29,16 @@
 
 use bytes::BytesMut;
 use cookie_factory::GenError;
-use futures::{sync::mpsc, task, Async, Future, Poll, Sink, Stream};
+use futures::{
+    stream::{SplitSink, SplitStream},
+    sync::mpsc,
+    try_ready, Async, AsyncSink, Future, Poll, Sink, StartSend, Stream,
+};
 use i2p_snow::{self, Builder};
 use nom::Err;
 use rand::{rngs::OsRng, Rng};
 use siphasher::sip::SipHasher;
+use std::collections::VecDeque;
 use std::fmt;
 use std::fs::File;
 use std::hash::Hasher;
@@ -251,10 +256,11 @@ where
     C: Decoder<Item = Frame, Error = io::Error>,
     C: Encoder<Item = Frame, Error = io::Error>,
 {
-    ctx: SessionContext<Block>,
-    upstream: Framed<T, C>,
+    ib: InboundSession<T, C>,
+    ob: OutboundSession<T, C>,
     engine: EngineTx<Block>,
     outbound: SessionRx<Block>,
+    cached_ob_block: Option<Block>,
 }
 
 impl<T, C> Session<T, C>
@@ -264,12 +270,96 @@ where
     C: Encoder<Item = Frame, Error = io::Error>,
 {
     fn new(ri: &RouterIdentity, upstream: Framed<T, C>, session_refs: SessionRefs<Block>) -> Self {
+        let (downstream, upstream) = upstream.split();
         let (tx, rx) = mpsc::unbounded();
+        let ctx = SessionContext::new(ri.hash(), session_refs.state, tx);
         Session {
-            ctx: SessionContext::new(ri.hash(), session_refs.state, tx),
-            upstream,
+            ib: InboundSession::new(ctx, upstream),
+            ob: OutboundSession::new(downstream),
             engine: session_refs.engine,
             outbound: rx,
+            cached_ob_block: None,
+        }
+    }
+}
+
+impl<T, C> Future for Session<T, C>
+where
+    T: AsyncRead + AsyncWrite,
+    C: Decoder<Item = Frame, Error = io::Error>,
+    C: Encoder<Item = Frame, Error = io::Error>,
+{
+    type Item = ();
+    type Error = io::Error;
+
+    fn poll(&mut self) -> Poll<(), io::Error> {
+        // Write cached block, if any
+        let mut write_ready = true;
+        if let Some(block) = self.cached_ob_block.take() {
+            match self.ob.start_send(block)? {
+                AsyncSink::Ready => (),
+                AsyncSink::NotReady(block) => {
+                    self.cached_ob_block = Some(block);
+                    write_ready = false;
+                }
+            }
+        }
+
+        // Write blocks
+        while write_ready {
+            match self.outbound.poll().unwrap() {
+                Async::Ready(Some(block)) => match self.ob.start_send(block)? {
+                    AsyncSink::Ready => (),
+                    AsyncSink::NotReady(block) => {
+                        self.cached_ob_block = Some(block);
+                        write_ready = false;
+                    }
+                },
+                _ => break,
+            }
+        }
+
+        // Flush blocks
+        self.ob.poll_complete()?;
+
+        // Read blocks
+        while let Async::Ready(f) = self.ib.poll()? {
+            if let Some((hash, block)) = f {
+                self.engine.unbounded_send((hash, block)).unwrap();
+            } else {
+                // EOF was reached. The remote peer has disconnected.
+                return Ok(Async::Ready(()));
+            }
+        }
+
+        // We know we got a `NotReady` from either `self.ob` or `self.ib`,
+        // so the contract is respected.
+        Ok(Async::NotReady)
+    }
+}
+
+struct InboundSession<T, C>
+where
+    T: AsyncRead + AsyncWrite,
+    C: Decoder<Item = Frame, Error = io::Error>,
+    C: Encoder<Item = Frame, Error = io::Error>,
+{
+    ctx: SessionContext<Block>,
+    upstream: SplitStream<Framed<T, C>>,
+    cached_blocks: VecDeque<Block>,
+}
+
+impl<T, C> InboundSession<T, C>
+where
+    T: AsyncRead + AsyncWrite,
+    C: Decoder<Item = Frame, Error = io::Error>,
+    C: Encoder<Item = Frame, Error = io::Error>,
+{
+    fn new(ctx: SessionContext<Block>, upstream: SplitStream<Framed<T, C>>) -> Self {
+        InboundSession {
+            ctx,
+            upstream,
+            cached_blocks: VecDeque::new(),
         }
     }
 
@@ -314,74 +404,116 @@ where
     }
 }
 
-impl<T, C> Future for Session<T, C>
+impl<T, C> Stream for InboundSession<T, C>
 where
     T: AsyncRead + AsyncWrite,
     C: Decoder<Item = Frame, Error = io::Error>,
     C: Encoder<Item = Frame, Error = io::Error>,
 {
-    type Item = ();
+    type Item = (Hash, Block);
     type Error = io::Error;
 
-    fn poll(&mut self) -> Poll<(), io::Error> {
-        // Write frames
-        const FRAMES_PER_TICK: usize = 10;
-        for i in 0..FRAMES_PER_TICK {
-            let mut done = false;
+    fn poll(&mut self) -> Poll<Option<Self::Item>, io::Error> {
+        loop {
+            // Return any cached blocks
+            while let Some(block) = self.cached_blocks.pop_front() {
+                return Ok(Async::Ready(Some((self.ctx.hash.clone(), block))));
+            }
 
-            // Create frame from blocks
-            const BLOCKS_PER_FRAME: usize = 10;
-            let mut frame = Vec::with_capacity(BLOCKS_PER_FRAME);
-            // TODO: Limit frame size instead of blocks per frame
-            for _ in 0..BLOCKS_PER_FRAME {
-                match self.outbound.poll().unwrap() {
-                    Async::Ready(Some(block)) => {
-                        frame.push(block);
-                    }
-                    _ => {
-                        done = true;
-                        break;
+            // Read frames
+            match try_ready!(self.upstream.poll()) {
+                Some(frame) => {
+                    // TODO: Validate block ordering within the frame
+                    for block in frame {
+                        if let Some(block) = self.handle_block(block) {
+                            self.cached_blocks.push_back(block);
+                        }
                     }
                 }
+                None => {
+                    // EOF was reached. The remote peer has disconnected.
+                    return Ok(Async::Ready(None));
+                }
             }
+        }
+    }
+}
 
-            if !frame.is_empty() {
-                // TODO: Add padding
-                self.upstream.start_send(frame)?;
+struct OutboundSession<T, C>
+where
+    T: AsyncRead + AsyncWrite,
+    C: Decoder<Item = Frame, Error = io::Error>,
+    C: Encoder<Item = Frame, Error = io::Error>,
+{
+    downstream: SplitSink<Framed<T, C>>,
+    cached_blocks: VecDeque<Block>,
+}
+
+impl<T, C> OutboundSession<T, C>
+where
+    T: AsyncRead + AsyncWrite,
+    C: Decoder<Item = Frame, Error = io::Error>,
+    C: Encoder<Item = Frame, Error = io::Error>,
+{
+    fn new(downstream: SplitSink<Framed<T, C>>) -> Self {
+        OutboundSession {
+            downstream,
+            cached_blocks: VecDeque::new(),
+        }
+    }
+}
+
+impl<T, C> Sink for OutboundSession<T, C>
+where
+    T: AsyncRead + AsyncWrite,
+    C: Decoder<Item = Frame, Error = io::Error>,
+    C: Encoder<Item = Frame, Error = io::Error>,
+{
+    type SinkItem = Block;
+    type SinkError = io::Error;
+
+    fn start_send(&mut self, block: Block) -> StartSend<Block, io::Error> {
+        self.cached_blocks.push_back(block);
+
+        const BLOCKS_PER_FRAME: usize = 10;
+        if self.cached_blocks.len() >= BLOCKS_PER_FRAME {
+            // Create frame from blocks
+            // TODO: Limit frame size instead of blocks per frame
+            // TODO: Add padding
+            let frame = self.cached_blocks.drain(0..BLOCKS_PER_FRAME).collect();
+
+            match self.downstream.start_send(frame)? {
+                AsyncSink::Ready => Ok(AsyncSink::Ready),
+                AsyncSink::NotReady(frame) => {
+                    for block in frame.into_iter().rev() {
+                        self.cached_blocks.push_front(block);
+                    }
+                    // Guaranteed to return a block
+                    let orig_block = self.cached_blocks.pop_back().unwrap();
+                    return Ok(AsyncSink::NotReady(orig_block));
+                }
             }
+        } else {
+            Ok(AsyncSink::Ready)
+        }
+    }
 
-            // If this is the last iteration, the loop will break even
-            // though there could still be frames to read. Because we did
-            // not reach `Async::NotReady`, we have to notify ourselves
-            // in order to tell the executor to schedule the task again.
-            if i + 1 == FRAMES_PER_TICK && !done {
-                task::current().notify();
+    fn poll_complete(&mut self) -> Poll<(), io::Error> {
+        // Package any remaining blocks in a frame
+        if !self.cached_blocks.is_empty() {
+            // Create frame from blocks
+            // TODO: Limit frame size instead of blocks per frame
+            // TODO: Add padding
+            let frame = self.cached_blocks.drain(..).collect();
+
+            if let AsyncSink::NotReady(frame) = self.downstream.start_send(frame)? {
+                self.cached_blocks.extend(frame);
+                return Ok(Async::NotReady);
             }
         }
 
         // Flush frames
-        self.upstream.poll_complete()?;
-
-        // Read frames
-        while let Async::Ready(f) = self.upstream.poll()? {
-            if let Some(frame) = f {
-                // TODO: Validate block ordering within the frame
-                for block in frame {
-                    if let Some(block) = self.handle_block(block) {
-                        self.engine
-                            .unbounded_send((self.ctx.hash.clone(), block))
-                            .unwrap()
-                    }
-                }
-            } else {
-                // EOF was reached. The remote peer has disconnected.
-                return Ok(Async::Ready(()));
-            }
-        }
-
-        // We know we got a `NotReady` from either `self.outbound` or `self.upstream`,
-        // so the contract is respected.
-        Ok(Async::NotReady)
+        self.downstream.poll_complete()
     }
 }
 
