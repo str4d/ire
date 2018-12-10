@@ -4,7 +4,11 @@
 
 use bytes::BytesMut;
 use cookie_factory::GenError;
-use futures::{sync::mpsc, task, Async, Future, Poll, Sink, Stream};
+use futures::{
+    stream::{SplitSink, SplitStream},
+    sync::mpsc,
+    try_ready, Async, AsyncSink, Future, Poll, Sink, StartSend, Stream,
+};
 use nom::{Err, Offset};
 use std::io;
 use std::iter::repeat;
@@ -145,11 +149,11 @@ where
     C: Decoder<Item = Frame, Error = io::Error>,
     C: Encoder<Item = Frame, Error = io::Error>,
 {
-    _ctx: SessionContext<Frame>,
-    ri: RouterIdentity,
-    upstream: Framed<T, C>,
+    ib: InboundSession<T, C>,
+    ob: OutboundSession<T, C>,
     engine: EngineTx<Frame>,
     outbound: SessionRx<Frame>,
+    cached_ob_frame: Option<Frame>,
 }
 
 impl<T, C> Session<T, C>
@@ -159,13 +163,15 @@ where
     C: Encoder<Item = Frame, Error = io::Error>,
 {
     fn new(ri: RouterIdentity, upstream: Framed<T, C>, session_refs: SessionRefs<Frame>) -> Self {
+        let (downstream, upstream) = upstream.split();
         let (tx, rx) = mpsc::unbounded();
+        let ctx = SessionContext::new(ri.hash(), session_refs.state, tx);
         Session {
-            _ctx: SessionContext::new(ri.hash(), session_refs.state, tx),
-            ri,
-            upstream,
+            ib: InboundSession::new(ctx, upstream),
+            ob: OutboundSession::new(downstream),
             engine: session_refs.engine,
             outbound: rx,
+            cached_ob_frame: None,
         }
     }
 }
@@ -180,41 +186,127 @@ where
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<(), io::Error> {
-        // Write frames
-        const FRAMES_PER_TICK: usize = 10;
-        for i in 0..FRAMES_PER_TICK {
-            match self.outbound.poll().unwrap() {
-                Async::Ready(Some(f)) => {
-                    self.upstream.start_send(f)?;
-
-                    // If this is the last iteration, the loop will break even
-                    // though there could still be frames to read. Because we did
-                    // not reach `Async::NotReady`, we have to notify ourselves
-                    // in order to tell the executor to schedule the task again.
-                    if i + 1 == FRAMES_PER_TICK {
-                        task::current().notify();
-                    }
+        // Write cached frame, if any
+        let mut write_ready = true;
+        if let Some(frame) = self.cached_ob_frame.take() {
+            match self.ob.start_send(frame)? {
+                AsyncSink::Ready => (),
+                AsyncSink::NotReady(frame) => {
+                    self.cached_ob_frame = Some(frame);
+                    write_ready = false;
                 }
+            }
+        }
+
+        // Write frames
+        while write_ready {
+            match self.outbound.poll().unwrap() {
+                Async::Ready(Some(frame)) => match self.ob.start_send(frame)? {
+                    AsyncSink::Ready => (),
+                    AsyncSink::NotReady(frame) => {
+                        self.cached_ob_frame = Some(frame);
+                        write_ready = false;
+                    }
+                },
                 _ => break,
             }
         }
 
         // Flush frames
-        self.upstream.poll_complete()?;
+        self.ob.poll_complete()?;
 
         // Read frames
-        while let Async::Ready(f) = self.upstream.poll()? {
-            if let Some(frame) = f {
-                self.engine.unbounded_send((self.ri.hash(), frame)).unwrap();
+        while let Async::Ready(f) = self.ib.poll()? {
+            if let Some((hash, frame)) = f {
+                self.engine.unbounded_send((hash, frame)).unwrap();
             } else {
                 // EOF was reached. The remote peer has disconnected.
                 return Ok(Async::Ready(()));
             }
         }
 
-        // We know we got a `NotReady` from either `self.outbound` or `self.upstream`,
+        // We know we got a `NotReady` from either `self.ob` or `self.ib`,
         // so the contract is respected.
         Ok(Async::NotReady)
+    }
+}
+
+struct InboundSession<T, C>
+where
+    T: AsyncRead + AsyncWrite,
+    C: Decoder<Item = Frame, Error = io::Error>,
+    C: Encoder<Item = Frame, Error = io::Error>,
+{
+    ctx: SessionContext<Frame>,
+    upstream: SplitStream<Framed<T, C>>,
+}
+
+impl<T, C> InboundSession<T, C>
+where
+    T: AsyncRead + AsyncWrite,
+    C: Decoder<Item = Frame, Error = io::Error>,
+    C: Encoder<Item = Frame, Error = io::Error>,
+{
+    fn new(ctx: SessionContext<Frame>, upstream: SplitStream<Framed<T, C>>) -> Self {
+        InboundSession { ctx, upstream }
+    }
+}
+
+impl<T, C> Stream for InboundSession<T, C>
+where
+    T: AsyncRead + AsyncWrite,
+    C: Decoder<Item = Frame, Error = io::Error>,
+    C: Encoder<Item = Frame, Error = io::Error>,
+{
+    type Item = (Hash, Frame);
+    type Error = io::Error;
+
+    fn poll(&mut self) -> Poll<Option<Self::Item>, io::Error> {
+        match try_ready!(self.upstream.poll()) {
+            Some(frame) => Ok(Async::Ready(Some((self.ctx.hash.clone(), frame)))),
+            None => {
+                // EOF was reached. The remote peer has disconnected.
+                Ok(Async::Ready(None))
+            }
+        }
+    }
+}
+
+struct OutboundSession<T, C>
+where
+    T: AsyncRead + AsyncWrite,
+    C: Decoder<Item = Frame, Error = io::Error>,
+    C: Encoder<Item = Frame, Error = io::Error>,
+{
+    downstream: SplitSink<Framed<T, C>>,
+}
+
+impl<T, C> OutboundSession<T, C>
+where
+    T: AsyncRead + AsyncWrite,
+    C: Decoder<Item = Frame, Error = io::Error>,
+    C: Encoder<Item = Frame, Error = io::Error>,
+{
+    fn new(downstream: SplitSink<Framed<T, C>>) -> Self {
+        OutboundSession { downstream }
+    }
+}
+
+impl<T, C> Sink for OutboundSession<T, C>
+where
+    T: AsyncRead + AsyncWrite,
+    C: Decoder<Item = Frame, Error = io::Error>,
+    C: Encoder<Item = Frame, Error = io::Error>,
+{
+    type SinkItem = Frame;
+    type SinkError = io::Error;
+
+    fn start_send(&mut self, frame: Frame) -> StartSend<Frame, io::Error> {
+        self.downstream.start_send(frame)
+    }
+
+    fn poll_complete(&mut self) -> Poll<(), io::Error> {
+        self.downstream.poll_complete()
     }
 }
 
