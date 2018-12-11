@@ -34,7 +34,7 @@ pub trait CommSystem: OutboundMessageHandler + Send + Sync {
     ///
     /// This returns a Future that must be polled in order to drive network
     /// communications.
-    fn start(&mut self, ctx: Arc<Context>) -> IoFuture<()>;
+    fn start(&mut self, ctx: Arc<Context>) -> Box<dyn Future<Item = (), Error = ()> + Send>;
 
     /// Returns true if there is an open session with the given peer.
     fn is_established(&self, hash: &Hash) -> bool;

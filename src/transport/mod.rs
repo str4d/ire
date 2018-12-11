@@ -1,9 +1,10 @@
 //! Transports used for point-to-point communication between I2P routers.
 
-use futures::{stream::Select, Async, Future, Poll, Sink, StartSend, Stream};
+use futures::{future::lazy, stream::Select, Async, Future, Poll, Sink, StartSend, Stream};
 use std::io;
 use std::iter::once;
 use std::sync::Arc;
+use tokio_executor::spawn;
 use tokio_io::IoFuture;
 
 use crate::crypto::dh::DHSessionKeyBuilder;
@@ -119,7 +120,7 @@ impl CommSystem for Manager {
         vec![self.ntcp.address(), self.ntcp2.address()]
     }
 
-    fn start(&mut self, ctx: Arc<Context>) -> IoFuture<()> {
+    fn start(&mut self, ctx: Arc<Context>) -> Box<dyn Future<Item = (), Error = ()> + Send> {
         let ntcp_engine = self.ntcp_engine.take().expect("Cannot call listen() twice");
         let ntcp2_engine = self
             .ntcp2_engine
@@ -134,20 +135,27 @@ impl CommSystem for Manager {
             .listen(ctx.keys.rid.clone(), ctx.keys.signing_private_key.clone())
             .map_err(|e| {
                 error!("NTCP listener error: {}", e);
-                e
             });
 
         let listener2 = self.ntcp2.listen(&ctx.keys.rid).map_err(|e| {
             error!("NTCP2 listener error: {}", e);
-            e
         });
 
         let engine = Engine {
             engines: ntcp_engine.select(ntcp2_engine),
             msg_handler: ctx.msg_handler.clone(),
-        };
+        }
+        .map(|_| ())
+        .map_err(|e| {
+            error!("CommSystem engine error: {}", e);
+        });
 
-        Box::new(engine.join3(listener, listener2).map(|_| ()))
+        Box::new(lazy(|| {
+            spawn(listener);
+            spawn(listener2);
+            spawn(engine);
+            Ok(())
+        }))
     }
 
     fn is_established(&self, hash: &Hash) -> bool {
