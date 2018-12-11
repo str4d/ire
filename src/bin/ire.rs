@@ -116,6 +116,7 @@ fn cli_client(args: &ArgMatches) -> i32 {
             let handle = ntcp.handle();
             let conn = ntcp
                 .connect(rsk.rid, rsk.signing_private_key, peer_ri.clone())
+                .unwrap()
                 .and_then(move |_| {
                     handle
                         .timestamp(peer_ri.clone(), 42)

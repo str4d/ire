@@ -384,7 +384,7 @@ impl Manager {
         own_ri: RouterIdentity,
         own_key: SigningPrivateKey,
         peer_ri: RouterInfo,
-    ) -> impl Future<Item = (), Error = io::Error> {
+    ) -> io::Result<impl Future<Item = (), Error = io::Error>> {
         connect(own_ri, own_key, peer_ri, self.session_manager.refs())
     }
 }
@@ -394,13 +394,16 @@ fn connect(
     own_key: SigningPrivateKey,
     peer_ri: RouterInfo,
     session_refs: SessionRefs<Frame>,
-) -> impl Future<Item = (), Error = io::Error> {
-    // TODO return error if there are no valid NTCP addresses (for some reason)
-    let addr = peer_ri
-        .address(&NTCP_STYLE, |_| true)
-        .unwrap()
-        .addr()
-        .unwrap();
+) -> io::Result<impl Future<Item = (), Error = io::Error>> {
+    let addr = match peer_ri.address(&NTCP_STYLE, |_| true) {
+        Some(ra) => ra.addr().unwrap(),
+        None => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "No valid NTCP addresses",
+            ))
+        }
+    };
 
     // Connect to the peer
     let conn = TcpStream::connect(&addr)
@@ -411,11 +414,11 @@ fn connect(
         .map_err(|e| io::Error::new(io::ErrorKind::Other, e));
 
     // Once connected:
-    timed.and_then(|(ri, conn)| {
+    Ok(timed.and_then(|(ri, conn)| {
         let session = Session::new(ri, conn, session_refs);
         spawn(session.map_err(|_| ()));
         Ok(())
-    })
+    }))
 }
 
 impl Transport for Manager {
@@ -470,10 +473,12 @@ impl Stream for Engine {
                 let own_rid = ctx.keys.rid.clone();
                 let own_key = ctx.keys.signing_private_key.clone();
                 let session_refs = session_refs.clone();
-                let connector = connect(own_rid, own_key, peer, session_refs).map_err(|e| {
-                    error!("Error while connecting: {}", e);
-                });
-                spawn(connector);
+                match connect(own_rid, own_key, peer, session_refs) {
+                    Ok(f) => spawn(f.map_err(|e| {
+                        error!("Error while connecting: {}", e);
+                    })),
+                    Err(e) => error!("{}", e),
+                }
             },
         )? {
             match f {
