@@ -22,10 +22,8 @@ use tokio_tcp::{TcpListener, TcpStream};
 use tokio_timer::Timeout;
 
 use super::{
-    session::{
-        self, EngineTx, SessionContext, SessionEngine, SessionManager, SessionRefs, SessionRx,
-    },
-    Bid, Handle, Transport,
+    session::{self, EngineRx, EngineTx, SessionContext, SessionManager, SessionRefs, SessionRx},
+    Bid, Transport,
 };
 use crate::crypto::{Aes256, SigningPrivateKey};
 use crate::data::{Hash, I2PString, RouterAddress, RouterIdentity, RouterInfo};
@@ -317,33 +315,40 @@ where
 pub struct Manager {
     addr: SocketAddr,
     session_manager: SessionManager<Frame>,
+    ctx: Option<Arc<Context>>,
 }
 
 pub struct Engine {
-    ctx: Option<Arc<Context>>,
-    session_engine: SessionEngine<Frame>,
-    session_refs: SessionRefs<Frame>,
+    inbound: EngineRx<Frame>,
 }
 
 impl Manager {
     pub fn new(addr: SocketAddr) -> (Self, Engine) {
-        let (session_manager, session_engine) = session::new_manager();
-        let session_refs = session_manager.refs();
+        let (session_manager, inbound) = session::new_manager();
         (
             Manager {
                 addr,
                 session_manager,
-            },
-            Engine {
                 ctx: None,
-                session_engine,
-                session_refs,
             },
+            Engine { inbound },
         )
     }
 
-    pub fn handle(&self) -> Handle {
-        self.session_manager.handle()
+    pub fn set_context(&mut self, ctx: Arc<Context>) {
+        self.ctx = Some(ctx);
+    }
+
+    pub fn sink(&self) -> OutboundSink {
+        let ctx = self
+            .ctx
+            .as_ref()
+            .cloned()
+            .expect("Should have called set_context()");
+        OutboundSink {
+            ctx,
+            session_refs: self.session_manager.refs(),
+        }
     }
 
     pub fn address(&self) -> RouterAddress {
@@ -441,46 +446,17 @@ impl Transport for Manager {
             } else {
                 70
             },
-            handle: self.session_manager.handle(),
+            sink: Box::new(self.sink()),
         })
-    }
-}
-
-impl Engine {
-    pub fn set_context(&mut self, ctx: Arc<Context>) {
-        self.ctx = Some(ctx);
     }
 }
 
 impl Stream for Engine {
     type Item = (Hash, Message);
-    type Error = ();
+    type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        let ctx = self
-            .ctx
-            .as_ref()
-            .cloned()
-            .expect("Should have called set_context()");
-        let session_refs = self.session_refs.clone();
-
-        while let Async::Ready(f) = self.session_engine.poll(
-            ctx.clone(),
-            Frame::Standard,
-            Frame::TimeSync,
-            |ctx, peer| {
-                // Connect to the peer
-                let own_rid = ctx.keys.rid.clone();
-                let own_key = ctx.keys.signing_private_key.clone();
-                let session_refs = session_refs.clone();
-                match connect(own_rid, own_key, peer, session_refs) {
-                    Ok(f) => spawn(f.map_err(|e| {
-                        error!("Error while connecting: {}", e);
-                    })),
-                    Err(e) => error!("{}", e),
-                }
-            },
-        )? {
+        while let Async::Ready(f) = self.inbound.poll().unwrap() {
             match f {
                 Some((from, Frame::Standard(msg))) => return Ok(Some((from, msg)).into()),
                 Some((from, frame)) => {
@@ -494,17 +470,64 @@ impl Stream for Engine {
     }
 }
 
+pub struct OutboundSink {
+    ctx: Arc<Context>,
+    session_refs: SessionRefs<Frame>,
+}
+
+impl Sink for OutboundSink {
+    type SinkItem = (RouterInfo, Message);
+    type SinkError = io::Error;
+
+    fn start_send(
+        &mut self,
+        (peer, msg): Self::SinkItem,
+    ) -> StartSend<Self::SinkItem, Self::SinkError> {
+        let session_refs = self.session_refs.clone();
+
+        match self
+            .session_refs
+            .state
+            .send(&peer.router_id.hash(), Frame::Standard(msg), || {
+                // Connect to the peer
+                let own_rid = self.ctx.keys.rid.clone();
+                let own_key = self.ctx.keys.signing_private_key.clone();
+                let peer = peer.clone();
+                let session_refs = session_refs.clone();
+                match connect(own_rid, own_key, peer, session_refs) {
+                    Ok(f) => spawn(f.map_err(|e| {
+                        error!("Error while connecting: {}", e);
+                    })),
+                    Err(e) => error!("{}", e),
+                }
+            }) {
+            Ok(AsyncSink::Ready) => Ok(AsyncSink::Ready),
+            Ok(AsyncSink::NotReady(Frame::Standard(msg))) => Ok(AsyncSink::NotReady((peer, msg))),
+            Err(e) => Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                format!("Channel to session is broken: {}", e),
+            )),
+            _ => unreachable!(),
+        }
+    }
+
+    fn poll_complete(&mut self) -> Poll<(), Self::SinkError> {
+        // Channels always complete immediately
+        Ok(Async::Ready(()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use bytes::BytesMut;
     use cookie_factory::GenError;
-    use futures::{lazy, Async, Future};
+    use futures::{lazy, Async, Future, Sink, Stream};
     use nom::{Err, Offset};
     use std::io::{self, Read, Write};
     use std::iter::repeat;
     use tokio_codec::{Decoder, Encoder};
 
-    use super::{frame, session, Frame, Session, NTCP_MTU};
+    use super::{frame, Frame, Manager, Session, NTCP_MTU};
     use crate::i2np::Message;
     use crate::router::mock::mock_context;
     use crate::transport::tests::{AliceNet, BobNet, NetworkCable};
@@ -584,12 +607,16 @@ mod tests {
         let alice_net = AliceNet::new(cable.clone());
         let alice_framed = TestCodec {}.framed(alice_net);
 
-        let (manager, mut engine) = session::new_manager();
+        let (mut manager, _) = Manager::new("127.0.0.1:1234".parse().unwrap());
+        manager.set_context(ctx);
 
         // Run on a task context
         lazy(move || {
-            let handle = manager.handle();
-            handle.send(ri.clone(), Message::dummy_data()).unwrap();
+            // Send a message, session is requested, message queued
+            let sink = manager.sink();
+            sink.send((ri.clone(), Message::dummy_data()))
+                .poll()
+                .unwrap();
 
             // Check it has not yet been received
             let mut bob_net = BobNet::new(cable);
@@ -597,23 +624,8 @@ mod tests {
             assert!(bob_net.read_to_end(&mut received).is_err());
             assert!(received.is_empty());
 
-            // Pass it through the engine, session is requested, message queued
-            engine
-                .poll(
-                    ctx,
-                    Frame::Standard,
-                    |_| panic!(),
-                    |_, peer| assert_eq!(peer, ri),
-                )
-                .unwrap();
-
-            // Still not received
-            received.clear();
-            assert!(bob_net.read_to_end(&mut received).is_err());
-            assert!(received.is_empty());
-
             // Create a session
-            let mut session = Session::new(rid, alice_framed, manager.refs());
+            let mut session = Session::new(rid, alice_framed, manager.session_manager.refs());
 
             // Pass it through the session, now it's on the wire
             session.poll().unwrap();
@@ -637,8 +649,8 @@ mod tests {
         let bob_net = BobNet::new(cable.clone());
         let bob_framed = TestCodec {}.framed(bob_net);
 
-        let (manager, mut engine) = session::new_manager();
-        let mut session = Session::new(rid, bob_framed, manager.refs());
+        let (manager, mut engine) = Manager::new("127.0.0.1:1234".parse().unwrap());
+        let mut session = Session::new(rid, bob_framed, manager.session_manager.refs());
 
         // Run on a task context
         lazy(move || {
@@ -646,26 +658,19 @@ mod tests {
             assert!(alice_net.write_all(DUMMY_MSG_NTCP_DATA).is_ok());
 
             // Check it has not yet been received
-            engine
-                .poll(ctx.clone(), |_| panic!(), |_| panic!(), |_, _| panic!())
-                .unwrap();
+            match engine.poll().unwrap() {
+                Async::NotReady => (),
+                _ => panic!(),
+            };
 
             // Pass it through the session
             session.poll().unwrap();
 
             // The engine should receive it now
-            match engine
-                .poll(ctx, |_| panic!(), |_| panic!(), |_, _| panic!())
-                .unwrap()
-            {
-                Async::Ready(Some((h, frame))) => {
+            match engine.poll().unwrap() {
+                Async::Ready(Some((h, msg))) => {
                     assert_eq!(h, hash);
-                    match frame {
-                        Frame::Standard(msg) => {
-                            assert_eq!(msg, *DUMMY_MSG);
-                        }
-                        _ => panic!(),
-                    }
+                    assert_eq!(msg, *DUMMY_MSG);
                 }
                 _ => panic!(),
             }

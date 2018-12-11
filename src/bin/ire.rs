@@ -8,7 +8,7 @@ extern crate ire;
 extern crate tokio;
 
 use clap::{App, Arg, ArgMatches, SubCommand};
-use futures::{Future, Stream};
+use futures::{Future, Sink, Stream};
 use ire::{
     data, i2np,
     netdb::reseed::HttpsReseeder,
@@ -111,18 +111,15 @@ fn cli_client(args: &ArgMatches) -> i32 {
     info!("Connecting to {}", peer_ri.router_id.hash());
     match args.value_of("transport") {
         Some("NTCP") => {
-            let (ntcp, mut engine) = transport::ntcp::Manager::new("127.0.0.1:0".parse().unwrap());
-            engine.set_context(mock_context());
-            let handle = ntcp.handle();
+            let (mut ntcp, engine) = transport::ntcp::Manager::new("127.0.0.1:0".parse().unwrap());
+            ntcp.set_context(mock_context());
             let conn = ntcp
                 .connect(rsk.rid, rsk.signing_private_key, peer_ri.clone())
                 .unwrap()
                 .and_then(move |_| {
-                    handle
-                        .timestamp(peer_ri.clone(), 42)
-                        .map(|_| (handle, peer_ri))
+                    info!("Connection established!");
+                    ntcp.sink().send((peer_ri, i2np::Message::dummy_data()))
                 })
-                .and_then(|(handle, peer)| handle.send(peer, i2np::Message::dummy_data()))
                 .and_then(|_| {
                     info!("Dummy data sent!");
                     Ok(())
@@ -138,20 +135,16 @@ fn cli_client(args: &ArgMatches) -> i32 {
             );
         }
         Some("NTCP2") => {
-            let (ntcp2, mut engine) =
+            let (mut ntcp2, engine) =
                 transport::ntcp2::Manager::new("127.0.0.1:0".parse().unwrap());
-            engine.set_context(mock_context());
-            let handle = ntcp2.handle();
+            ntcp2.set_context(mock_context());
             let conn = ntcp2
                 .connect(&ri, peer_ri.clone())
                 .unwrap()
                 .and_then(move |_| {
                     info!("Connection established!");
-                    handle
-                        .timestamp(peer_ri.clone(), 42)
-                        .map(|_| (handle, peer_ri))
+                    ntcp2.sink().send((peer_ri, i2np::Message::dummy_data()))
                 })
-                .and_then(|(handle, peer)| handle.send(peer, i2np::Message::dummy_data()))
                 .and_then(|_| {
                     info!("Dummy data sent!");
                     Ok(())
