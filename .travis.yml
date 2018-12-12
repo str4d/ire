@@ -38,6 +38,6 @@ before_cache: |
 
 after_success: |
   if [[ "$TRAVIS_RUST_VERSION" == nightly ]]; then
-    cargo tarpaulin --out Xml
+    cargo tarpaulin --timeout 180 --out Xml
     bash <(curl -s https://codecov.io/bash)
   fi
