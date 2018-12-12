@@ -1,14 +1,11 @@
 //! Common structures for managing active sessions over individual transports.
 
-use futures::{sync::mpsc, Async, Poll, Stream};
+use futures::{sync::mpsc, Async, AsyncSink, Poll, Sink, StartSend, Stream};
 use std::collections::HashMap;
 use std::io;
 use std::sync::{Arc, Mutex};
 
-use super::{Handle, MessageRx, TimestampRx};
-use crate::data::{Hash, RouterInfo};
-use crate::i2np::Message;
-use crate::router::Context;
+use crate::data::Hash;
 
 //
 // Session state
@@ -18,7 +15,7 @@ use crate::router::Context;
 pub(super) type EngineTx<Frame> = mpsc::UnboundedSender<(Hash, Frame)>;
 
 /// Shorthand for the receive half of an Engine-bound message channel.
-type EngineRx<Frame> = mpsc::UnboundedReceiver<(Hash, Frame)>;
+pub(super) type EngineRx<Frame> = mpsc::UnboundedReceiver<(Hash, Frame)>;
 
 /// Shorthand for the transmit half of a Session-bound message channel.
 type SessionTx<Frame> = mpsc::UnboundedSender<Frame>;
@@ -53,31 +50,34 @@ impl<F> SessionState<F> {
         self.0.lock().unwrap().sessions.contains_key(hash)
     }
 
-    fn send<P>(&self, hash: &Hash, frame: F, connect_to_peer: P)
+    pub(super) fn send<P>(
+        &self,
+        hash: &Hash,
+        frame: F,
+        connect_to_peer: P,
+    ) -> StartSend<F, mpsc::SendError<F>>
     where
         P: FnOnce(),
     {
         let mut s = self.0.lock().unwrap();
 
         // If we have an established session, use it.
-        if let Some(session) = s.sessions.get(hash) {
-            session.unbounded_send(frame).unwrap();
-            return;
+        if let Some(mut session) = s.sessions.get(hash) {
+            session.start_send(frame)
+        } else {
+            // Cache the frame for sending once we have a session.
+            s.pending_sessions
+                .entry(hash.clone())
+                .or_insert_with(|| {
+                    // No pending session, let's create one
+                    connect_to_peer();
+                    vec![]
+                })
+                .push(frame);
+            Ok(AsyncSink::Ready)
         }
-
-        // Cache the frame for sending once we have a session.
-        s.pending_sessions
-            .entry(hash.clone())
-            .or_insert_with(|| {
-                // No pending session, let's create one
-                connect_to_peer();
-                vec![]
-            })
-            .push(frame);
     }
-}
 
-impl<F> SessionState<F> {
     fn new() -> Self {
         SessionState(Arc::new(Mutex::new(Shared::new())))
     }
@@ -150,42 +150,22 @@ impl<F> Stream for SessionRefs<F> {
 
 pub(super) struct SessionManager<F> {
     state: SessionState<F>,
-    handle: Handle,
     inbound: EngineTx<F>,
 }
 
-pub(super) struct SessionEngine<F> {
-    state: SessionState<F>,
-    inbound_msg: EngineRx<F>,
-    outbound_msg: MessageRx,
-    outbound_ts: TimestampRx,
-}
-
-pub(super) fn new_manager<F>() -> (SessionManager<F>, SessionEngine<F>) {
-    let (message, outbound_msg) = mpsc::unbounded();
-    let (timestamp, outbound_ts) = mpsc::unbounded();
+pub(super) fn new_manager<F>() -> (SessionManager<F>, EngineRx<F>) {
     let (inbound, inbound_msg) = mpsc::unbounded();
     let state = SessionState::new();
     (
         SessionManager {
             state: state.clone(),
-            handle: Handle { message, timestamp },
             inbound,
         },
-        SessionEngine {
-            state,
-            inbound_msg,
-            outbound_msg,
-            outbound_ts,
-        },
+        inbound_msg,
     )
 }
 
 impl<F> SessionManager<F> {
-    pub fn handle(&self) -> Handle {
-        self.handle.clone()
-    }
-
     pub(super) fn refs(&self) -> SessionRefs<F> {
         SessionRefs {
             state: self.state.clone(),
@@ -195,43 +175,5 @@ impl<F> SessionManager<F> {
 
     pub fn have_session(&self, hash: &Hash) -> bool {
         self.state.contains(hash)
-    }
-}
-
-impl<F> SessionEngine<F> {
-    pub fn poll<P, Q, R>(
-        &mut self,
-        ctx: Arc<Context>,
-        frame_message: P,
-        frame_timestamp: Q,
-        connect_to_peer: R,
-    ) -> Poll<Option<(Hash, F)>, ()>
-    where
-        P: Fn(Message) -> F,
-        Q: Fn(u32) -> F,
-        R: Fn(Arc<Context>, RouterInfo),
-    {
-        // Write timestamps first
-        while let Async::Ready(f) = self.outbound_ts.poll().unwrap() {
-            if let Some((peer, ts)) = f {
-                self.state
-                    .send(&peer.router_id.hash(), frame_timestamp(ts), || {
-                        connect_to_peer(ctx.clone(), peer)
-                    });
-            }
-        }
-
-        // Write messages
-        while let Async::Ready(f) = self.outbound_msg.poll().unwrap() {
-            if let Some((peer, msg)) = f {
-                self.state
-                    .send(&peer.router_id.hash(), frame_message(msg), || {
-                        connect_to_peer(ctx.clone(), peer)
-                    });
-            }
-        }
-
-        // Return the next inbound frame
-        self.inbound_msg.poll()
     }
 }

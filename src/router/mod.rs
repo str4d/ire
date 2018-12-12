@@ -1,6 +1,7 @@
-use futures::{future::join_all, sync::oneshot, Future};
+use futures::{future::lazy, sync::oneshot, Future};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
+use tokio_executor::spawn;
 
 use crate::data::{Hash, RouterInfo, RouterSecretKeys};
 use crate::i2np::{DatabaseSearchReply, DatabaseStoreData, Message, MessagePayload};
@@ -100,19 +101,17 @@ impl Router {
     pub fn start(&mut self) -> impl Future<Item = (), Error = ()> {
         info!("Our router hash is {}", self.ctx.keys.rid.hash());
 
-        let components: Vec<Box<dyn Future<Item = (), Error = ()> + Send>> = vec![
-            Box::new(
-                self.ctx
-                    .comms
-                    .write()
-                    .unwrap()
-                    .start(self.ctx.clone())
-                    .map_err(|e| {
-                        error!("CommSystem engine error: {}", e);
-                    }),
-            ),
-            netdb_engine(self.ctx.clone()),
-        ];
-        join_all(components).map(|_| ())
+        let comms_engine = self.ctx.comms.write().unwrap().start(self.ctx.clone());
+        let netdb_engine = netdb_engine(self.ctx.clone());
+
+        lazy(|| {
+            // Start the transport system
+            spawn(comms_engine);
+
+            // Start network database operations
+            spawn(netdb_engine);
+
+            Ok(())
+        })
     }
 }

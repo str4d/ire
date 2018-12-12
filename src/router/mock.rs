@@ -4,7 +4,7 @@
 //! self-consistency across its component's API.
 
 use config::Config;
-use futures::{future, sync::oneshot};
+use futures::{future, sync::oneshot, Future};
 use std::sync::{Arc, RwLock};
 use tokio_io::IoFuture;
 
@@ -44,7 +44,7 @@ impl CommSystem for MockCommSystem {
         vec![]
     }
 
-    fn start(&mut self, _ctx: Arc<Context>) -> IoFuture<()> {
+    fn start(&mut self, _ctx: Arc<Context>) -> Box<dyn Future<Item = (), Error = ()> + Send> {
         Box::new(future::ok(()))
     }
 

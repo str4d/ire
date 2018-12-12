@@ -4,7 +4,11 @@
 
 use bytes::BytesMut;
 use cookie_factory::GenError;
-use futures::{sync::mpsc, task, Async, Future, Poll, Sink, Stream};
+use futures::{
+    stream::{SplitSink, SplitStream},
+    sync::mpsc,
+    try_ready, Async, AsyncSink, Future, Poll, Sink, StartSend, Stream,
+};
 use nom::{Err, Offset};
 use std::io;
 use std::iter::repeat;
@@ -18,10 +22,8 @@ use tokio_tcp::{TcpListener, TcpStream};
 use tokio_timer::Timeout;
 
 use super::{
-    session::{
-        self, EngineTx, SessionContext, SessionEngine, SessionManager, SessionRefs, SessionRx,
-    },
-    Bid, Handle, Transport,
+    session::{self, EngineRx, EngineTx, SessionContext, SessionManager, SessionRefs, SessionRx},
+    Bid, Transport,
 };
 use crate::crypto::{Aes256, SigningPrivateKey};
 use crate::data::{Hash, I2PString, RouterAddress, RouterIdentity, RouterInfo};
@@ -145,11 +147,11 @@ where
     C: Decoder<Item = Frame, Error = io::Error>,
     C: Encoder<Item = Frame, Error = io::Error>,
 {
-    _ctx: SessionContext<Frame>,
-    ri: RouterIdentity,
-    upstream: Framed<T, C>,
+    ib: InboundSession<T, C>,
+    ob: OutboundSession<T, C>,
     engine: EngineTx<Frame>,
     outbound: SessionRx<Frame>,
+    cached_ob_frame: Option<Frame>,
 }
 
 impl<T, C> Session<T, C>
@@ -159,13 +161,15 @@ where
     C: Encoder<Item = Frame, Error = io::Error>,
 {
     fn new(ri: RouterIdentity, upstream: Framed<T, C>, session_refs: SessionRefs<Frame>) -> Self {
+        let (downstream, upstream) = upstream.split();
         let (tx, rx) = mpsc::unbounded();
+        let ctx = SessionContext::new(ri.hash(), session_refs.state, tx);
         Session {
-            _ctx: SessionContext::new(ri.hash(), session_refs.state, tx),
-            ri,
-            upstream,
+            ib: InboundSession::new(ctx, upstream),
+            ob: OutboundSession::new(downstream),
             engine: session_refs.engine,
             outbound: rx,
+            cached_ob_frame: None,
         }
     }
 }
@@ -180,41 +184,127 @@ where
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<(), io::Error> {
-        // Write frames
-        const FRAMES_PER_TICK: usize = 10;
-        for i in 0..FRAMES_PER_TICK {
-            match self.outbound.poll().unwrap() {
-                Async::Ready(Some(f)) => {
-                    self.upstream.start_send(f)?;
-
-                    // If this is the last iteration, the loop will break even
-                    // though there could still be frames to read. Because we did
-                    // not reach `Async::NotReady`, we have to notify ourselves
-                    // in order to tell the executor to schedule the task again.
-                    if i + 1 == FRAMES_PER_TICK {
-                        task::current().notify();
-                    }
+        // Write cached frame, if any
+        let mut write_ready = true;
+        if let Some(frame) = self.cached_ob_frame.take() {
+            match self.ob.start_send(frame)? {
+                AsyncSink::Ready => (),
+                AsyncSink::NotReady(frame) => {
+                    self.cached_ob_frame = Some(frame);
+                    write_ready = false;
                 }
+            }
+        }
+
+        // Write frames
+        while write_ready {
+            match self.outbound.poll().unwrap() {
+                Async::Ready(Some(frame)) => match self.ob.start_send(frame)? {
+                    AsyncSink::Ready => (),
+                    AsyncSink::NotReady(frame) => {
+                        self.cached_ob_frame = Some(frame);
+                        write_ready = false;
+                    }
+                },
                 _ => break,
             }
         }
 
         // Flush frames
-        self.upstream.poll_complete()?;
+        self.ob.poll_complete()?;
 
         // Read frames
-        while let Async::Ready(f) = self.upstream.poll()? {
-            if let Some(frame) = f {
-                self.engine.unbounded_send((self.ri.hash(), frame)).unwrap();
+        while let Async::Ready(f) = self.ib.poll()? {
+            if let Some((hash, frame)) = f {
+                self.engine.unbounded_send((hash, frame)).unwrap();
             } else {
                 // EOF was reached. The remote peer has disconnected.
                 return Ok(Async::Ready(()));
             }
         }
 
-        // We know we got a `NotReady` from either `self.outbound` or `self.upstream`,
+        // We know we got a `NotReady` from either `self.ob` or `self.ib`,
         // so the contract is respected.
         Ok(Async::NotReady)
+    }
+}
+
+struct InboundSession<T, C>
+where
+    T: AsyncRead + AsyncWrite,
+    C: Decoder<Item = Frame, Error = io::Error>,
+    C: Encoder<Item = Frame, Error = io::Error>,
+{
+    ctx: SessionContext<Frame>,
+    upstream: SplitStream<Framed<T, C>>,
+}
+
+impl<T, C> InboundSession<T, C>
+where
+    T: AsyncRead + AsyncWrite,
+    C: Decoder<Item = Frame, Error = io::Error>,
+    C: Encoder<Item = Frame, Error = io::Error>,
+{
+    fn new(ctx: SessionContext<Frame>, upstream: SplitStream<Framed<T, C>>) -> Self {
+        InboundSession { ctx, upstream }
+    }
+}
+
+impl<T, C> Stream for InboundSession<T, C>
+where
+    T: AsyncRead + AsyncWrite,
+    C: Decoder<Item = Frame, Error = io::Error>,
+    C: Encoder<Item = Frame, Error = io::Error>,
+{
+    type Item = (Hash, Frame);
+    type Error = io::Error;
+
+    fn poll(&mut self) -> Poll<Option<Self::Item>, io::Error> {
+        match try_ready!(self.upstream.poll()) {
+            Some(frame) => Ok(Async::Ready(Some((self.ctx.hash.clone(), frame)))),
+            None => {
+                // EOF was reached. The remote peer has disconnected.
+                Ok(Async::Ready(None))
+            }
+        }
+    }
+}
+
+struct OutboundSession<T, C>
+where
+    T: AsyncRead + AsyncWrite,
+    C: Decoder<Item = Frame, Error = io::Error>,
+    C: Encoder<Item = Frame, Error = io::Error>,
+{
+    downstream: SplitSink<Framed<T, C>>,
+}
+
+impl<T, C> OutboundSession<T, C>
+where
+    T: AsyncRead + AsyncWrite,
+    C: Decoder<Item = Frame, Error = io::Error>,
+    C: Encoder<Item = Frame, Error = io::Error>,
+{
+    fn new(downstream: SplitSink<Framed<T, C>>) -> Self {
+        OutboundSession { downstream }
+    }
+}
+
+impl<T, C> Sink for OutboundSession<T, C>
+where
+    T: AsyncRead + AsyncWrite,
+    C: Decoder<Item = Frame, Error = io::Error>,
+    C: Encoder<Item = Frame, Error = io::Error>,
+{
+    type SinkItem = Frame;
+    type SinkError = io::Error;
+
+    fn start_send(&mut self, frame: Frame) -> StartSend<Frame, io::Error> {
+        self.downstream.start_send(frame)
+    }
+
+    fn poll_complete(&mut self) -> Poll<(), io::Error> {
+        self.downstream.poll_complete()
     }
 }
 
@@ -225,33 +315,40 @@ where
 pub struct Manager {
     addr: SocketAddr,
     session_manager: SessionManager<Frame>,
+    ctx: Option<Arc<Context>>,
 }
 
 pub struct Engine {
-    ctx: Option<Arc<Context>>,
-    session_engine: SessionEngine<Frame>,
-    session_refs: SessionRefs<Frame>,
+    inbound: EngineRx<Frame>,
 }
 
 impl Manager {
     pub fn new(addr: SocketAddr) -> (Self, Engine) {
-        let (session_manager, session_engine) = session::new_manager();
-        let session_refs = session_manager.refs();
+        let (session_manager, inbound) = session::new_manager();
         (
             Manager {
                 addr,
                 session_manager,
-            },
-            Engine {
                 ctx: None,
-                session_engine,
-                session_refs,
             },
+            Engine { inbound },
         )
     }
 
-    pub fn handle(&self) -> Handle {
-        self.session_manager.handle()
+    pub fn set_context(&mut self, ctx: Arc<Context>) {
+        self.ctx = Some(ctx);
+    }
+
+    pub fn sink(&self) -> OutboundSink {
+        let ctx = self
+            .ctx
+            .as_ref()
+            .cloned()
+            .expect("Should have called set_context()");
+        OutboundSink {
+            ctx,
+            session_refs: self.session_manager.refs(),
+        }
     }
 
     pub fn address(&self) -> RouterAddress {
@@ -292,7 +389,7 @@ impl Manager {
         own_ri: RouterIdentity,
         own_key: SigningPrivateKey,
         peer_ri: RouterInfo,
-    ) -> impl Future<Item = (), Error = io::Error> {
+    ) -> io::Result<impl Future<Item = (), Error = io::Error>> {
         connect(own_ri, own_key, peer_ri, self.session_manager.refs())
     }
 }
@@ -302,13 +399,16 @@ fn connect(
     own_key: SigningPrivateKey,
     peer_ri: RouterInfo,
     session_refs: SessionRefs<Frame>,
-) -> impl Future<Item = (), Error = io::Error> {
-    // TODO return error if there are no valid NTCP addresses (for some reason)
-    let addr = peer_ri
-        .address(&NTCP_STYLE, |_| true)
-        .unwrap()
-        .addr()
-        .unwrap();
+) -> io::Result<impl Future<Item = (), Error = io::Error>> {
+    let addr = match peer_ri.address(&NTCP_STYLE, |_| true) {
+        Some(ra) => ra.addr().unwrap(),
+        None => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "No valid NTCP addresses",
+            ))
+        }
+    };
 
     // Connect to the peer
     let conn = TcpStream::connect(&addr)
@@ -319,11 +419,11 @@ fn connect(
         .map_err(|e| io::Error::new(io::ErrorKind::Other, e));
 
     // Once connected:
-    timed.and_then(|(ri, conn)| {
+    Ok(timed.and_then(|(ri, conn)| {
         let session = Session::new(ri, conn, session_refs);
         spawn(session.map_err(|_| ()));
         Ok(())
-    })
+    }))
 }
 
 impl Transport for Manager {
@@ -346,44 +446,17 @@ impl Transport for Manager {
             } else {
                 70
             },
-            handle: self.session_manager.handle(),
+            sink: Box::new(self.sink()),
         })
-    }
-}
-
-impl Engine {
-    pub fn set_context(&mut self, ctx: Arc<Context>) {
-        self.ctx = Some(ctx);
     }
 }
 
 impl Stream for Engine {
     type Item = (Hash, Message);
-    type Error = ();
+    type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        let ctx = self
-            .ctx
-            .as_ref()
-            .cloned()
-            .expect("Should have called set_context()");
-        let session_refs = self.session_refs.clone();
-
-        while let Async::Ready(f) = self.session_engine.poll(
-            ctx.clone(),
-            Frame::Standard,
-            Frame::TimeSync,
-            |ctx, peer| {
-                // Connect to the peer
-                let own_rid = ctx.keys.rid.clone();
-                let own_key = ctx.keys.signing_private_key.clone();
-                let session_refs = session_refs.clone();
-                let connector = connect(own_rid, own_key, peer, session_refs).map_err(|e| {
-                    error!("Error while connecting: {}", e);
-                });
-                spawn(connector);
-            },
-        )? {
+        while let Async::Ready(f) = self.inbound.poll().unwrap() {
             match f {
                 Some((from, Frame::Standard(msg))) => return Ok(Some((from, msg)).into()),
                 Some((from, frame)) => {
@@ -397,17 +470,64 @@ impl Stream for Engine {
     }
 }
 
+pub struct OutboundSink {
+    ctx: Arc<Context>,
+    session_refs: SessionRefs<Frame>,
+}
+
+impl Sink for OutboundSink {
+    type SinkItem = (RouterInfo, Message);
+    type SinkError = io::Error;
+
+    fn start_send(
+        &mut self,
+        (peer, msg): Self::SinkItem,
+    ) -> StartSend<Self::SinkItem, Self::SinkError> {
+        let session_refs = self.session_refs.clone();
+
+        match self
+            .session_refs
+            .state
+            .send(&peer.router_id.hash(), Frame::Standard(msg), || {
+                // Connect to the peer
+                let own_rid = self.ctx.keys.rid.clone();
+                let own_key = self.ctx.keys.signing_private_key.clone();
+                let peer = peer.clone();
+                let session_refs = session_refs.clone();
+                match connect(own_rid, own_key, peer, session_refs) {
+                    Ok(f) => spawn(f.map_err(|e| {
+                        error!("Error while connecting: {}", e);
+                    })),
+                    Err(e) => error!("{}", e),
+                }
+            }) {
+            Ok(AsyncSink::Ready) => Ok(AsyncSink::Ready),
+            Ok(AsyncSink::NotReady(Frame::Standard(msg))) => Ok(AsyncSink::NotReady((peer, msg))),
+            Err(e) => Err(io::Error::new(
+                io::ErrorKind::BrokenPipe,
+                format!("Channel to session is broken: {}", e),
+            )),
+            _ => unreachable!(),
+        }
+    }
+
+    fn poll_complete(&mut self) -> Poll<(), Self::SinkError> {
+        // Channels always complete immediately
+        Ok(Async::Ready(()))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use bytes::BytesMut;
     use cookie_factory::GenError;
-    use futures::{lazy, Async, Future};
+    use futures::{lazy, Async, Future, Sink, Stream};
     use nom::{Err, Offset};
     use std::io::{self, Read, Write};
     use std::iter::repeat;
     use tokio_codec::{Decoder, Encoder};
 
-    use super::{frame, session, Frame, Session, NTCP_MTU};
+    use super::{frame, Frame, Manager, Session, NTCP_MTU};
     use crate::i2np::Message;
     use crate::router::mock::mock_context;
     use crate::transport::tests::{AliceNet, BobNet, NetworkCable};
@@ -487,12 +607,16 @@ mod tests {
         let alice_net = AliceNet::new(cable.clone());
         let alice_framed = TestCodec {}.framed(alice_net);
 
-        let (manager, mut engine) = session::new_manager();
+        let (mut manager, _) = Manager::new("127.0.0.1:1234".parse().unwrap());
+        manager.set_context(ctx);
 
         // Run on a task context
         lazy(move || {
-            let handle = manager.handle();
-            handle.send(ri.clone(), Message::dummy_data()).unwrap();
+            // Send a message, session is requested, message queued
+            let sink = manager.sink();
+            sink.send((ri.clone(), Message::dummy_data()))
+                .poll()
+                .unwrap();
 
             // Check it has not yet been received
             let mut bob_net = BobNet::new(cable);
@@ -500,23 +624,8 @@ mod tests {
             assert!(bob_net.read_to_end(&mut received).is_err());
             assert!(received.is_empty());
 
-            // Pass it through the engine, session is requested, message queued
-            engine
-                .poll(
-                    ctx,
-                    Frame::Standard,
-                    |_| panic!(),
-                    |_, peer| assert_eq!(peer, ri),
-                )
-                .unwrap();
-
-            // Still not received
-            received.clear();
-            assert!(bob_net.read_to_end(&mut received).is_err());
-            assert!(received.is_empty());
-
             // Create a session
-            let mut session = Session::new(rid, alice_framed, manager.refs());
+            let mut session = Session::new(rid, alice_framed, manager.session_manager.refs());
 
             // Pass it through the session, now it's on the wire
             session.poll().unwrap();
@@ -540,8 +649,8 @@ mod tests {
         let bob_net = BobNet::new(cable.clone());
         let bob_framed = TestCodec {}.framed(bob_net);
 
-        let (manager, mut engine) = session::new_manager();
-        let mut session = Session::new(rid, bob_framed, manager.refs());
+        let (manager, mut engine) = Manager::new("127.0.0.1:1234".parse().unwrap());
+        let mut session = Session::new(rid, bob_framed, manager.session_manager.refs());
 
         // Run on a task context
         lazy(move || {
@@ -549,26 +658,19 @@ mod tests {
             assert!(alice_net.write_all(DUMMY_MSG_NTCP_DATA).is_ok());
 
             // Check it has not yet been received
-            engine
-                .poll(ctx.clone(), |_| panic!(), |_| panic!(), |_, _| panic!())
-                .unwrap();
+            match engine.poll().unwrap() {
+                Async::NotReady => (),
+                _ => panic!(),
+            };
 
             // Pass it through the session
             session.poll().unwrap();
 
             // The engine should receive it now
-            match engine
-                .poll(ctx, |_| panic!(), |_| panic!(), |_, _| panic!())
-                .unwrap()
-            {
-                Async::Ready(Some((h, frame))) => {
+            match engine.poll().unwrap() {
+                Async::Ready(Some((h, msg))) => {
                     assert_eq!(h, hash);
-                    match frame {
-                        Frame::Standard(msg) => {
-                            assert_eq!(msg, *DUMMY_MSG);
-                        }
-                        _ => panic!(),
-                    }
+                    assert_eq!(msg, *DUMMY_MSG);
                 }
                 _ => panic!(),
             }

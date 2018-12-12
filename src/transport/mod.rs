@@ -1,9 +1,10 @@
 //! Transports used for point-to-point communication between I2P routers.
 
-use futures::{stream::Select, sync::mpsc, Async, Future, Poll, Sink, StartSend, Stream};
+use futures::{future::lazy, stream::Select, Async, Future, Poll, Sink, StartSend, Stream};
 use std::io;
 use std::iter::once;
 use std::sync::Arc;
+use tokio_executor::spawn;
 use tokio_io::IoFuture;
 
 use crate::crypto::dh::DHSessionKeyBuilder;
@@ -19,60 +20,26 @@ pub mod ntcp;
 pub mod ntcp2;
 mod session;
 
-/// Shorthand for the transmit half of a Transport-bound message channel.
-type MessageTx = mpsc::UnboundedSender<(RouterInfo, Message)>;
-
-/// Shorthand for the receive half of a Transport-bound message channel.
-type MessageRx = mpsc::UnboundedReceiver<(RouterInfo, Message)>;
-
-/// Shorthand for the transmit half of a Transport-bound timestamp channel.
-type TimestampTx = mpsc::UnboundedSender<(RouterInfo, u32)>;
-
-/// Shorthand for the receive half of a Transport-bound timestamp channel.
-type TimestampRx = mpsc::UnboundedReceiver<(RouterInfo, u32)>;
-
-/// A reference to a transport, that can be used to send messages and
-/// timestamps to other routers (if they are reachable via this transport).
-#[derive(Clone)]
-pub struct Handle {
-    message: MessageTx,
-    timestamp: TimestampTx,
-}
-
-impl Handle {
-    pub fn send(&self, peer: RouterInfo, msg: Message) -> io::Result<()> {
-        self.message
-            .unbounded_send((peer, msg))
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
-    }
-
-    pub fn timestamp(&self, peer: RouterInfo, ts: u32) -> io::Result<()> {
-        self.timestamp
-            .unbounded_send((peer, ts))
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
-    }
-}
-
 /// A bid from a transport indicating how much it thinks it will "cost" to
 /// send a particular message.
 struct Bid {
     bid: u32,
-    handle: Handle,
+    sink: Box<dyn Sink<SinkItem = (RouterInfo, Message), SinkError = io::Error> + Send>,
 }
 
 impl Sink for Bid {
     type SinkItem = (RouterInfo, Message);
-    type SinkError = ();
+    type SinkError = io::Error;
 
     fn start_send(
         &mut self,
         message: Self::SinkItem,
     ) -> StartSend<Self::SinkItem, Self::SinkError> {
-        self.handle.message.start_send(message).map_err(|_| ())
+        self.sink.start_send(message)
     }
 
     fn poll_complete(&mut self) -> Poll<(), Self::SinkError> {
-        self.handle.message.poll_complete().map_err(|_| ())
+        self.sink.poll_complete()
     }
 }
 
@@ -153,40 +120,42 @@ impl CommSystem for Manager {
         vec![self.ntcp.address(), self.ntcp2.address()]
     }
 
-    fn start(&mut self, ctx: Arc<Context>) -> IoFuture<()> {
-        let mut ntcp_engine = self.ntcp_engine.take().expect("Cannot call listen() twice");
-        let mut ntcp2_engine = self
+    fn start(&mut self, ctx: Arc<Context>) -> Box<dyn Future<Item = (), Error = ()> + Send> {
+        let ntcp_engine = self.ntcp_engine.take().expect("Cannot call listen() twice");
+        let ntcp2_engine = self
             .ntcp2_engine
             .take()
             .expect("Cannot call listen() twice");
 
-        ntcp_engine.set_context(ctx.clone());
-        ntcp2_engine.set_context(ctx.clone());
+        self.ntcp.set_context(ctx.clone());
+        self.ntcp2.set_context(ctx.clone());
 
         let listener = self
             .ntcp
             .listen(ctx.keys.rid.clone(), ctx.keys.signing_private_key.clone())
             .map_err(|e| {
                 error!("NTCP listener error: {}", e);
-                e
             });
 
         let listener2 = self.ntcp2.listen(&ctx.keys.rid).map_err(|e| {
             error!("NTCP2 listener error: {}", e);
-            e
         });
 
         let engine = Engine {
             engines: ntcp_engine.select(ntcp2_engine),
             msg_handler: ctx.msg_handler.clone(),
-        };
+        }
+        .map(|_| ())
+        .map_err(|e| {
+            error!("CommSystem engine error: {}", e);
+        });
 
-        Box::new(
-            engine
-                .map_err(|_| io::Error::new(io::ErrorKind::Other, "Error in transport::Engine"))
-                .join3(listener, listener2)
-                .map(|_| ()),
-        )
+        Box::new(lazy(|| {
+            spawn(listener);
+            spawn(listener2);
+            spawn(engine);
+            Ok(())
+        }))
     }
 
     fn is_established(&self, hash: &Hash) -> bool {
@@ -196,12 +165,15 @@ impl CommSystem for Manager {
 
 impl Future for Engine {
     type Item = ();
-    type Error = ();
+    type Error = io::Error;
 
-    fn poll(&mut self) -> Poll<(), ()> {
+    fn poll(&mut self) -> Poll<(), io::Error> {
         while let Async::Ready(f) = self.engines.poll()? {
             if let Some((from, msg)) = f {
                 self.msg_handler.handle(from, msg);
+            } else {
+                // All engine streams have ended
+                return Ok(Async::Ready(()));
             }
         }
         Ok(Async::NotReady)
@@ -210,7 +182,7 @@ impl Future for Engine {
 
 #[cfg(test)]
 mod tests {
-    use futures::{lazy, Async, Stream};
+    use futures::Async;
     use std::io::{self, Read, Write};
     use std::net::SocketAddr;
     use std::sync::{Arc, Mutex};
@@ -218,7 +190,6 @@ mod tests {
     use tokio_io::{AsyncRead, AsyncWrite};
 
     use super::*;
-    use crate::data::{Hash, RouterSecretKeys};
 
     pub struct NetworkCable {
         alice_to_bob: Vec<u8>,
@@ -328,84 +299,6 @@ mod tests {
         fn shutdown(&mut self) -> io::Result<Async<()>> {
             Ok(().into())
         }
-    }
-
-    #[test]
-    fn handle_send() {
-        let (message, mut message_rx) = mpsc::unbounded();
-        let (timestamp, mut timestamp_rx) = mpsc::unbounded();
-        let handle = Handle { message, timestamp };
-
-        let _hash = Hash::from_bytes(&[0; 32]);
-        let msg = Message::dummy_data();
-        let mut msg2 = Message::dummy_data();
-        // Ensure the two messages are identical
-        msg2.expiration = msg.expiration.clone();
-
-        // Run on a task context
-        lazy(move || {
-            // Check the queue is empty
-            assert_eq!(
-                (message_rx.poll(), timestamp_rx.poll()),
-                (Ok(Async::NotReady), Ok(Async::NotReady))
-            );
-
-            // Send a message
-            let ri = RouterInfo::new(RouterSecretKeys::new().rid);
-            handle.send(ri.clone(), msg).unwrap();
-
-            // Check it was received
-            assert_eq!(
-                (message_rx.poll(), timestamp_rx.poll()),
-                (Ok(Async::Ready(Some((ri, msg2)))), Ok(Async::NotReady))
-            );
-
-            // Check the queue is empty again
-            assert_eq!(
-                (message_rx.poll(), timestamp_rx.poll()),
-                (Ok(Async::NotReady), Ok(Async::NotReady))
-            );
-
-            Ok::<(), ()>(())
-        })
-        .wait()
-        .unwrap();
-    }
-
-    #[test]
-    fn handle_timestamp() {
-        let (message, mut message_rx) = mpsc::unbounded();
-        let (timestamp, mut timestamp_rx) = mpsc::unbounded();
-        let handle = Handle { message, timestamp };
-
-        // Run on a task context
-        lazy(move || {
-            // Check the queue is empty
-            assert_eq!(
-                (message_rx.poll(), timestamp_rx.poll()),
-                (Ok(Async::NotReady), Ok(Async::NotReady))
-            );
-
-            // Send a message
-            let ri = RouterInfo::new(RouterSecretKeys::new().rid);
-            handle.timestamp(ri.clone(), 42).unwrap();
-
-            // Check it was received
-            assert_eq!(
-                (message_rx.poll(), timestamp_rx.poll()),
-                (Ok(Async::NotReady), Ok(Async::Ready(Some((ri, 42)))))
-            );
-
-            // Check the queue is empty again
-            assert_eq!(
-                (message_rx.poll(), timestamp_rx.poll()),
-                (Ok(Async::NotReady), Ok(Async::NotReady))
-            );
-
-            Ok::<(), ()>(())
-        })
-        .wait()
-        .unwrap();
     }
 
     #[test]
