@@ -58,7 +58,7 @@ fn wait_for_search_reply(
                 ),
             )
         }
-        Err((_, _)) => Box::new(future::err(LookupError::NotFound)),
+        Err((_, _)) => Box::new(future::err(LookupError::SendFailure)),
     }
 }
 
