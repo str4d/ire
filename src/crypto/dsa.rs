@@ -152,13 +152,15 @@ impl DsaPublicKey {
 
 #[cfg(test)]
 mod tests {
-    use super::{DsaPrivateKey, DsaPublicKey};
+    use super::{DsaPrivateKey, DsaPublicKey, DsaSignature};
 
     #[test]
     fn random_signatures() {
         for _ in 0..200 {
             let sk = DsaPrivateKey::new();
             let vk = DsaPublicKey::from_private(&sk);
+
+            assert_eq!(DsaPublicKey::from_bytes(vk.as_bytes()).unwrap(), vk);
 
             let msg1 = b"Foo bar";
             let msg2 = b"Spam eggs";
@@ -170,6 +172,12 @@ mod tests {
             assert!(vk.verify(msg2, &sig2));
             assert!(!vk.verify(msg1, &sig2));
             assert!(!vk.verify(msg2, &sig1));
+
+            let encoded1 = sig1.to_bytes();
+            let encoded2 = sig2.to_bytes();
+
+            assert_eq!(DsaSignature::from_bytes(&encoded1).unwrap(), sig1);
+            assert_eq!(DsaSignature::from_bytes(&encoded2).unwrap(), sig2);
         }
     }
 }
