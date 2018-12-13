@@ -53,6 +53,7 @@ pub enum Frame {
 
 use std::fmt;
 
+#[cfg_attr(tarpaulin, skip)]
 impl fmt::Debug for Frame {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {

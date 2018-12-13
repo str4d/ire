@@ -41,6 +41,7 @@ pub enum Error {
     TypeMismatch,
 }
 
+#[cfg_attr(tarpaulin, skip)]
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -201,6 +202,7 @@ impl Clone for PublicKey {
     }
 }
 
+#[cfg_attr(tarpaulin, skip)]
 impl fmt::Debug for PublicKey {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         self.0[..].fmt(formatter)
@@ -233,6 +235,7 @@ impl Clone for PrivateKey {
     }
 }
 
+#[cfg_attr(tarpaulin, skip)]
 impl fmt::Debug for PrivateKey {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         self.0[..].fmt(formatter)

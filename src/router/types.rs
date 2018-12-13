@@ -49,6 +49,7 @@ pub enum LookupError {
     TimerFailure,
 }
 
+#[cfg_attr(tarpaulin, skip)]
 impl fmt::Display for LookupError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -76,6 +77,7 @@ impl From<crypto::Error> for StoreError {
     }
 }
 
+#[cfg_attr(tarpaulin, skip)]
 impl fmt::Display for StoreError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {

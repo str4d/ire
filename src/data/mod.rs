@@ -44,6 +44,7 @@ pub enum ReadError {
     Parser,
 }
 
+#[cfg_attr(tarpaulin, skip)]
 impl fmt::Display for ReadError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -98,6 +99,7 @@ impl Hash {
     }
 }
 
+#[cfg_attr(tarpaulin, skip)]
 impl fmt::Display for Hash {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", constants::I2P_BASE64.encode(&self.0))
@@ -122,6 +124,7 @@ impl I2PDate {
     }
 }
 
+#[cfg_attr(tarpaulin, skip)]
 impl fmt::Display for I2PDate {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         DateTime::<Utc>::from(self.to_system_time()).fmt(f)
@@ -169,6 +172,7 @@ impl SessionTag {
 #[derive(Clone, Copy, Debug)]
 pub struct TunnelId(pub u32);
 
+#[cfg_attr(tarpaulin, skip)]
 impl fmt::Display for TunnelId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)

@@ -107,6 +107,7 @@ pub enum Block {
     Unknown(u8, Vec<u8>),
 }
 
+#[cfg_attr(tarpaulin, skip)]
 impl fmt::Debug for Block {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
