@@ -12,7 +12,7 @@ use crate::data::{Hash, RouterAddress, RouterInfo};
 use crate::i2np::Message;
 use crate::router::{
     config,
-    types::{CommSystem, InboundMessageHandler, OutboundMessageHandler},
+    types::{CommSystem, MessageHandler},
     Context,
 };
 
@@ -54,7 +54,7 @@ pub struct Manager {
 
 pub struct Engine {
     engines: Select<ntcp::Engine, ntcp2::Engine>,
-    msg_handler: Arc<dyn InboundMessageHandler>,
+    msg_handler: Arc<dyn MessageHandler>,
 }
 
 trait Transport {
@@ -92,25 +92,6 @@ impl Manager {
             ntcp_engine: Some(ntcp_engine),
             ntcp2: ntcp2_manager,
             ntcp2_engine: Some(ntcp2_engine),
-        }
-    }
-}
-
-impl OutboundMessageHandler for Manager {
-    /// Send an I2NP message to a peer over one of our transports.
-    ///
-    /// Returns an Err giving back the message if it cannot be sent over any of
-    /// our transports.
-    fn send(&self, peer: RouterInfo, msg: Message) -> Result<IoFuture<()>, (RouterInfo, Message)> {
-        match once(self.ntcp.bid(&peer, msg.size()))
-            .chain(once(self.ntcp2.bid(&peer, msg.ntcp2_size())))
-            .filter_map(|b| b)
-            .min_by_key(|b| b.bid)
-        {
-            Some(bid) => Ok(Box::new(bid.send((peer, msg)).map(|_| ()).map_err(|_| {
-                io::Error::new(io::ErrorKind::Other, "Error in transport::Engine")
-            }))),
-            None => Err((peer, msg)),
         }
     }
 }
@@ -160,6 +141,23 @@ impl CommSystem for Manager {
 
     fn is_established(&self, hash: &Hash) -> bool {
         self.ntcp.is_established(hash) || self.ntcp2.is_established(hash)
+    }
+
+    /// Send an I2NP message to a peer over one of our transports.
+    ///
+    /// Returns an Err giving back the message if it cannot be sent over any of
+    /// our transports.
+    fn send(&self, peer: RouterInfo, msg: Message) -> Result<IoFuture<()>, (RouterInfo, Message)> {
+        match once(self.ntcp.bid(&peer, msg.size()))
+            .chain(once(self.ntcp2.bid(&peer, msg.ntcp2_size())))
+            .filter_map(|b| b)
+            .min_by_key(|b| b.bid)
+        {
+            Some(bid) => Ok(Box::new(bid.send((peer, msg)).map(|_| ()).map_err(|_| {
+                io::Error::new(io::ErrorKind::Other, "Error in transport::Engine")
+            }))),
+            None => Err((peer, msg)),
+        }
     }
 }
 

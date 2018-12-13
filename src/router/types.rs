@@ -11,22 +11,15 @@ use crate::crypto;
 use crate::data::{Hash, LeaseSet, RouterAddress, RouterInfo};
 use crate::i2np::{DatabaseSearchReply, Message};
 
-pub trait InboundMessageHandler: Send + Sync {
+pub trait MessageHandler: Send + Sync {
     fn register_lookup(&self, from: Hash, key: Hash, tx: oneshot::Sender<DatabaseSearchReply>);
 
     fn handle(&self, from: Hash, msg: Message);
 }
 
-pub trait OutboundMessageHandler {
-    /// Send an I2NP message to a peer.
-    ///
-    /// Returns an Err giving back the message if it cannot be sent.
-    fn send(&self, peer: RouterInfo, msg: Message) -> Result<IoFuture<()>, (RouterInfo, Message)>;
-}
-
 /// Manages the communication subsystem between peers, including connections,
 /// listeners, transports, connection keys, etc.
-pub trait CommSystem: OutboundMessageHandler + Send + Sync {
+pub trait CommSystem: Send + Sync {
     /// Returns the addresses of the underlying transports.
     fn addresses(&self) -> Vec<RouterAddress>;
 
@@ -38,6 +31,11 @@ pub trait CommSystem: OutboundMessageHandler + Send + Sync {
 
     /// Returns true if there is an open session with the given peer.
     fn is_established(&self, hash: &Hash) -> bool;
+
+    /// Send an I2NP message to a peer.
+    ///
+    /// Returns an Err giving back the message if it cannot be sent.
+    fn send(&self, peer: RouterInfo, msg: Message) -> Result<IoFuture<()>, (RouterInfo, Message)>;
 }
 
 /// Network database lookup errors

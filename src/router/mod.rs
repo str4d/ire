@@ -31,7 +31,7 @@ impl MessageHandler {
     }
 }
 
-impl types::InboundMessageHandler for MessageHandler {
+impl types::MessageHandler for MessageHandler {
     fn register_lookup(&self, from: Hash, key: Hash, tx: oneshot::Sender<DatabaseSearchReply>) {
         self.pending_lookups.lock().unwrap().insert((from, key), tx);
     }
@@ -91,7 +91,7 @@ pub struct Context {
     pub ri: Arc<RwLock<RouterInfo>>,
     pub netdb: Arc<RwLock<dyn types::NetworkDatabase>>,
     pub comms: Arc<RwLock<dyn types::CommSystem>>,
-    pub msg_handler: Arc<dyn types::InboundMessageHandler>,
+    pub msg_handler: Arc<dyn types::MessageHandler>,
 }
 
 impl Router {

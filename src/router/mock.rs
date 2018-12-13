@@ -8,7 +8,7 @@ use futures::{future, sync::oneshot, Future};
 use std::sync::{Arc, RwLock};
 use tokio_io::IoFuture;
 
-use super::types::{CommSystem, InboundMessageHandler, OutboundMessageHandler};
+use super::types::{CommSystem, MessageHandler};
 use crate::data::{Hash, RouterAddress, RouterInfo, RouterSecretKeys};
 use crate::i2np::{DatabaseSearchReply, Message};
 use crate::netdb::LocalNetworkDatabase;
@@ -16,7 +16,7 @@ use crate::router::Context;
 
 struct MockMessageHandler;
 
-impl InboundMessageHandler for MockMessageHandler {
+impl MessageHandler for MockMessageHandler {
     fn register_lookup(&self, _from: Hash, _key: Hash, _tx: oneshot::Sender<DatabaseSearchReply>) {}
     fn handle(&self, _from: Hash, _msg: Message) {}
 }
@@ -26,16 +26,6 @@ pub(super) struct MockCommSystem;
 impl MockCommSystem {
     pub(super) fn new() -> Self {
         MockCommSystem {}
-    }
-}
-
-impl OutboundMessageHandler for MockCommSystem {
-    fn send(
-        &self,
-        _peer: RouterInfo,
-        _msg: Message,
-    ) -> Result<IoFuture<()>, (RouterInfo, Message)> {
-        Ok(Box::new(future::ok(())))
     }
 }
 
@@ -50,6 +40,14 @@ impl CommSystem for MockCommSystem {
 
     fn is_established(&self, _hash: &Hash) -> bool {
         false
+    }
+
+    fn send(
+        &self,
+        _peer: RouterInfo,
+        _msg: Message,
+    ) -> Result<IoFuture<()>, (RouterInfo, Message)> {
+        Ok(Box::new(future::ok(())))
     }
 }
 
