@@ -1,6 +1,9 @@
 //! The traits for the various router components.
 
-use futures::{sync::oneshot, Future};
+use futures::{
+    sync::{mpsc, oneshot},
+    Future,
+};
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
@@ -15,6 +18,13 @@ pub trait MessageHandler: Send + Sync {
     fn register_lookup(&self, from: Hash, key: Hash, tx: oneshot::Sender<DatabaseSearchReply>);
 
     fn handle(&self, from: Hash, msg: Message);
+}
+
+pub type DistributorResult =
+    Box<dyn Future<Item = (), Error = mpsc::SendError<(Hash, Message)>> + Send>;
+
+pub trait Distributor: Clone + Send + Sync + 'static {
+    fn handle(&self, from: Hash, msg: Message) -> DistributorResult;
 }
 
 /// Manages the communication subsystem between peers, including connections,

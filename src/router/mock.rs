@@ -5,10 +5,10 @@
 
 use config::Config;
 use futures::{future, sync::oneshot, Future};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 use tokio_io::IoFuture;
 
-use super::types::{CommSystem, MessageHandler};
+use super::types::{CommSystem, Distributor, DistributorResult, MessageHandler};
 use crate::data::{Hash, RouterAddress, RouterInfo, RouterSecretKeys};
 use crate::i2np::{DatabaseSearchReply, Message};
 use crate::netdb::LocalNetworkDatabase;
@@ -19,6 +19,26 @@ struct MockMessageHandler;
 impl MessageHandler for MockMessageHandler {
     fn register_lookup(&self, _from: Hash, _key: Hash, _tx: oneshot::Sender<DatabaseSearchReply>) {}
     fn handle(&self, _from: Hash, _msg: Message) {}
+}
+
+#[derive(Clone)]
+pub(crate) struct MockDistributor {
+    pub(crate) received: Arc<Mutex<Vec<(Hash, Message)>>>,
+}
+
+impl MockDistributor {
+    pub(crate) fn new() -> Self {
+        MockDistributor {
+            received: Arc::new(Mutex::new(vec![])),
+        }
+    }
+}
+
+impl Distributor for MockDistributor {
+    fn handle(&self, from: Hash, msg: Message) -> DistributorResult {
+        self.received.lock().unwrap().push((from, msg));
+        Box::new(future::ok(()))
+    }
 }
 
 pub(super) struct MockCommSystem;

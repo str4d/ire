@@ -1,4 +1,8 @@
-use futures::{future::lazy, sync::oneshot, Future};
+use futures::{
+    future::{self, lazy},
+    sync::{mpsc, oneshot},
+    Future, Sink,
+};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, RwLock};
 use tokio_executor::spawn;
@@ -14,6 +18,38 @@ pub mod types;
 
 pub use self::builder::Builder;
 use self::config::Config;
+
+pub(crate) type DistributorTx = mpsc::Sender<(Hash, Message)>;
+
+#[derive(Clone)]
+struct Distributor {
+    netdb: DistributorTx,
+}
+
+impl Distributor {
+    fn new(netdb: DistributorTx) -> Self {
+        Distributor { netdb }
+    }
+}
+
+impl types::Distributor for Distributor {
+    fn handle(&self, from: Hash, msg: Message) -> types::DistributorResult {
+        match msg.payload {
+            MessagePayload::DatabaseStore(_)
+            | MessagePayload::DatabaseLookup(_)
+            | MessagePayload::DatabaseSearchReply(_) => {
+                let f: types::DistributorResult =
+                    Box::new(self.netdb.clone().send((from, msg)).map(|_| ()));
+                f
+            }
+            _ => {
+                debug!("Dropping unhandled message from {}:\n{}", from, msg);
+                let f: types::DistributorResult = Box::new(future::ok(()));
+                f
+            }
+        }
+    }
+}
 
 type PendingLookups = HashMap<(Hash, Hash), oneshot::Sender<DatabaseSearchReply>>;
 
