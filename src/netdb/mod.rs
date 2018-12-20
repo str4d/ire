@@ -1,17 +1,23 @@
 //! The I2P network database.
 
 use chrono::offset::Utc;
-use futures::{future, sync::oneshot, Async, Future};
+use futures::{
+    future,
+    sync::{mpsc, oneshot},
+    try_ready, Async, Future, Poll, Stream,
+};
 use rand::{thread_rng, Rng};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime};
 use tokio_executor::spawn;
 use tokio_timer::{sleep, Delay};
 
 use crate::data::{Hash, LeaseSet, RouterInfo, NET_ID};
-use crate::i2np::DatabaseLookupType;
+use crate::i2np::{
+    DatabaseLookupType, DatabaseSearchReply, DatabaseStoreData, Message, MessagePayload,
+};
 use crate::router::{
     config,
     types::{LookupError, NetworkDatabase, StoreError},
@@ -41,18 +47,110 @@ const EXPLORE_MAX_INTERVAL: u64 = 15 * 60;
 /// Explore quickly if we have fewer than this many routers.
 const EXPLORE_MIN_ROUTERS: usize = 250;
 
+type PendingLookups = HashMap<(Hash, Hash), oneshot::Sender<DatabaseSearchReply>>;
+pub(crate) type PendingTx = mpsc::Sender<(Hash, Hash, oneshot::Sender<DatabaseSearchReply>)>;
+type PendingRx = mpsc::Receiver<(Hash, Hash, oneshot::Sender<DatabaseSearchReply>)>;
+
+pub struct MessageHandler {
+    netdb: Arc<RwLock<dyn NetworkDatabase>>,
+    pending_lookups: PendingLookups,
+    pending_rx: PendingRx,
+    ib_rx: mpsc::Receiver<(Hash, Message)>,
+}
+
+impl MessageHandler {
+    pub fn new(
+        netdb: Arc<RwLock<dyn NetworkDatabase>>,
+        pending_rx: PendingRx,
+        ib_rx: mpsc::Receiver<(Hash, Message)>,
+    ) -> Self {
+        MessageHandler {
+            netdb,
+            pending_lookups: HashMap::new(),
+            pending_rx,
+            ib_rx,
+        }
+    }
+}
+
+impl Future for MessageHandler {
+    type Item = ();
+    type Error = ();
+
+    fn poll(&mut self) -> Poll<(), ()> {
+        loop {
+            // First update the pending lookup table
+            while let Async::Ready(f) = self.pending_rx.poll()? {
+                if let Some((from, key, tx)) = f {
+                    self.pending_lookups.insert((from, key), tx);
+                } else {
+                    // pending_rx.poll() returned None, so we are done
+                    return Ok(Async::Ready(()));
+                }
+            }
+
+            // Then handle the next message
+            if let Some((from, msg)) = try_ready!(self.ib_rx.poll()) {
+                match msg.payload {
+                    MessagePayload::DatabaseStore(ds) => match ds.data {
+                        DatabaseStoreData::RI(ri) => {
+                            self.netdb
+                                .write()
+                                .unwrap()
+                                .store_router_info(ds.key, ri)
+                                .expect("Failed to store RouterInfo");
+                        }
+                        DatabaseStoreData::LS(ls) => {
+                            self.netdb
+                                .write()
+                                .unwrap()
+                                .store_lease_set(ds.key, ls)
+                                .expect("Failed to store LeaseSet");
+                        }
+                    },
+                    MessagePayload::DatabaseSearchReply(dsr) => {
+                        if let Some(pending) = self
+                            .pending_lookups
+                            .remove(&(from.clone(), dsr.key.clone()))
+                        {
+                            debug!("Received msg {} from {}:\n{}", msg.id, from, dsr);
+                            if let Err(dsr) = pending.send(dsr) {
+                                warn!(
+                                    "Lookup task timed out waiting for DatabaseSearchReply on {}",
+                                    dsr.key
+                                );
+                            }
+                        } else {
+                            debug!(
+                                "Received msg {} from {} with no pending lookup:\n{}",
+                                msg.id, from, dsr
+                            )
+                        }
+                    }
+                    _ => debug!("Received message from {}:\n{}", from, msg),
+                }
+            } else {
+                // ib_rx.poll() returned None, so we are done
+                return Ok(Async::Ready(()));
+            }
+        }
+    }
+}
+
 /// Performs network database maintenance operations.
 struct Engine {
     ctx: Arc<Context>,
+    register_pending: PendingTx,
     expire_ri_timer: Delay,
     expire_ls_timer: Delay,
     explore_timer: Delay,
 }
 
 impl Engine {
-    fn new(ctx: Arc<Context>) -> Self {
+    fn new(ctx: Arc<Context>, register_pending: PendingTx) -> Self {
         Engine {
             ctx,
+            register_pending,
             expire_ri_timer: sleep(Duration::from_secs(EXPIRE_RI_INTERVAL)),
             expire_ls_timer: sleep(Duration::from_secs(EXPIRE_LS_INTERVAL)),
             explore_timer: sleep(Duration::from_secs(0)),
@@ -118,7 +216,13 @@ impl Engine {
             let ff = netdb.select_closest_ff(&key).unwrap();
 
             // Fire off an exploration job
-            let explore = lookup::explore_netdb(self.ctx.clone(), key, ff, 30 * 1000);
+            let explore = lookup::explore_netdb(
+                self.ctx.clone(),
+                self.register_pending.clone(),
+                key,
+                ff,
+                30 * 1000,
+            );
             spawn(
                 explore
                     .map(|_| ())
@@ -148,23 +252,29 @@ impl Engine {
     }
 }
 
-pub fn netdb_engine(ctx: Arc<Context>) -> Box<dyn Future<Item = (), Error = ()> + Send> {
-    Box::new(future::loop_fn(Engine::new(ctx), |engine| {
-        engine
-            .start_cycle()
-            .and_then(|engine| engine.check_reseed())
-            .and_then(|engine| engine.expire_router_infos())
-            .and_then(|engine| engine.expire_lease_sets())
-            .and_then(|engine| engine.explore())
-            .and_then(|engine| engine.finish_cycle())
-            .and_then(|(engine, done)| {
-                if done {
-                    Ok(future::Loop::Break(()))
-                } else {
-                    Ok(future::Loop::Continue(engine))
-                }
-            })
-    }))
+pub fn netdb_engine(
+    ctx: Arc<Context>,
+    register_pending: PendingTx,
+) -> Box<dyn Future<Item = (), Error = ()> + Send> {
+    Box::new(future::loop_fn(
+        Engine::new(ctx, register_pending),
+        |engine| {
+            engine
+                .start_cycle()
+                .and_then(|engine| engine.check_reseed())
+                .and_then(|engine| engine.expire_router_infos())
+                .and_then(|engine| engine.expire_lease_sets())
+                .and_then(|engine| engine.explore())
+                .and_then(|engine| engine.finish_cycle())
+                .and_then(|(engine, done)| {
+                    if done {
+                        Ok(future::Loop::Break(()))
+                    } else {
+                        Ok(future::Loop::Continue(engine))
+                    }
+                })
+        },
+    ))
 }
 
 fn router_info_is_current(ri: &RouterInfo) -> Result<(), StoreError> {
@@ -211,15 +321,17 @@ pub struct LocalNetworkDatabase {
     ls_ds: HashMap<Hash, LeaseSet>,
     pending_ri: PendingLookup<RouterInfo>,
     pending_ls: PendingLookup<LeaseSet>,
+    register_pending: PendingTx,
 }
 
 impl LocalNetworkDatabase {
-    pub(super) fn new() -> Self {
+    pub(super) fn new(pending_tx: PendingTx) -> Self {
         LocalNetworkDatabase {
             ri_ds: HashMap::new(),
             ls_ds: HashMap::new(),
             pending_ri: HashMap::new(),
             pending_ls: HashMap::new(),
+            register_pending: pending_tx,
         }
     }
 }
@@ -268,6 +380,7 @@ impl NetworkDatabase for LocalNetworkDatabase {
                     match from_peer.or_else(|| self.select_closest_ff(key)) {
                         Some(ff) => lookup::lookup_db_entry(
                             ctx,
+                            self.register_pending.clone(),
                             key.clone(),
                             DatabaseLookupType::RouterInfo,
                             ff,
@@ -314,6 +427,7 @@ impl NetworkDatabase for LocalNetworkDatabase {
                     match self.select_closest_ff(key) {
                         Some(ff) => lookup::lookup_db_entry(
                             ctx,
+                            self.register_pending.clone(),
                             key.clone(),
                             DatabaseLookupType::LeaseSet,
                             ff,
@@ -407,7 +521,7 @@ impl NetworkDatabase for LocalNetworkDatabase {
 
 #[cfg(test)]
 mod tests {
-    use futures::Async;
+    use futures::{sync::mpsc, Async};
     use std::time::{Duration, SystemTime};
 
     use super::{router_info_is_current, LocalNetworkDatabase, XorMetric, ROUTER_INFO_EXPIRATION};
@@ -449,7 +563,8 @@ mod tests {
 
     #[test]
     fn store_and_retrieve() {
-        let mut netdb = LocalNetworkDatabase::new();
+        let (tx, _) = mpsc::channel(0);
+        let mut netdb = LocalNetworkDatabase::new(tx);
 
         let rsk = RouterSecretKeys::new();
         let mut ri = RouterInfo::new(rsk.rid);

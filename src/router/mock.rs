@@ -4,22 +4,15 @@
 //! self-consistency across its component's API.
 
 use config::Config;
-use futures::{future, sync::oneshot, Future};
+use futures::{future, sync::mpsc, Future};
 use std::sync::{Arc, Mutex, RwLock};
 use tokio_io::IoFuture;
 
-use super::types::{CommSystem, Distributor, DistributorResult, MessageHandler};
+use super::types::{CommSystem, Distributor, DistributorResult};
 use crate::data::{Hash, RouterAddress, RouterInfo, RouterSecretKeys};
-use crate::i2np::{DatabaseSearchReply, Message};
+use crate::i2np::Message;
 use crate::netdb::LocalNetworkDatabase;
 use crate::router::Context;
-
-struct MockMessageHandler;
-
-impl MessageHandler for MockMessageHandler {
-    fn register_lookup(&self, _from: Hash, _key: Hash, _tx: oneshot::Sender<DatabaseSearchReply>) {}
-    fn handle(&self, _from: Hash, _msg: Message) {}
-}
 
 #[derive(Clone)]
 pub(crate) struct MockDistributor {
@@ -76,12 +69,13 @@ pub fn mock_context() -> Arc<Context> {
     let mut ri = RouterInfo::new(keys.rid.clone());
     ri.sign(&keys.signing_private_key);
 
+    let (tx, _) = mpsc::channel(0);
+
     Arc::new(Context {
         config: RwLock::new(Config::default()),
         keys,
         ri: Arc::new(RwLock::new(ri)),
-        netdb: Arc::new(RwLock::new(LocalNetworkDatabase::new())),
+        netdb: Arc::new(RwLock::new(LocalNetworkDatabase::new(tx))),
         comms: Arc::new(RwLock::new(MockCommSystem::new())),
-        msg_handler: Arc::new(MockMessageHandler {}),
     })
 }

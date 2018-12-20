@@ -1,4 +1,5 @@
 use ::config::{Config, ConfigError, File};
+use futures::sync::mpsc;
 use std::fmt;
 use std::fs;
 use std::io;
@@ -6,10 +7,10 @@ use std::sync::{Arc, RwLock};
 
 use super::{
     types::{CommSystem, NetworkDatabase},
-    Context, MessageHandler, Router,
+    Context, Distributor, Router,
 };
 use crate::data::{ReadError, RouterInfo, RouterSecretKeys};
-use crate::netdb::LocalNetworkDatabase;
+use crate::netdb::{LocalNetworkDatabase, MessageHandler};
 use crate::router::config;
 use crate::transport;
 
@@ -123,17 +124,31 @@ impl Builder {
             },
         };
 
+        let (netdb_pending_tx, netdb_pending_rx) = mpsc::channel(1024);
+        let (netdb_ib_tx, netdb_ib_rx) = mpsc::channel(1024);
+
         let netdb = match self.netdb {
             Some(netdb) => netdb,
-            None => Arc::new(RwLock::new(LocalNetworkDatabase::new())),
+            None => Arc::new(RwLock::new(LocalNetworkDatabase::new(
+                netdb_pending_tx.clone(),
+            ))),
         };
+
+        let distributor = Distributor::new(netdb_ib_tx);
 
         let comms = match self.comms {
             Some(comms) => comms,
-            None => Arc::new(RwLock::new(transport::Manager::from_config(&settings))),
+            None => Arc::new(RwLock::new(transport::Manager::from_config(
+                &settings,
+                distributor,
+            ))),
         };
 
-        let msg_handler = Arc::new(MessageHandler::new(netdb.clone()));
+        let netdb_msg_handler = Some(MessageHandler::new(
+            netdb.clone(),
+            netdb_pending_rx,
+            netdb_ib_rx,
+        ));
 
         let mut ri = RouterInfo::new(keys.rid.clone());
         ri.set_addresses(comms.read().unwrap().addresses());
@@ -155,8 +170,9 @@ impl Builder {
                 ri: Arc::new(RwLock::new(ri)),
                 netdb,
                 comms,
-                msg_handler,
             }),
+            netdb_pending_tx,
+            netdb_msg_handler,
         })
     }
 }

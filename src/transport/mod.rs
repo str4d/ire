@@ -1,6 +1,8 @@
 //! Transports used for point-to-point communication between I2P routers.
 
-use futures::{future::lazy, stream::Select, Async, Future, Poll, Sink, StartSend, Stream};
+use futures::{
+    future::lazy, stream::Select, try_ready, Async, Future, Poll, Sink, StartSend, Stream,
+};
 use std::io;
 use std::iter::once;
 use std::sync::Arc;
@@ -12,7 +14,7 @@ use crate::data::{Hash, RouterAddress, RouterInfo};
 use crate::i2np::Message;
 use crate::router::{
     config,
-    types::{CommSystem, MessageHandler},
+    types::{CommSystem, Distributor, DistributorResult},
     Context,
 };
 
@@ -45,16 +47,18 @@ impl Sink for Bid {
 
 /// Coordinates the sending and receiving of frames over the various supported
 /// transports.
-pub struct Manager {
+pub struct Manager<D: Distributor> {
     ntcp: ntcp::Manager,
     ntcp_engine: Option<ntcp::Engine>,
     ntcp2: ntcp2::Manager,
     ntcp2_engine: Option<ntcp2::Engine>,
+    distributor: D,
 }
 
-pub struct Engine {
+pub struct Engine<D: Distributor> {
     engines: Select<ntcp::Engine, ntcp2::Engine>,
-    msg_handler: Arc<dyn MessageHandler>,
+    distributor: D,
+    pending_ib: Option<DistributorResult>,
 }
 
 trait Transport {
@@ -63,8 +67,8 @@ trait Transport {
     fn bid(&self, peer: &RouterInfo, msg_size: usize) -> Option<Bid>;
 }
 
-impl Manager {
-    pub fn from_config(config: &config::Config) -> Self {
+impl<D: Distributor> Manager<D> {
+    pub fn from_config(config: &config::Config, distributor: D) -> Self {
         let ntcp_addr = config
             .get_str(config::NTCP_LISTEN)
             .expect("Must configure an NTCP address")
@@ -92,11 +96,12 @@ impl Manager {
             ntcp_engine: Some(ntcp_engine),
             ntcp2: ntcp2_manager,
             ntcp2_engine: Some(ntcp2_engine),
+            distributor,
         }
     }
 }
 
-impl CommSystem for Manager {
+impl<D: Distributor> CommSystem for Manager<D> {
     fn addresses(&self) -> Vec<RouterAddress> {
         vec![self.ntcp.address(), self.ntcp2.address()]
     }
@@ -124,7 +129,8 @@ impl CommSystem for Manager {
 
         let engine = Engine {
             engines: ntcp_engine.select(ntcp2_engine),
-            msg_handler: ctx.msg_handler.clone(),
+            distributor: self.distributor.clone(),
+            pending_ib: None,
         }
         .map(|_| ())
         .map_err(|e| {
@@ -161,20 +167,27 @@ impl CommSystem for Manager {
     }
 }
 
-impl Future for Engine {
+impl<D: Distributor> Future for Engine<D> {
     type Item = ();
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<(), io::Error> {
-        while let Async::Ready(f) = self.engines.poll()? {
+        loop {
+            if let Some(f) = &mut self.pending_ib {
+                try_ready!(f
+                    .poll()
+                    .map_err(|_| io::Error::new(io::ErrorKind::Other, "A subsystem is down!")));
+                self.pending_ib = None;
+            }
+
+            let f = try_ready!(self.engines.poll());
             if let Some((from, msg)) = f {
-                self.msg_handler.handle(from, msg);
+                self.pending_ib = Some(self.distributor.handle(from, msg));
             } else {
                 // All engine streams have ended
                 return Ok(Async::Ready(()));
             }
         }
-        Ok(Async::NotReady)
     }
 }
 
@@ -188,6 +201,7 @@ mod tests {
     use tokio_io::{AsyncRead, AsyncWrite};
 
     use super::*;
+    use crate::router::mock::MockDistributor;
 
     pub struct NetworkCable {
         alice_to_bob: Vec<u8>,
@@ -318,7 +332,8 @@ mod tests {
             .set(config::NTCP2_KEYFILE, ntcp2_keyfile.to_str())
             .unwrap();
 
-        let manager = Manager::from_config(&config);
+        let distributor = MockDistributor::new();
+        let manager = Manager::from_config(&config, distributor);
         let addrs = manager.addresses();
 
         assert_eq!(addrs[0].addr(), Some(ntcp_addr));

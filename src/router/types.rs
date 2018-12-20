@@ -1,9 +1,6 @@
 //! The traits for the various router components.
 
-use futures::{
-    sync::{mpsc, oneshot},
-    Future,
-};
+use futures::{sync::mpsc, Future};
 use std::fmt;
 use std::sync::Arc;
 use std::time::Duration;
@@ -12,13 +9,7 @@ use tokio_io::IoFuture;
 use super::Context;
 use crate::crypto;
 use crate::data::{Hash, LeaseSet, RouterAddress, RouterInfo};
-use crate::i2np::{DatabaseSearchReply, Message};
-
-pub trait MessageHandler: Send + Sync {
-    fn register_lookup(&self, from: Hash, key: Hash, tx: oneshot::Sender<DatabaseSearchReply>);
-
-    fn handle(&self, from: Hash, msg: Message);
-}
+use crate::i2np::Message;
 
 pub type DistributorResult =
     Box<dyn Future<Item = (), Error = mpsc::SendError<(Hash, Message)>> + Send>;
