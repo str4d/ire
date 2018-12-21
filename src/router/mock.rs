@@ -15,12 +15,12 @@ use crate::netdb::LocalNetworkDatabase;
 use crate::router::Context;
 
 #[derive(Clone)]
-pub(crate) struct MockDistributor {
-    pub(crate) received: Arc<Mutex<Vec<(Hash, Message)>>>,
+pub struct MockDistributor {
+    pub received: Arc<Mutex<Vec<(Hash, Message)>>>,
 }
 
 impl MockDistributor {
-    pub(crate) fn new() -> Self {
+    pub fn new() -> Self {
         MockDistributor {
             received: Arc::new(Mutex::new(vec![])),
         }

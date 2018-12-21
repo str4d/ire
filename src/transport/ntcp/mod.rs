@@ -22,13 +22,16 @@ use tokio_tcp::{TcpListener, TcpStream};
 use tokio_timer::Timeout;
 
 use super::{
-    session::{self, EngineRx, EngineTx, SessionContext, SessionManager, SessionRefs, SessionRx},
+    session::{self, SessionContext, SessionManager, SessionRefs, SessionRx},
     Bid, Transport,
 };
 use crate::crypto::{Aes256, SigningPrivateKey};
 use crate::data::{Hash, I2PString, RouterAddress, RouterIdentity, RouterInfo};
 use crate::i2np::Message;
-use crate::router::Context;
+use crate::router::{
+    types::{Distributor, DistributorResult},
+    Context,
+};
 
 #[allow(needless_pass_by_value)]
 mod frame;
@@ -142,44 +145,53 @@ impl Encoder for Codec {
 // Session handling
 //
 
-struct Session<T, C>
+struct Session<T, C, D>
 where
     T: AsyncRead + AsyncWrite,
     C: Decoder<Item = Frame, Error = io::Error>,
     C: Encoder<Item = Frame, Error = io::Error>,
+    D: Distributor,
 {
     ib: InboundSession<T, C>,
     ob: OutboundSession<T, C>,
-    engine: EngineTx<Frame>,
+    distributor: D,
+    pending_ib: Option<DistributorResult>,
     outbound: SessionRx<Frame>,
     cached_ob_frame: Option<Frame>,
 }
 
-impl<T, C> Session<T, C>
+impl<T, C, D> Session<T, C, D>
 where
     T: AsyncRead + AsyncWrite,
     C: Decoder<Item = Frame, Error = io::Error>,
     C: Encoder<Item = Frame, Error = io::Error>,
+    D: Distributor,
 {
-    fn new(ri: RouterIdentity, upstream: Framed<T, C>, session_refs: SessionRefs<Frame>) -> Self {
+    fn new(
+        ri: RouterIdentity,
+        upstream: Framed<T, C>,
+        session_refs: SessionRefs<Frame, D>,
+    ) -> Self {
         let (downstream, upstream) = upstream.split();
         let (tx, rx) = mpsc::unbounded();
         let ctx = SessionContext::new(ri.hash(), session_refs.state, tx);
         Session {
             ib: InboundSession::new(ctx, upstream),
             ob: OutboundSession::new(downstream),
-            engine: session_refs.engine,
+            distributor: session_refs.distributor,
+            pending_ib: None,
             outbound: rx,
             cached_ob_frame: None,
         }
     }
 }
 
-impl<T, C> Future for Session<T, C>
+impl<T, C, D> Future for Session<T, C, D>
 where
     T: AsyncRead + AsyncWrite,
     C: Decoder<Item = Frame, Error = io::Error>,
     C: Encoder<Item = Frame, Error = io::Error>,
+    D: Distributor,
 {
     type Item = ();
     type Error = io::Error;
@@ -215,18 +227,22 @@ where
         self.ob.poll_complete()?;
 
         // Read frames
-        while let Async::Ready(f) = self.ib.poll()? {
-            if let Some((hash, frame)) = f {
-                self.engine.unbounded_send((hash, frame)).unwrap();
+        loop {
+            if let Some(f) = &mut self.pending_ib {
+                try_ready!(f
+                    .poll()
+                    .map_err(|_| io::Error::new(io::ErrorKind::Other, "A subsystem is down!")));
+                self.pending_ib = None;
+            }
+
+            let f = try_ready!(self.ib.poll());
+            if let Some((from, msg)) = f {
+                self.pending_ib = Some(self.distributor.handle(from, msg));
             } else {
                 // EOF was reached. The remote peer has disconnected.
                 return Ok(Async::Ready(()));
             }
         }
-
-        // We know we got a `NotReady` from either `self.ob` or `self.ib`,
-        // so the contract is respected.
-        Ok(Async::NotReady)
     }
 }
 
@@ -257,15 +273,28 @@ where
     C: Decoder<Item = Frame, Error = io::Error>,
     C: Encoder<Item = Frame, Error = io::Error>,
 {
-    type Item = (Hash, Frame);
+    type Item = (Hash, Message);
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, io::Error> {
-        match try_ready!(self.upstream.poll()) {
-            Some(frame) => Ok(Async::Ready(Some((self.ctx.hash.clone(), frame)))),
-            None => {
-                // EOF was reached. The remote peer has disconnected.
-                Ok(Async::Ready(None))
+        loop {
+            match try_ready!(self.upstream.poll()) {
+                Some(frame) => match frame {
+                    Frame::Standard(msg) => {
+                        return Ok(Async::Ready(Some((self.ctx.hash.clone(), msg))))
+                    }
+                    frame => {
+                        // TODO: Do something
+                        debug!(
+                            "Dropping unhandled frame from {}: {:?}",
+                            self.ctx.hash, frame
+                        );
+                    }
+                },
+                None => {
+                    // EOF was reached. The remote peer has disconnected.
+                    return Ok(Async::Ready(None));
+                }
             }
         }
     }
@@ -313,34 +342,26 @@ where
 // Connection management engine
 //
 
-pub struct Manager {
+pub struct Manager<D: Distributor> {
     addr: SocketAddr,
-    session_manager: SessionManager<Frame>,
+    session_manager: SessionManager<Frame, D>,
     ctx: Option<Arc<Context>>,
 }
 
-pub struct Engine {
-    inbound: EngineRx<Frame>,
-}
-
-impl Manager {
-    pub fn new(addr: SocketAddr) -> (Self, Engine) {
-        let (session_manager, inbound) = session::new_manager();
-        (
-            Manager {
-                addr,
-                session_manager,
-                ctx: None,
-            },
-            Engine { inbound },
-        )
+impl<D: Distributor> Manager<D> {
+    pub fn new(addr: SocketAddr, distributor: D) -> Self {
+        Manager {
+            addr,
+            session_manager: session::new_manager(distributor),
+            ctx: None,
+        }
     }
 
     pub fn set_context(&mut self, ctx: Arc<Context>) {
         self.ctx = Some(ctx);
     }
 
-    pub fn sink(&self) -> OutboundSink {
+    pub fn sink(&self) -> OutboundSink<D> {
         let ctx = self
             .ctx
             .as_ref()
@@ -395,11 +416,11 @@ impl Manager {
     }
 }
 
-fn connect(
+fn connect<D: Distributor>(
     own_ri: RouterIdentity,
     own_key: SigningPrivateKey,
     peer_ri: RouterInfo,
-    session_refs: SessionRefs<Frame>,
+    session_refs: SessionRefs<Frame, D>,
 ) -> io::Result<impl Future<Item = (), Error = io::Error>> {
     let addr = match peer_ri.address(&NTCP_STYLE, |_| true) {
         Some(ra) => ra.addr().unwrap(),
@@ -427,7 +448,7 @@ fn connect(
     }))
 }
 
-impl Transport for Manager {
+impl<D: Distributor> Transport for Manager<D> {
     fn is_established(&self, hash: &Hash) -> bool {
         self.session_manager.have_session(hash)
     }
@@ -452,31 +473,12 @@ impl Transport for Manager {
     }
 }
 
-impl Stream for Engine {
-    type Item = (Hash, Message);
-    type Error = io::Error;
-
-    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        while let Async::Ready(f) = self.inbound.poll().unwrap() {
-            match f {
-                Some((from, Frame::Standard(msg))) => return Ok(Some((from, msg)).into()),
-                Some((from, frame)) => {
-                    // TODO: Do something
-                    debug!("Received frame from {}: {:?}", from, frame);
-                }
-                None => return Ok(Async::Ready(None)),
-            }
-        }
-        Ok(Async::NotReady)
-    }
-}
-
-pub struct OutboundSink {
+pub struct OutboundSink<D: Distributor> {
     ctx: Arc<Context>,
-    session_refs: SessionRefs<Frame>,
+    session_refs: SessionRefs<Frame, D>,
 }
 
-impl Sink for OutboundSink {
+impl<D: Distributor> Sink for OutboundSink<D> {
     type SinkItem = (RouterInfo, Message);
     type SinkError = io::Error;
 
@@ -522,7 +524,7 @@ impl Sink for OutboundSink {
 mod tests {
     use bytes::BytesMut;
     use cookie_factory::GenError;
-    use futures::{lazy, Async, Future, Sink, Stream};
+    use futures::{lazy, Future, Sink};
     use nom::{Err, Offset};
     use std::io::{self, Read, Write};
     use std::iter::repeat;
@@ -530,7 +532,7 @@ mod tests {
 
     use super::{frame, Frame, Manager, Session, NTCP_MTU};
     use crate::i2np::Message;
-    use crate::router::mock::mock_context;
+    use crate::router::mock::{mock_context, MockDistributor};
     use crate::transport::tests::{AliceNet, BobNet, NetworkCable};
 
     struct TestCodec;
@@ -608,7 +610,8 @@ mod tests {
         let alice_net = AliceNet::new(cable.clone());
         let alice_framed = TestCodec {}.framed(alice_net);
 
-        let (mut manager, _) = Manager::new("127.0.0.1:1234".parse().unwrap());
+        let distributor = MockDistributor::new();
+        let mut manager = Manager::new("127.0.0.1:1234".parse().unwrap(), distributor);
         manager.set_context(ctx);
 
         // Run on a task context
@@ -650,7 +653,9 @@ mod tests {
         let bob_net = BobNet::new(cable.clone());
         let bob_framed = TestCodec {}.framed(bob_net);
 
-        let (manager, mut engine) = Manager::new("127.0.0.1:1234".parse().unwrap());
+        let distributor = MockDistributor::new();
+        let received = distributor.received.clone();
+        let manager = Manager::new("127.0.0.1:1234".parse().unwrap(), distributor);
         let mut session = Session::new(rid, bob_framed, manager.session_manager.refs());
 
         // Run on a task context
@@ -659,22 +664,16 @@ mod tests {
             assert!(alice_net.write_all(DUMMY_MSG_NTCP_DATA).is_ok());
 
             // Check it has not yet been received
-            match engine.poll().unwrap() {
-                Async::NotReady => (),
-                _ => panic!(),
-            };
+            assert!(received.lock().unwrap().is_empty());
 
             // Pass it through the session
             session.poll().unwrap();
 
-            // The engine should receive it now
-            match engine.poll().unwrap() {
-                Async::Ready(Some((h, msg))) => {
-                    assert_eq!(h, hash);
-                    assert_eq!(msg, *DUMMY_MSG);
-                }
-                _ => panic!(),
-            }
+            // The distributor should have received it now
+            let r = received.lock().unwrap();
+            assert_eq!(r.len(), 1);
+            assert_eq!(r[0].0, hash);
+            assert_eq!(r[0].1, *DUMMY_MSG);
 
             Ok::<(), ()>(())
         })

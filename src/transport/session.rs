@@ -6,16 +6,11 @@ use std::io;
 use std::sync::{Arc, Mutex};
 
 use crate::data::Hash;
+use crate::router::types::Distributor;
 
 //
 // Session state
 //
-
-/// Shorthand for the transmit half of an Engine-bound message channel.
-pub(super) type EngineTx<Frame> = mpsc::UnboundedSender<(Hash, Frame)>;
-
-/// Shorthand for the receive half of an Engine-bound message channel.
-pub(super) type EngineRx<Frame> = mpsc::UnboundedReceiver<(Hash, Frame)>;
 
 /// Shorthand for the transmit half of a Session-bound message channel.
 type SessionTx<Frame> = mpsc::UnboundedSender<Frame>;
@@ -118,28 +113,28 @@ impl<F> Drop for SessionContext<F> {
     }
 }
 
-pub(super) struct SessionRefs<F> {
+pub(super) struct SessionRefs<F, D: Distributor> {
     pub(super) state: SessionState<F>,
-    pub(super) engine: EngineTx<F>,
+    pub(super) distributor: D,
 }
 
-impl<F> Clone for SessionRefs<F> {
+impl<F, D: Distributor> Clone for SessionRefs<F, D> {
     fn clone(&self) -> Self {
         SessionRefs {
             state: self.state.clone(),
-            engine: self.engine.clone(),
+            distributor: self.distributor.clone(),
         }
     }
 }
 
-impl<F> Stream for SessionRefs<F> {
-    type Item = (SessionRefs<F>);
+impl<F, D: Distributor> Stream for SessionRefs<F, D> {
+    type Item = (SessionRefs<F, D>);
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
         Ok(Async::Ready(Some(SessionRefs {
             state: self.state.clone(),
-            engine: self.engine.clone(),
+            distributor: self.distributor.clone(),
         })))
     }
 }
@@ -148,28 +143,23 @@ impl<F> Stream for SessionRefs<F> {
 // Connection management engine
 //
 
-pub(super) struct SessionManager<F> {
+pub(super) struct SessionManager<F, D: Distributor> {
     state: SessionState<F>,
-    inbound: EngineTx<F>,
+    distributor: D,
 }
 
-pub(super) fn new_manager<F>() -> (SessionManager<F>, EngineRx<F>) {
-    let (inbound, inbound_msg) = mpsc::unbounded();
-    let state = SessionState::new();
-    (
-        SessionManager {
-            state: state.clone(),
-            inbound,
-        },
-        inbound_msg,
-    )
+pub(super) fn new_manager<F, D: Distributor>(distributor: D) -> SessionManager<F, D> {
+    SessionManager {
+        state: SessionState::new(),
+        distributor,
+    }
 }
 
-impl<F> SessionManager<F> {
-    pub(super) fn refs(&self) -> SessionRefs<F> {
+impl<F, D: Distributor> SessionManager<F, D> {
+    pub(super) fn refs(&self) -> SessionRefs<F, D> {
         SessionRefs {
             state: self.state.clone(),
-            engine: self.inbound.clone(),
+            distributor: self.distributor.clone(),
         }
     }
 

@@ -1,8 +1,6 @@
 //! Transports used for point-to-point communication between I2P routers.
 
-use futures::{
-    future::lazy, stream::Select, try_ready, Async, Future, Poll, Sink, StartSend, Stream,
-};
+use futures::{future::lazy, Future, Poll, Sink, StartSend};
 use std::io;
 use std::iter::once;
 use std::sync::Arc;
@@ -14,7 +12,7 @@ use crate::data::{Hash, RouterAddress, RouterInfo};
 use crate::i2np::Message;
 use crate::router::{
     config,
-    types::{CommSystem, Distributor, DistributorResult},
+    types::{CommSystem, Distributor},
     Context,
 };
 
@@ -48,17 +46,8 @@ impl Sink for Bid {
 /// Coordinates the sending and receiving of frames over the various supported
 /// transports.
 pub struct Manager<D: Distributor> {
-    ntcp: ntcp::Manager,
-    ntcp_engine: Option<ntcp::Engine>,
-    ntcp2: ntcp2::Manager,
-    ntcp2_engine: Option<ntcp2::Engine>,
-    distributor: D,
-}
-
-pub struct Engine<D: Distributor> {
-    engines: Select<ntcp::Engine, ntcp2::Engine>,
-    distributor: D,
-    pending_ib: Option<DistributorResult>,
+    ntcp: ntcp::Manager<D>,
+    ntcp2: ntcp2::Manager<D>,
 }
 
 trait Transport {
@@ -81,22 +70,19 @@ impl<D: Distributor> Manager<D> {
             .unwrap();
         let ntcp2_keyfile = config.get_str(config::NTCP2_KEYFILE).unwrap();
 
-        let (ntcp_manager, ntcp_engine) = ntcp::Manager::new(ntcp_addr);
-        let (ntcp2_manager, ntcp2_engine) =
-            match ntcp2::Manager::from_file(ntcp2_addr, &ntcp2_keyfile) {
+        let ntcp_manager = ntcp::Manager::new(ntcp_addr, distributor.clone());
+        let ntcp2_manager =
+            match ntcp2::Manager::from_file(ntcp2_addr, &ntcp2_keyfile, distributor.clone()) {
                 Ok(ret) => ret,
                 Err(_) => {
-                    let (ntcp2_manager, ntcp2_engine) = ntcp2::Manager::new(ntcp2_addr);
+                    let ntcp2_manager = ntcp2::Manager::new(ntcp2_addr, distributor);
                     ntcp2_manager.to_file(&ntcp2_keyfile).unwrap();
-                    (ntcp2_manager, ntcp2_engine)
+                    ntcp2_manager
                 }
             };
         Manager {
             ntcp: ntcp_manager,
-            ntcp_engine: Some(ntcp_engine),
             ntcp2: ntcp2_manager,
-            ntcp2_engine: Some(ntcp2_engine),
-            distributor,
         }
     }
 }
@@ -107,12 +93,6 @@ impl<D: Distributor> CommSystem for Manager<D> {
     }
 
     fn start(&mut self, ctx: Arc<Context>) -> Box<dyn Future<Item = (), Error = ()> + Send> {
-        let ntcp_engine = self.ntcp_engine.take().expect("Cannot call listen() twice");
-        let ntcp2_engine = self
-            .ntcp2_engine
-            .take()
-            .expect("Cannot call listen() twice");
-
         self.ntcp.set_context(ctx.clone());
         self.ntcp2.set_context(ctx.clone());
 
@@ -127,20 +107,9 @@ impl<D: Distributor> CommSystem for Manager<D> {
             error!("NTCP2 listener error: {}", e);
         });
 
-        let engine = Engine {
-            engines: ntcp_engine.select(ntcp2_engine),
-            distributor: self.distributor.clone(),
-            pending_ib: None,
-        }
-        .map(|_| ())
-        .map_err(|e| {
-            error!("CommSystem engine error: {}", e);
-        });
-
         Box::new(lazy(|| {
             spawn(listener);
             spawn(listener2);
-            spawn(engine);
             Ok(())
         }))
     }
@@ -163,30 +132,6 @@ impl<D: Distributor> CommSystem for Manager<D> {
                 io::Error::new(io::ErrorKind::Other, "Error in transport::Engine")
             }))),
             None => Err((peer, msg)),
-        }
-    }
-}
-
-impl<D: Distributor> Future for Engine<D> {
-    type Item = ();
-    type Error = io::Error;
-
-    fn poll(&mut self) -> Poll<(), io::Error> {
-        loop {
-            if let Some(f) = &mut self.pending_ib {
-                try_ready!(f
-                    .poll()
-                    .map_err(|_| io::Error::new(io::ErrorKind::Other, "A subsystem is down!")));
-                self.pending_ib = None;
-            }
-
-            let f = try_ready!(self.engines.poll());
-            if let Some((from, msg)) = f {
-                self.pending_ib = Some(self.distributor.handle(from, msg));
-            } else {
-                // All engine streams have ended
-                return Ok(Async::Ready(()));
-            }
         }
     }
 }
