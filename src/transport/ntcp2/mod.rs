@@ -123,9 +123,32 @@ impl fmt::Debug for Block {
             )
             .fmt(formatter),
             Block::Message(_) => "I2NP message".fmt(formatter),
-            Block::Termination(_, rsn, _) => {
-                format!("Termination (reason: {})", rsn).fmt(formatter)
-            }
+            Block::Termination(_, rsn, _) => format!(
+                "Termination (reason: {} - {})",
+                rsn,
+                match rsn {
+                    0 => "unspecified",
+                    1 => "termination received",
+                    2 => "idle timeout",
+                    3 => "router shutdown",
+                    4 => "data phase AEAD failure",
+                    5 => "incompatible options",
+                    6 => "incompatible signature type",
+                    7 => "clock skew",
+                    8 => "padding violation",
+                    9 => "AEAD framing error",
+                    10 => "payload format error",
+                    11 => "message 1 error",
+                    12 => "message 2 error",
+                    13 => "message 3 error",
+                    14 => "intra-frame read timeout",
+                    15 => "RI signature verification fail",
+                    16 => "s parameter missing, invalid, or mismatched in RouterInfo",
+                    17 => "banned",
+                    _ => "unknown",
+                }
+            )
+            .fmt(formatter),
             Block::Padding(size) => format!("Padding ({} bytes)", size).fmt(formatter),
             Block::Unknown(blk, ref data) => {
                 format!("Unknown (type: {}, {} bytes)", blk, data.len()).fmt(formatter)
