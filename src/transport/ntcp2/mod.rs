@@ -55,13 +55,16 @@ use tokio_timer::Timeout;
 
 use super::{
     ntcp::NTCP_STYLE,
-    session::{self, EngineRx, EngineTx, SessionContext, SessionManager, SessionRefs, SessionRx},
+    session::{self, SessionContext, SessionManager, SessionRefs, SessionRx},
     Bid, Transport,
 };
 use crate::constants::I2P_BASE64;
 use crate::data::{Hash, I2PString, RouterAddress, RouterIdentity, RouterInfo};
 use crate::i2np::{DatabaseStore, Message, MessagePayload};
-use crate::router::Context;
+use crate::router::{
+    types::{Distributor, DistributorResult},
+    Context,
+};
 
 #[allow(needless_pass_by_value)]
 mod frame;
@@ -120,9 +123,32 @@ impl fmt::Debug for Block {
             )
             .fmt(formatter),
             Block::Message(_) => "I2NP message".fmt(formatter),
-            Block::Termination(_, rsn, _) => {
-                format!("Termination (reason: {})", rsn).fmt(formatter)
-            }
+            Block::Termination(_, rsn, _) => format!(
+                "Termination (reason: {} - {})",
+                rsn,
+                match rsn {
+                    0 => "unspecified",
+                    1 => "termination received",
+                    2 => "idle timeout",
+                    3 => "router shutdown",
+                    4 => "data phase AEAD failure",
+                    5 => "incompatible options",
+                    6 => "incompatible signature type",
+                    7 => "clock skew",
+                    8 => "padding violation",
+                    9 => "AEAD framing error",
+                    10 => "payload format error",
+                    11 => "message 1 error",
+                    12 => "message 2 error",
+                    13 => "message 3 error",
+                    14 => "intra-frame read timeout",
+                    15 => "RI signature verification fail",
+                    16 => "s parameter missing, invalid, or mismatched in RouterInfo",
+                    17 => "banned",
+                    _ => "unknown",
+                }
+            )
+            .fmt(formatter),
             Block::Padding(size) => format!("Padding ({} bytes)", size).fmt(formatter),
             Block::Unknown(blk, ref data) => {
                 format!("Unknown (type: {}, {} bytes)", blk, data.len()).fmt(formatter)
@@ -249,44 +275,53 @@ impl Encoder for Codec {
 // Session handling
 //
 
-struct Session<T, C>
+struct Session<T, C, D>
 where
     T: AsyncRead + AsyncWrite,
     C: Decoder<Item = Frame, Error = io::Error>,
     C: Encoder<Item = Frame, Error = io::Error>,
+    D: Distributor,
 {
     ib: InboundSession<T, C>,
     ob: OutboundSession<T, C>,
-    engine: EngineTx<Block>,
+    distributor: D,
+    pending_ib: Option<DistributorResult>,
     outbound: SessionRx<Block>,
     cached_ob_block: Option<Block>,
 }
 
-impl<T, C> Session<T, C>
+impl<T, C, D> Session<T, C, D>
 where
     T: AsyncRead + AsyncWrite,
     C: Decoder<Item = Frame, Error = io::Error>,
     C: Encoder<Item = Frame, Error = io::Error>,
+    D: Distributor,
 {
-    fn new(ri: &RouterIdentity, upstream: Framed<T, C>, session_refs: SessionRefs<Block>) -> Self {
+    fn new(
+        ri: &RouterIdentity,
+        upstream: Framed<T, C>,
+        session_refs: SessionRefs<Block, D>,
+    ) -> Self {
         let (downstream, upstream) = upstream.split();
         let (tx, rx) = mpsc::unbounded();
         let ctx = SessionContext::new(ri.hash(), session_refs.state, tx);
         Session {
             ib: InboundSession::new(ctx, upstream),
             ob: OutboundSession::new(downstream),
-            engine: session_refs.engine,
+            distributor: session_refs.distributor,
+            pending_ib: None,
             outbound: rx,
             cached_ob_block: None,
         }
     }
 }
 
-impl<T, C> Future for Session<T, C>
+impl<T, C, D> Future for Session<T, C, D>
 where
     T: AsyncRead + AsyncWrite,
     C: Decoder<Item = Frame, Error = io::Error>,
     C: Encoder<Item = Frame, Error = io::Error>,
+    D: Distributor,
 {
     type Item = ();
     type Error = io::Error;
@@ -322,18 +357,22 @@ where
         self.ob.poll_complete()?;
 
         // Read blocks
-        while let Async::Ready(f) = self.ib.poll()? {
-            if let Some((hash, block)) = f {
-                self.engine.unbounded_send((hash, block)).unwrap();
+        loop {
+            if let Some(f) = &mut self.pending_ib {
+                try_ready!(f
+                    .poll()
+                    .map_err(|_| io::Error::new(io::ErrorKind::Other, "A subsystem is down!")));
+                self.pending_ib = None;
+            }
+
+            let f = try_ready!(self.ib.poll());
+            if let Some((from, msg)) = f {
+                self.pending_ib = Some(self.distributor.handle(from, msg));
             } else {
                 // EOF was reached. The remote peer has disconnected.
                 return Ok(Async::Ready(()));
             }
         }
-
-        // We know we got a `NotReady` from either `self.ob` or `self.ib`,
-        // so the contract is respected.
-        Ok(Async::NotReady)
     }
 }
 
@@ -345,7 +384,7 @@ where
 {
     ctx: SessionContext<Block>,
     upstream: SplitStream<Framed<T, C>>,
-    cached_blocks: VecDeque<Block>,
+    cached_msgs: VecDeque<Message>,
 }
 
 impl<T, C> InboundSession<T, C>
@@ -358,13 +397,13 @@ where
         InboundSession {
             ctx,
             upstream,
-            cached_blocks: VecDeque::new(),
+            cached_msgs: VecDeque::new(),
         }
     }
 
-    /// Handles a block at the session level. Optionally returns a block that
-    /// should be sent onwards to the transport engine.
-    fn handle_block(&self, block: Block) -> Option<Block> {
+    /// Handles a block at the session level. Optionally returns a message that
+    /// should be distributed.
+    fn handle_block(&self, block: Block) -> Option<Message> {
         match block {
             Block::RouterInfo(ri, _flags) => {
                 // Validate hash
@@ -383,8 +422,9 @@ where
                     DatabaseStore::from_ri(ri, None),
                 ));
 
-                Some(Block::Message(fake_ds))
+                Some(fake_ds)
             }
+            Block::Message(msg) => Some(msg),
             Block::Padding(_) => {
                 trace!("Dropping padding block from {}: {:?}", self.ctx.hash, block);
                 None
@@ -398,7 +438,14 @@ where
                 debug!("Dropping unknown block: {:?}", block);
                 None
             }
-            block => Some(block),
+            block => {
+                // TODO: Do something
+                debug!(
+                    "Dropping unhandled block from {}: {:?}",
+                    self.ctx.hash, block
+                );
+                None
+            }
         }
     }
 }
@@ -409,14 +456,14 @@ where
     C: Decoder<Item = Frame, Error = io::Error>,
     C: Encoder<Item = Frame, Error = io::Error>,
 {
-    type Item = (Hash, Block);
+    type Item = (Hash, Message);
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, io::Error> {
         loop {
-            // Return any cached blocks
-            while let Some(block) = self.cached_blocks.pop_front() {
-                return Ok(Async::Ready(Some((self.ctx.hash.clone(), block))));
+            // Return any cached messages
+            while let Some(msg) = self.cached_msgs.pop_front() {
+                return Ok(Async::Ready(Some((self.ctx.hash.clone(), msg))));
             }
 
             // Read frames
@@ -424,8 +471,8 @@ where
                 Some(frame) => {
                     // TODO: Validate block ordering within the frame
                     for block in frame {
-                        if let Some(block) = self.handle_block(block) {
-                            self.cached_blocks.push_back(block);
+                        if let Some(msg) = self.handle_block(block) {
+                            self.cached_msgs.push_back(msg);
                         }
                     }
                 }
@@ -520,21 +567,17 @@ where
 // Connection management engine
 //
 
-pub struct Manager {
+pub struct Manager<D: Distributor> {
     addr: SocketAddr,
     static_private_key: Vec<u8>,
     static_public_key: Vec<u8>,
     aesobfse_iv: [u8; 16],
-    session_manager: SessionManager<Block>,
+    session_manager: SessionManager<Block, D>,
     ctx: Option<Arc<Context>>,
 }
 
-pub struct Engine {
-    inbound: EngineRx<Block>,
-}
-
-impl Manager {
-    pub fn new(addr: SocketAddr) -> (Self, Engine) {
+impl<D: Distributor> Manager<D> {
+    pub fn new(addr: SocketAddr, distributor: D) -> Self {
         let builder: Builder<'_> = Builder::new(NTCP2_NOISE_PROTOCOL_NAME.parse().unwrap());
         let dh = builder.generate_keypair().unwrap();
 
@@ -542,22 +585,17 @@ impl Manager {
         let mut rng = OsRng::new().expect("should be able to construct RNG");
         rng.fill(&mut aesobfse_iv[..]);
 
-        let (session_manager, inbound) = session::new_manager();
-
-        (
-            Manager {
-                addr,
-                static_private_key: dh.private,
-                static_public_key: dh.public,
-                aesobfse_iv,
-                session_manager,
-                ctx: None,
-            },
-            Engine { inbound },
-        )
+        Manager {
+            addr,
+            static_private_key: dh.private,
+            static_public_key: dh.public,
+            aesobfse_iv,
+            session_manager: session::new_manager(distributor),
+            ctx: None,
+        }
     }
 
-    pub fn from_file(addr: SocketAddr, path: &str) -> io::Result<(Self, Engine)> {
+    pub fn from_file(addr: SocketAddr, path: &str, distributor: D) -> io::Result<Self> {
         let mut keys = File::open(path)?;
         let mut data: Vec<u8> = Vec::new();
         keys.read_to_end(&mut data)?;
@@ -570,19 +608,14 @@ impl Manager {
         static_public_key.extend_from_slice(&data[32..64]);
         aesobfse_iv.copy_from_slice(&data[64..]);
 
-        let (session_manager, inbound) = session::new_manager();
-
-        Ok((
-            Manager {
-                addr,
-                static_private_key: static_private_key.clone(),
-                static_public_key,
-                aesobfse_iv,
-                session_manager,
-                ctx: None,
-            },
-            Engine { inbound },
-        ))
+        Ok(Manager {
+            addr,
+            static_private_key: static_private_key.clone(),
+            static_public_key,
+            aesobfse_iv,
+            session_manager: session::new_manager(distributor),
+            ctx: None,
+        })
     }
 
     pub fn to_file(&self, path: &str) -> io::Result<()> {
@@ -598,7 +631,7 @@ impl Manager {
         self.ctx = Some(ctx);
     }
 
-    pub fn sink(&self) -> OutboundSink {
+    pub fn sink(&self) -> OutboundSink<D> {
         let ctx = self
             .ctx
             .as_ref()
@@ -645,27 +678,28 @@ impl Manager {
             let conn = handshake::IBHandshake::new(conn, &static_key, &aesobfse_key, &aesobfse_iv);
 
             // Once connected:
-            let process_conn = conn.and_then(|(ri, conn)| {
-                let peer_hash = ri.router_id.hash();
-                let session = Session::new(&ri.router_id, conn, session_refs);
+            let process_conn = conn
+                .and_then(|(ri, conn)| {
+                    let peer_hash = ri.router_id.hash();
+                    let session = Session::new(&ri.router_id, conn, session_refs);
 
-                // Treat RouterInfo from handshake as a DatabaseStore
-                debug!(
-                    "Converting RouterInfo block from {} into DatabaseStore message",
-                    peer_hash
-                );
-                // TODO: Fake-store if we are a FF and flood flag is set
-                let fake_ds = Message::from_payload(MessagePayload::DatabaseStore(
-                    DatabaseStore::from_ri(ri, None),
-                ));
-                session
-                    .engine
-                    .unbounded_send((peer_hash, Block::Message(fake_ds)))
-                    .unwrap();
+                    // Treat RouterInfo from handshake as a DatabaseStore
+                    debug!(
+                        "Converting RouterInfo block from {} into DatabaseStore message",
+                        peer_hash
+                    );
+                    // TODO: Fake-store if we are a FF and flood flag is set
+                    let fake_ds = Message::from_payload(MessagePayload::DatabaseStore(
+                        DatabaseStore::from_ri(ri, None),
+                    ));
+                    let stored = session.distributor.handle(peer_hash, fake_ds);
 
-                // Start the session
-                session
-            });
+                    // Start the session
+                    stored
+                        .map(|_| session)
+                        .map_err(|_| io::Error::new(io::ErrorKind::Other, "A subsystem is down!"))
+                })
+                .and_then(|session| session);
 
             spawn(process_conn.map_err(|e| error!("Error while listening: {:?}", e)));
             Ok(())
@@ -686,11 +720,11 @@ impl Manager {
     }
 }
 
-fn connect(
+fn connect<D: Distributor>(
     static_private_key: &[u8],
     own_ri: &RouterInfo,
     peer_ri: RouterInfo,
-    session_refs: SessionRefs<Block>,
+    session_refs: SessionRefs<Block, D>,
 ) -> io::Result<impl Future<Item = (), Error = io::Error>> {
     // Connect to the peer
     let transport = match handshake::OBHandshake::new(
@@ -715,7 +749,7 @@ fn connect(
     }))
 }
 
-impl Transport for Manager {
+impl<D: Distributor> Transport for Manager<D> {
     fn is_established(&self, hash: &Hash) -> bool {
         self.session_manager.have_session(hash)
     }
@@ -754,32 +788,13 @@ impl Transport for Manager {
     }
 }
 
-impl Stream for Engine {
-    type Item = (Hash, Message);
-    type Error = io::Error;
-
-    fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {
-        while let Async::Ready(f) = self.inbound.poll().unwrap() {
-            match f {
-                Some((from, Block::Message(msg))) => return Ok(Some((from, msg)).into()),
-                Some((from, block)) => {
-                    // TODO: Do something
-                    debug!("Received block from {}: {:?}", from, block);
-                }
-                None => return Ok(Async::Ready(None)),
-            }
-        }
-        Ok(Async::NotReady)
-    }
-}
-
-pub struct OutboundSink {
+pub struct OutboundSink<D: Distributor> {
     ctx: Arc<Context>,
     static_private_key: Vec<u8>,
-    session_refs: SessionRefs<Block>,
+    session_refs: SessionRefs<Block, D>,
 }
 
-impl Sink for OutboundSink {
+impl<D: Distributor> Sink for OutboundSink<D> {
     type SinkItem = (RouterInfo, Message);
     type SinkError = io::Error;
 
@@ -828,7 +843,7 @@ impl Sink for OutboundSink {
 mod tests {
     use bytes::BytesMut;
     use cookie_factory::GenError;
-    use futures::{lazy, Async, Future, Sink, Stream};
+    use futures::{lazy, Future, Sink};
     use nom::{Err, Offset};
     use std::io::{self, Read, Write};
     use std::iter::repeat;
@@ -836,7 +851,7 @@ mod tests {
 
     use super::{frame, Frame, Manager, Session, NTCP2_MTU};
     use crate::i2np::Message;
-    use crate::router::mock::mock_context;
+    use crate::router::mock::{mock_context, MockDistributor};
     use crate::transport::tests::{AliceNet, BobNet, NetworkCable};
 
     struct TestCodec;
@@ -914,7 +929,8 @@ mod tests {
         let alice_net = AliceNet::new(cable.clone());
         let alice_framed = TestCodec {}.framed(alice_net);
 
-        let (mut manager, _) = Manager::new("127.0.0.1:1234".parse().unwrap());
+        let distributor = MockDistributor::new();
+        let mut manager = Manager::new("127.0.0.1:1234".parse().unwrap(), distributor);
         manager.set_context(ctx);
 
         // Run on a task context
@@ -956,7 +972,9 @@ mod tests {
         let bob_net = BobNet::new(cable.clone());
         let bob_framed = TestCodec {}.framed(bob_net);
 
-        let (manager, mut engine) = Manager::new("127.0.0.1:1234".parse().unwrap());
+        let distributor = MockDistributor::new();
+        let received = distributor.received.clone();
+        let manager = Manager::new("127.0.0.1:1234".parse().unwrap(), distributor);
         let mut session = Session::new(&rid, bob_framed, manager.session_manager.refs());
 
         // Run on a task context
@@ -965,22 +983,16 @@ mod tests {
             assert!(alice_net.write_all(DUMMY_MSG_NTCP2_DATA).is_ok());
 
             // Check it has not yet been received
-            match engine.poll().unwrap() {
-                Async::NotReady => (),
-                _ => panic!(),
-            };
+            assert!(received.lock().unwrap().is_empty());
 
             // Pass it through the session
             session.poll().unwrap();
 
-            // The engine should receive it now
-            match engine.poll().unwrap() {
-                Async::Ready(Some((h, msg))) => {
-                    assert_eq!(h, hash);
-                    assert_eq!(msg, *DUMMY_MSG);
-                }
-                _ => panic!(),
-            }
+            // The distributor should have received it now
+            let r = received.lock().unwrap();
+            assert_eq!(r.len(), 1);
+            assert_eq!(r[0].0, hash);
+            assert_eq!(r[0].1, *DUMMY_MSG);
 
             Ok::<(), ()>(())
         })

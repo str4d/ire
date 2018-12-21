@@ -539,6 +539,7 @@ mod tests {
     use futures::{done, Async, Future};
 
     use crate::data::{RouterInfo, RouterSecretKeys};
+    use crate::router::mock::MockDistributor;
 
     macro_rules! test_poll {
         ($node:expr) => {
@@ -576,7 +577,8 @@ mod tests {
             bob_aesobfse_iv,
         ) = {
             let sk = RouterSecretKeys::new();
-            let (manager, _) = Manager::new("127.0.0.1:0".parse().unwrap());
+            let distributor = MockDistributor::new();
+            let manager = Manager::new("127.0.0.1:0".parse().unwrap(), distributor);
             let mut ri = RouterInfo::new(sk.rid.clone());
             ri.set_addresses(vec![manager.address()]);
             ri.sign(&sk.signing_private_key);

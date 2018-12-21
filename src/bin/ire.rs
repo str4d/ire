@@ -8,11 +8,14 @@ extern crate ire;
 extern crate tokio;
 
 use clap::{App, Arg, ArgMatches, SubCommand};
-use futures::{Future, Sink, Stream};
+use futures::{Future, Sink};
 use ire::{
     data, i2np,
     netdb::reseed::HttpsReseeder,
-    router::{mock::mock_context, Builder},
+    router::{
+        mock::{mock_context, MockDistributor},
+        Builder,
+    },
     transport,
 };
 
@@ -108,10 +111,13 @@ fn cli_client(args: &ArgMatches) -> i32 {
     let mut ri = data::RouterInfo::new(rsk.rid.clone());
     ri.sign(&rsk.signing_private_key);
 
+    let distributor = MockDistributor::new();
+
     info!("Connecting to {}", peer_ri.router_id.hash());
     match args.value_of("transport") {
         Some("NTCP") => {
-            let (mut ntcp, engine) = transport::ntcp::Manager::new("127.0.0.1:0".parse().unwrap());
+            let mut ntcp =
+                transport::ntcp::Manager::new("127.0.0.1:0".parse().unwrap(), distributor);
             ntcp.set_context(mock_context());
             let conn = ntcp
                 .connect(rsk.rid, rsk.signing_private_key, peer_ri.clone())
@@ -125,18 +131,11 @@ fn cli_client(args: &ArgMatches) -> i32 {
                     Ok(())
                 })
                 .map_err(|e| error!("Connection error: {}", e));
-            tokio::run(
-                engine
-                    .into_future()
-                    .map(|_| ())
-                    .map_err(|_| ())
-                    .join(conn)
-                    .map(|_| ()),
-            );
+            tokio::run(conn);
         }
         Some("NTCP2") => {
-            let (mut ntcp2, engine) =
-                transport::ntcp2::Manager::new("127.0.0.1:0".parse().unwrap());
+            let mut ntcp2 =
+                transport::ntcp2::Manager::new("127.0.0.1:0".parse().unwrap(), distributor);
             ntcp2.set_context(mock_context());
             let conn = ntcp2
                 .connect(&ri, peer_ri.clone())
@@ -150,14 +149,7 @@ fn cli_client(args: &ArgMatches) -> i32 {
                     Ok(())
                 })
                 .map_err(|e| error!("Connection error: {}", e));
-            tokio::run(
-                engine
-                    .into_future()
-                    .map(|_| ())
-                    .map_err(|_| ())
-                    .join(conn)
-                    .map(|_| ()),
-            );
+            tokio::run(conn);
         }
         Some(_) => panic!("Unknown transport specified"),
         None => panic!("No transport specified"),

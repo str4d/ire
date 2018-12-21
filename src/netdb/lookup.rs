@@ -1,14 +1,14 @@
 use futures::{
     future::{self, Either},
     sync::oneshot,
-    Future,
+    Future, Sink,
 };
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio_timer::Timeout;
 
-use super::{create_routing_key, PendingLookup, XorMetric};
+use super::{create_routing_key, PendingLookup, PendingTx, XorMetric};
 use crate::data::{Hash, RouterInfo};
 use crate::i2np::{DatabaseLookup, DatabaseLookupType, DatabaseSearchReply, Message};
 use crate::router::{types::LookupError, Context};
@@ -23,6 +23,7 @@ type LookupFuture<T, E> = Box<dyn Future<Item = T, Error = E> + Send>;
 
 fn wait_for_search_reply(
     ctx: &Arc<Context>,
+    register_pending: PendingTx,
     peer: RouterInfo,
     key: Hash,
     dlm: Message,
@@ -32,15 +33,18 @@ fn wait_for_search_reply(
         Ok(f) => {
             // Set up a channel so we get notified if a DatabaseSearchReply arrives
             let (tx_dsr, rx_dsr) = oneshot::channel();
-            ctx.msg_handler.register_lookup(peer_hash, key, tx_dsr);
-
-            let received_dsr = f.map_err(|_| LookupError::SendFailure).and_then(|_| {
-                // Wait on the DatabaseSearchReply. If the lookup succeeds
-                // (returning a DatabaseStore), this future will hang, but the
-                // rx_store future in lookup_db_entry() will fire, causing this
-                // future to be dropped.
-                rx_dsr.map(Some).map_err(|_| LookupError::TimedOut)
-            });
+            let received_dsr = register_pending
+                .send((peer_hash, key, tx_dsr))
+                .map_err(|_| LookupError::SendFailure)
+                .and_then(|_| {
+                    f.map_err(|_| LookupError::SendFailure).and_then(|_| {
+                        // Wait on the DatabaseSearchReply. If the lookup succeeds
+                        // (returning a DatabaseStore), this future will hang, but the
+                        // rx_store future in lookup_db_entry() will fire, causing this
+                        // future to be dropped.
+                        rx_dsr.map(Some).map_err(|_| LookupError::TimedOut)
+                    })
+                });
 
             Box::new(
                 Timeout::new(received_dsr, Duration::from_secs(SINGLE_LOOKUP_TIMEOUT)).or_else(
@@ -116,6 +120,7 @@ fn process_dsr(
 
 struct IterativeLookup {
     ctx: Arc<Context>,
+    register_pending: PendingTx,
     key: Hash,
     rk: Hash,
     from: Hash,
@@ -128,6 +133,7 @@ impl IterativeLookup {
     /// Returns the lookup state and the first peer to try
     fn new(
         ctx: Arc<Context>,
+        register_pending: PendingTx,
         key: Hash,
         from: Hash,
         lookup_type: DatabaseLookupType,
@@ -146,6 +152,7 @@ impl IterativeLookup {
         (
             IterativeLookup {
                 ctx,
+                register_pending,
                 key,
                 rk,
                 from,
@@ -165,7 +172,14 @@ impl IterativeLookup {
         let peer_hash = peer.router_id.hash();
         debug!("Sending lookup to peer {}:\n{}", peer_hash, dlm);
         self.tried.insert(peer_hash);
-        let reply = wait_for_search_reply(&self.ctx, peer, self.key.clone(), dlm).or_else(|e| {
+        let reply = wait_for_search_reply(
+            &self.ctx,
+            self.register_pending.clone(),
+            peer,
+            self.key.clone(),
+            dlm,
+        )
+        .or_else(|e| {
             error!("Error while sending lookup: {}", e);
             Ok(None)
         });
@@ -211,13 +225,14 @@ impl IterativeLookup {
 
 fn iterative_lookup(
     ctx: Arc<Context>,
+    register_pending: PendingTx,
     key: Hash,
     from: Hash,
     lookup_type: DatabaseLookupType,
     ff: RouterInfo,
 ) -> LookupFuture<(), ()> {
     Box::new(future::loop_fn(
-        IterativeLookup::new(ctx, key, from, lookup_type, vec![ff]),
+        IterativeLookup::new(ctx, register_pending, key, from, lookup_type, vec![ff]),
         move |(lookup, peer)| {
             lookup.process_peer(peer).and_then(|mut lookup| {
                 if let Some(peer) = lookup.select_next_peer() {
@@ -238,6 +253,7 @@ fn iterative_lookup(
 /// DatabaseSearchReply messages are not yet handled.
 pub fn lookup_db_entry<T: Send + 'static>(
     ctx: Arc<Context>,
+    register_pending: PendingTx,
     key: Hash,
     lookup_type: DatabaseLookupType,
     ff: RouterInfo,
@@ -251,7 +267,14 @@ pub fn lookup_db_entry<T: Send + 'static>(
     pending.entry(key.clone()).or_default().push(tx_store);
 
     let lookup = rx_store
-        .select2(iterative_lookup(ctx, key, from, lookup_type, ff))
+        .select2(iterative_lookup(
+            ctx,
+            register_pending,
+            key,
+            from,
+            lookup_type,
+            ff,
+        ))
         .then(|res| match res {
             Ok(Either::A((ri, _))) => Box::new(future::ok(ri)),
             Ok(Either::B(((), _))) => Box::new(future::err(LookupError::NotFound)),
@@ -275,18 +298,26 @@ pub fn lookup_db_entry<T: Send + 'static>(
 /// Explores the netDb for a given key.
 pub fn explore_netdb(
     ctx: Arc<Context>,
+    register_pending: PendingTx,
     key: Hash,
     ff: RouterInfo,
     timeout_ms: u64,
 ) -> LookupFuture<(), LookupError> {
     let from = ctx.ri.read().unwrap().router_id.hash();
 
-    let explorer =
-        iterative_lookup(ctx, key, from, DatabaseLookupType::Exploratory, ff).then(|_| {
-            // No more peers to explore, so we are done
-            debug!("Finished exploratory lookup");
-            Ok(())
-        });
+    let explorer = iterative_lookup(
+        ctx,
+        register_pending,
+        key,
+        from,
+        DatabaseLookupType::Exploratory,
+        ff,
+    )
+    .then(|_| {
+        // No more peers to explore, so we are done
+        debug!("Finished exploratory lookup");
+        Ok(())
+    });
 
     Box::new(
         Timeout::new(explorer, Duration::from_millis(timeout_ms)).map_err(|e| {

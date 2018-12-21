@@ -135,16 +135,16 @@ impl DatabaseLookup {
 impl fmt::Display for DatabaseLookup {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         format!(
-            "DatabaseLookup\n- key: {}\n- type: {:?}\n- excluded peers: [\n{}\n  ]",
+            "DatabaseLookup\n- key: {}\n- type: {:?}\n- excluded peers: [{}  ]",
             self.key,
             self.lookup_type,
             self.excluded_peers
                 .iter()
                 .map(|peer| format!("    {}", peer))
                 .fold(String::new(), |acc, peer| if acc.is_empty() {
-                    peer
+                    acc + &"\n" + &peer + &"\n"
                 } else {
-                    acc + &"\n" + &peer
+                    acc + &peer + &"\n"
                 })
         )
         .fmt(f)
@@ -163,14 +163,14 @@ pub struct DatabaseSearchReply {
 impl fmt::Display for DatabaseSearchReply {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         format!(
-            "DatabaseSearchReply\n- key: {}\n- peers: [\n{}\n  ]\n- from: {}",
+            "DatabaseSearchReply\n- key: {}\n- peers: [{}  ]\n- from: {}",
             self.key,
             self.peers.iter().map(|peer| format!("    {}", peer)).fold(
                 String::new(),
                 |acc, peer| if acc.is_empty() {
-                    peer
+                    acc + &"\n" + &peer + &"\n"
                 } else {
-                    acc + &"\n" + &peer
+                    acc + &peer + &"\n"
                 }
             ),
             self.from

@@ -1,6 +1,6 @@
 //! Transports used for point-to-point communication between I2P routers.
 
-use futures::{future::lazy, stream::Select, Async, Future, Poll, Sink, StartSend, Stream};
+use futures::{future::lazy, Future, Poll, Sink, StartSend};
 use std::io;
 use std::iter::once;
 use std::sync::Arc;
@@ -12,7 +12,7 @@ use crate::data::{Hash, RouterAddress, RouterInfo};
 use crate::i2np::Message;
 use crate::router::{
     config,
-    types::{CommSystem, InboundMessageHandler, OutboundMessageHandler},
+    types::{CommSystem, Distributor},
     Context,
 };
 
@@ -45,16 +45,9 @@ impl Sink for Bid {
 
 /// Coordinates the sending and receiving of frames over the various supported
 /// transports.
-pub struct Manager {
-    ntcp: ntcp::Manager,
-    ntcp_engine: Option<ntcp::Engine>,
-    ntcp2: ntcp2::Manager,
-    ntcp2_engine: Option<ntcp2::Engine>,
-}
-
-pub struct Engine {
-    engines: Select<ntcp::Engine, ntcp2::Engine>,
-    msg_handler: Arc<dyn InboundMessageHandler>,
+pub struct Manager<D: Distributor> {
+    ntcp: ntcp::Manager<D>,
+    ntcp2: ntcp2::Manager<D>,
 }
 
 trait Transport {
@@ -63,8 +56,8 @@ trait Transport {
     fn bid(&self, peer: &RouterInfo, msg_size: usize) -> Option<Bid>;
 }
 
-impl Manager {
-    pub fn from_config(config: &config::Config) -> Self {
+impl<D: Distributor> Manager<D> {
+    pub fn from_config(config: &config::Config, distributor: D) -> Self {
         let ntcp_addr = config
             .get_str(config::NTCP_LISTEN)
             .expect("Must configure an NTCP address")
@@ -77,26 +70,54 @@ impl Manager {
             .unwrap();
         let ntcp2_keyfile = config.get_str(config::NTCP2_KEYFILE).unwrap();
 
-        let (ntcp_manager, ntcp_engine) = ntcp::Manager::new(ntcp_addr);
-        let (ntcp2_manager, ntcp2_engine) =
-            match ntcp2::Manager::from_file(ntcp2_addr, &ntcp2_keyfile) {
+        let ntcp_manager = ntcp::Manager::new(ntcp_addr, distributor.clone());
+        let ntcp2_manager =
+            match ntcp2::Manager::from_file(ntcp2_addr, &ntcp2_keyfile, distributor.clone()) {
                 Ok(ret) => ret,
                 Err(_) => {
-                    let (ntcp2_manager, ntcp2_engine) = ntcp2::Manager::new(ntcp2_addr);
+                    let ntcp2_manager = ntcp2::Manager::new(ntcp2_addr, distributor);
                     ntcp2_manager.to_file(&ntcp2_keyfile).unwrap();
-                    (ntcp2_manager, ntcp2_engine)
+                    ntcp2_manager
                 }
             };
         Manager {
             ntcp: ntcp_manager,
-            ntcp_engine: Some(ntcp_engine),
             ntcp2: ntcp2_manager,
-            ntcp2_engine: Some(ntcp2_engine),
         }
     }
 }
 
-impl OutboundMessageHandler for Manager {
+impl<D: Distributor> CommSystem for Manager<D> {
+    fn addresses(&self) -> Vec<RouterAddress> {
+        vec![self.ntcp.address(), self.ntcp2.address()]
+    }
+
+    fn start(&mut self, ctx: Arc<Context>) -> Box<dyn Future<Item = (), Error = ()> + Send> {
+        self.ntcp.set_context(ctx.clone());
+        self.ntcp2.set_context(ctx.clone());
+
+        let listener = self
+            .ntcp
+            .listen(ctx.keys.rid.clone(), ctx.keys.signing_private_key.clone())
+            .map_err(|e| {
+                error!("NTCP listener error: {}", e);
+            });
+
+        let listener2 = self.ntcp2.listen(&ctx.keys.rid).map_err(|e| {
+            error!("NTCP2 listener error: {}", e);
+        });
+
+        Box::new(lazy(|| {
+            spawn(listener);
+            spawn(listener2);
+            Ok(())
+        }))
+    }
+
+    fn is_established(&self, hash: &Hash) -> bool {
+        self.ntcp.is_established(hash) || self.ntcp2.is_established(hash)
+    }
+
     /// Send an I2NP message to a peer over one of our transports.
     ///
     /// Returns an Err giving back the message if it cannot be sent over any of
@@ -115,71 +136,6 @@ impl OutboundMessageHandler for Manager {
     }
 }
 
-impl CommSystem for Manager {
-    fn addresses(&self) -> Vec<RouterAddress> {
-        vec![self.ntcp.address(), self.ntcp2.address()]
-    }
-
-    fn start(&mut self, ctx: Arc<Context>) -> Box<dyn Future<Item = (), Error = ()> + Send> {
-        let ntcp_engine = self.ntcp_engine.take().expect("Cannot call listen() twice");
-        let ntcp2_engine = self
-            .ntcp2_engine
-            .take()
-            .expect("Cannot call listen() twice");
-
-        self.ntcp.set_context(ctx.clone());
-        self.ntcp2.set_context(ctx.clone());
-
-        let listener = self
-            .ntcp
-            .listen(ctx.keys.rid.clone(), ctx.keys.signing_private_key.clone())
-            .map_err(|e| {
-                error!("NTCP listener error: {}", e);
-            });
-
-        let listener2 = self.ntcp2.listen(&ctx.keys.rid).map_err(|e| {
-            error!("NTCP2 listener error: {}", e);
-        });
-
-        let engine = Engine {
-            engines: ntcp_engine.select(ntcp2_engine),
-            msg_handler: ctx.msg_handler.clone(),
-        }
-        .map(|_| ())
-        .map_err(|e| {
-            error!("CommSystem engine error: {}", e);
-        });
-
-        Box::new(lazy(|| {
-            spawn(listener);
-            spawn(listener2);
-            spawn(engine);
-            Ok(())
-        }))
-    }
-
-    fn is_established(&self, hash: &Hash) -> bool {
-        self.ntcp.is_established(hash) || self.ntcp2.is_established(hash)
-    }
-}
-
-impl Future for Engine {
-    type Item = ();
-    type Error = io::Error;
-
-    fn poll(&mut self) -> Poll<(), io::Error> {
-        while let Async::Ready(f) = self.engines.poll()? {
-            if let Some((from, msg)) = f {
-                self.msg_handler.handle(from, msg);
-            } else {
-                // All engine streams have ended
-                return Ok(Async::Ready(()));
-            }
-        }
-        Ok(Async::NotReady)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use futures::Async;
@@ -190,6 +146,7 @@ mod tests {
     use tokio_io::{AsyncRead, AsyncWrite};
 
     use super::*;
+    use crate::router::mock::MockDistributor;
 
     pub struct NetworkCable {
         alice_to_bob: Vec<u8>,
@@ -320,7 +277,8 @@ mod tests {
             .set(config::NTCP2_KEYFILE, ntcp2_keyfile.to_str())
             .unwrap();
 
-        let manager = Manager::from_config(&config);
+        let distributor = MockDistributor::new();
+        let manager = Manager::from_config(&config, distributor);
         let addrs = manager.addresses();
 
         assert_eq!(addrs[0].addr(), Some(ntcp_addr));

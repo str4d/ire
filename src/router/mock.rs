@@ -4,21 +4,34 @@
 //! self-consistency across its component's API.
 
 use config::Config;
-use futures::{future, sync::oneshot, Future};
-use std::sync::{Arc, RwLock};
+use futures::{future, sync::mpsc, Future};
+use std::sync::{Arc, Mutex, RwLock};
 use tokio_io::IoFuture;
 
-use super::types::{CommSystem, InboundMessageHandler, OutboundMessageHandler};
+use super::types::{CommSystem, Distributor, DistributorResult};
 use crate::data::{Hash, RouterAddress, RouterInfo, RouterSecretKeys};
-use crate::i2np::{DatabaseSearchReply, Message};
+use crate::i2np::Message;
 use crate::netdb::LocalNetworkDatabase;
 use crate::router::Context;
 
-struct MockMessageHandler;
+#[derive(Clone)]
+pub struct MockDistributor {
+    pub received: Arc<Mutex<Vec<(Hash, Message)>>>,
+}
 
-impl InboundMessageHandler for MockMessageHandler {
-    fn register_lookup(&self, _from: Hash, _key: Hash, _tx: oneshot::Sender<DatabaseSearchReply>) {}
-    fn handle(&self, _from: Hash, _msg: Message) {}
+impl MockDistributor {
+    pub fn new() -> Self {
+        MockDistributor {
+            received: Arc::new(Mutex::new(vec![])),
+        }
+    }
+}
+
+impl Distributor for MockDistributor {
+    fn handle(&self, from: Hash, msg: Message) -> DistributorResult {
+        self.received.lock().unwrap().push((from, msg));
+        Box::new(future::ok(()))
+    }
 }
 
 pub(super) struct MockCommSystem;
@@ -26,16 +39,6 @@ pub(super) struct MockCommSystem;
 impl MockCommSystem {
     pub(super) fn new() -> Self {
         MockCommSystem {}
-    }
-}
-
-impl OutboundMessageHandler for MockCommSystem {
-    fn send(
-        &self,
-        _peer: RouterInfo,
-        _msg: Message,
-    ) -> Result<IoFuture<()>, (RouterInfo, Message)> {
-        Ok(Box::new(future::ok(())))
     }
 }
 
@@ -51,6 +54,14 @@ impl CommSystem for MockCommSystem {
     fn is_established(&self, _hash: &Hash) -> bool {
         false
     }
+
+    fn send(
+        &self,
+        _peer: RouterInfo,
+        _msg: Message,
+    ) -> Result<IoFuture<()>, (RouterInfo, Message)> {
+        Ok(Box::new(future::ok(())))
+    }
 }
 
 pub fn mock_context() -> Arc<Context> {
@@ -58,12 +69,13 @@ pub fn mock_context() -> Arc<Context> {
     let mut ri = RouterInfo::new(keys.rid.clone());
     ri.sign(&keys.signing_private_key);
 
+    let (tx, _) = mpsc::channel(0);
+
     Arc::new(Context {
         config: RwLock::new(Config::default()),
         keys,
         ri: Arc::new(RwLock::new(ri)),
-        netdb: Arc::new(RwLock::new(LocalNetworkDatabase::new())),
+        netdb: Arc::new(RwLock::new(LocalNetworkDatabase::new(tx))),
         comms: Arc::new(RwLock::new(MockCommSystem::new())),
-        msg_handler: Arc::new(MockMessageHandler {}),
     })
 }
