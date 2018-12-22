@@ -181,7 +181,7 @@ impl SessionTag {
 /// Defines an identifier that is unique to each router in a tunnel. A TunnelId
 /// is generally greater than zero; do not use a value of zero except in
 /// special cases.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TunnelId(pub u32);
 
 #[cfg_attr(tarpaulin, skip)]
