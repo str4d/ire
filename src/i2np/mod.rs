@@ -30,6 +30,7 @@ const MESSAGE_EXPIRATION_MS: u64 = 60 * 1000;
 pub enum BuildRequestError {
     Crypto(crypto::Error),
     Read(ReadError),
+    Duplicate,
 }
 
 impl From<crypto::Error> for BuildRequestError {
@@ -49,7 +50,7 @@ impl<T> From<nom::Err<T>> for BuildRequestError {
 //
 
 #[derive(Debug, PartialEq)]
-enum ParticipantType {
+pub enum ParticipantType {
     InboundGateway,
     Intermediate,
     OutboundEndpoint,
@@ -59,17 +60,17 @@ enum ParticipantType {
 /// in the tunnel.
 #[derive(Debug, PartialEq)]
 pub struct BuildRequestRecord {
-    receive_tid: TunnelId,
+    pub receive_tid: TunnelId,
     our_ident: Hash,
-    next_tid: TunnelId,
-    next_ident: Hash,
-    layer_key: SessionKey,
-    iv_key: SessionKey,
-    reply_key: SessionKey,
-    reply_iv: [u8; 16],
-    hop_type: ParticipantType,
-    request_time: u32,
-    send_msg_id: u32,
+    pub next_tid: TunnelId,
+    pub next_ident: Hash,
+    pub layer_key: SessionKey,
+    pub iv_key: SessionKey,
+    pub reply_key: SessionKey,
+    pub reply_iv: [u8; 16],
+    pub hop_type: ParticipantType,
+    pub request_time: u32,
+    pub send_msg_id: u32,
 }
 
 impl BuildRequestRecord {
@@ -84,7 +85,7 @@ impl BuildRequestRecord {
 /// to participate.
 #[derive(Debug, PartialEq)]
 pub struct BuildResponseRecord {
-    reply: u8,
+    pub reply: u8,
 }
 
 //

@@ -1,9 +1,35 @@
 //! Implementation of tunnels over I2P.
 
-use crate::data::{Hash, TunnelId};
+use std::time::SystemTime;
 
+use crate::data::{Hash, RouterInfo, TunnelId};
+
+mod acceptor;
 mod encryption;
 mod frame;
+
+/// The lifetime of a tunnel. Always 10 minutes for current I2P tunnels.
+const TUNNEL_LIFETIME: u64 = 10 * 60;
+
+/// Data specific to the type of hop:
+/// - InboundGateway contains `next_hop`
+/// - Intermediate contains `from_ident` and `next_hop`
+/// - OutboundEndpoint contains `from_ident`
+enum HopData {
+    InboundGateway((RouterInfo, TunnelId)),
+    Intermediate(Hash, (RouterInfo, TunnelId)),
+    OutboundEndpoint(Hash),
+}
+
+/// The configuration of a particular hop in a tunnel.
+///
+/// Tunnels have a maximum lifetime of 10 minutes, so the [`RouterInfo`] of the next hop
+/// is looked up at tunnel build time and cached here.
+pub struct HopConfig {
+    hop_data: HopData,
+    layer_cipher: encryption::LayerCipher,
+    expires: SystemTime,
+}
 
 #[derive(Debug, PartialEq)]
 enum TunnelMessageDeliveryType {

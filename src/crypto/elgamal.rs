@@ -137,6 +137,7 @@ impl Encryptor {
     }
 }
 
+#[derive(Clone)]
 pub struct Decryptor(BigUint);
 
 impl<'a> From<&'a PrivateKey> for Decryptor {
