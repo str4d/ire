@@ -8,12 +8,15 @@
 //!
 //! [I2NP specification](https://geti2p.net/spec/i2np)
 
+use nom;
 use rand::{thread_rng, Rng};
 use std::fmt;
 use std::time::{Duration, SystemTime};
 
-use crate::crypto::SessionKey;
-use crate::data::{Certificate, Hash, I2PDate, LeaseSet, RouterInfo, SessionTag, TunnelId};
+use crate::crypto::{self, elgamal, SessionKey};
+use crate::data::{
+    Certificate, Hash, I2PDate, LeaseSet, ReadError, RouterInfo, SessionTag, TunnelId,
+};
 use crate::util::serialize;
 
 #[allow(double_parens)]
@@ -21,6 +24,25 @@ use crate::util::serialize;
 pub(crate) mod frame;
 
 const MESSAGE_EXPIRATION_MS: u64 = 60 * 1000;
+
+/// BuildRequestRecord errors
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BuildRequestError {
+    Crypto(crypto::Error),
+    Read(ReadError),
+}
+
+impl From<crypto::Error> for BuildRequestError {
+    fn from(e: crypto::Error) -> Self {
+        BuildRequestError::Crypto(e)
+    }
+}
+
+impl<T> From<nom::Err<T>> for BuildRequestError {
+    fn from(e: nom::Err<T>) -> Self {
+        BuildRequestError::Read(e.into())
+    }
+}
 
 //
 // Common structures
@@ -48,6 +70,14 @@ pub struct BuildRequestRecord {
     hop_type: ParticipantType,
     request_time: u32,
     send_msg_id: u32,
+}
+
+impl BuildRequestRecord {
+    pub fn decrypt(ct: &[u8], decryptor: &elgamal::Decryptor) -> Result<Self, BuildRequestError> {
+        let pt = decryptor.decrypt(&ct, false)?;
+        let (_, brr) = frame::build_request_record(&pt)?;
+        Ok(brr)
+    }
 }
 
 /// Reply to a BuildRequestRecord stating whether or not a particular hop agrees

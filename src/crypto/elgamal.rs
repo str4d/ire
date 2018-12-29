@@ -89,7 +89,7 @@ impl Encryptor {
     }
 
     /// ElGamal encryption using I2P's message and ciphertext encoding schemes.
-    pub fn encrypt(&self, msg: &[u8]) -> Result<[u8; 514], Error> {
+    pub fn encrypt(&self, msg: &[u8], include_zeroes: bool) -> Result<Vec<u8>, Error> {
         // Message must be no more than 222 bytes
         if msg.len() > 222 {
             return Err(Error::InvalidMessage);
@@ -112,15 +112,27 @@ impl Encryptor {
         data.extend_from_slice(msg);
 
         self.encrypt_basic(&data).map(|(gamma, delta)| {
-            // ElGamal ciphertext:
-            // 0   1                       257 258                      514
-            // | 0 | padding zeroes | gamma | 0 | padding zeroes | delta |
-            let gamma = rectify(&gamma, 256);
-            let delta = rectify(&delta, 256);
-            let mut ct = [0u8; 514];
-            ct[1..257].copy_from_slice(&gamma);
-            ct[258..514].copy_from_slice(&delta);
-            ct
+            if include_zeroes {
+                // ElGamal ciphertext:
+                // 0   1                       257 258                      514
+                // | 0 | padding zeroes | gamma | 0 | padding zeroes | delta |
+                let gamma = rectify(&gamma, 256);
+                let delta = rectify(&delta, 256);
+                let mut ct = vec![0; 514];
+                ct[1..257].copy_from_slice(&gamma);
+                ct[258..514].copy_from_slice(&delta);
+                ct
+            } else {
+                // ElGamal ciphertext:
+                // 0                       256                      512
+                // | padding zeroes | gamma | padding zeroes | delta |
+                let gamma = rectify(&gamma, 256);
+                let delta = rectify(&delta, 256);
+                let mut ct = vec![0; 512];
+                ct[0..256].copy_from_slice(&gamma);
+                ct[256..512].copy_from_slice(&delta);
+                ct
+            }
         })
     }
 }
@@ -146,18 +158,32 @@ impl Decryptor {
     }
 
     /// ElGamal decryption using I2P's message and ciphertext encoding schemes.
-    // TODO: Errors
-    pub fn decrypt(&self, ct: &[u8]) -> Result<Vec<u8>, Error> {
-        // Ciphertext must be 514 bytes
-        if ct.len() != 514 {
-            return Err(Error::InvalidCiphertext);
-        }
+    pub fn decrypt(&self, ct: &[u8], has_zeroes: bool) -> Result<Vec<u8>, Error> {
+        let (gamma, delta) = if has_zeroes {
+            // Ciphertext must be 514 bytes
+            if ct.len() != 514 {
+                return Err(Error::InvalidCiphertext);
+            }
 
-        // ElGamal ciphertext:
-        // 0   1                       257 258                      514
-        // | 0 | padding zeroes | gamma | 0 | padding zeroes | delta |
-        let gamma = BigUint::from_bytes_be(&ct[..257]);
-        let delta = BigUint::from_bytes_be(&ct[257..]);
+            // ElGamal ciphertext:
+            // 0   1                       257 258                      514
+            // | 0 | padding zeroes | gamma | 0 | padding zeroes | delta |
+            let gamma = BigUint::from_bytes_be(&ct[..257]);
+            let delta = BigUint::from_bytes_be(&ct[257..]);
+            (gamma, delta)
+        } else {
+            // Ciphertext must be 512 bytes
+            if ct.len() != 512 {
+                return Err(Error::InvalidCiphertext);
+            }
+
+            // ElGamal ciphertext:
+            // 0                       256                      512
+            // | padding zeroes | gamma | padding zeroes | delta |
+            let gamma = BigUint::from_bytes_be(&ct[..256]);
+            let delta = BigUint::from_bytes_be(&ct[256..]);
+            (gamma, delta)
+        };
 
         let data = self.decrypt_basic((gamma, delta));
         if data.len() < 33 {
@@ -210,30 +236,30 @@ mod tests {
         let dec = Decryptor::from(&priv_key);
 
         // Message too long
-        assert!(enc.encrypt(&[0u8; 223]).is_err());
+        assert!(enc.encrypt(&[0u8; 223], true).is_err());
 
         // Full-width all-zeroes message
         let msg = [0u8; 222];
-        let ct = enc.encrypt(&msg[..]).unwrap();
-        let pt = dec.decrypt(&ct).unwrap();
+        let ct = enc.encrypt(&msg[..], true).unwrap();
+        let pt = dec.decrypt(&ct, true).unwrap();
         assert_eq!(&pt[..], &msg[..]);
 
         // Short all-zeroes message
         let msg = [0u8; 8];
-        let ct = enc.encrypt(&msg[..]).unwrap();
-        let pt = dec.decrypt(&ct).unwrap();
+        let ct = enc.encrypt(&msg[..], true).unwrap();
+        let pt = dec.decrypt(&ct, true).unwrap();
         assert_eq!(&pt[..], &msg[..]);
 
         // Full-width all-ones message
         let msg = [1u8; 222];
-        let ct = enc.encrypt(&msg[..]).unwrap();
-        let pt = dec.decrypt(&ct).unwrap();
+        let ct = enc.encrypt(&msg[..], true).unwrap();
+        let pt = dec.decrypt(&ct, true).unwrap();
         assert_eq!(&pt[..], &msg[..]);
 
         // Short all-ones message
         let msg = [1u8; 8];
-        let ct = enc.encrypt(&msg[..]).unwrap();
-        let pt = dec.decrypt(&ct).unwrap();
+        let ct = enc.encrypt(&msg[..], true).unwrap();
+        let pt = dec.decrypt(&ct, true).unwrap();
         assert_eq!(&pt[..], &msg[..]);
     }
 
@@ -355,10 +381,18 @@ mod tests {
             let ct = I2P_BASE64.decode(tv.ct.as_bytes()).unwrap();
 
             // Check round-trip
-            assert_eq!(dec.decrypt(&enc.encrypt(msg).unwrap()).unwrap(), msg);
+            assert_eq!(
+                dec.decrypt(&enc.encrypt(msg, true).unwrap(), true).unwrap(),
+                msg
+            );
+            assert_eq!(
+                dec.decrypt(&enc.encrypt(msg, false).unwrap(), false)
+                    .unwrap(),
+                msg
+            );
 
             // Check test vector
-            assert_eq!(dec.decrypt(&ct).unwrap(), msg);
+            assert_eq!(dec.decrypt(&ct, true).unwrap(), msg);
         }
     }
 }
