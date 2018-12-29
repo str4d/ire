@@ -569,7 +569,7 @@ impl Signature {
 }
 
 /// A symmetric key used for AES-256 encryption.
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct SessionKey(pub [u8; 32]);
 
 impl SessionKey {

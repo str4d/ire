@@ -2,6 +2,7 @@
 
 use crate::data::{Hash, TunnelId};
 
+mod encryption;
 mod frame;
 
 #[derive(Debug, PartialEq)]

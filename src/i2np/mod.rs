@@ -273,8 +273,8 @@ pub struct Garlic {
 /// or endpoint. The data is of fixed length, containing I2NP messages that are
 /// fragmented, batched, padded, and encrypted.
 pub struct TunnelData {
-    tid: TunnelId,
-    data: [u8; 1024],
+    pub tid: TunnelId,
+    pub data: [u8; 1024],
 }
 
 impl TunnelData {
