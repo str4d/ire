@@ -7,6 +7,7 @@ use crate::data::{Hash, RouterInfo, TunnelId};
 mod acceptor;
 mod encryption;
 mod frame;
+mod processor;
 
 /// The lifetime of a tunnel. Always 10 minutes for current I2P tunnels.
 const TUNNEL_LIFETIME: u64 = 10 * 60;
