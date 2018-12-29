@@ -3,7 +3,11 @@ use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use nom::*;
-use sha2::{Digest, Sha256};
+use rand::rngs::OsRng;
+use sha2::{
+    digest::generic_array::{typenum::U32, GenericArray},
+    Digest, Sha256,
+};
 use std::io::{Read, Write};
 
 use super::*;
@@ -68,16 +72,20 @@ pub fn build_request_record<'a>(
     )
 }
 
+fn calculate_build_response_record_hash(padding: &[u8], reply: u8) -> GenericArray<u8, U32> {
+    let mut hasher = Sha256::default();
+    hasher.input(padding);
+    hasher.input(&[reply]);
+    hasher.result()
+}
+
 fn validate_build_response_record<'a>(
     input: &'a [u8],
     hash: &Hash,
     padding: &[u8],
     reply: u8,
 ) -> IResult<&'a [u8], ()> {
-    let mut hasher = Sha256::default();
-    hasher.input(padding);
-    hasher.input(&[reply]);
-    let res = hasher.result();
+    let res = calculate_build_response_record_hash(padding, reply);
     if hash.eq(&Hash::from_bytes(array_ref![res, 0, 32])) {
         Ok((input, ()))
     } else {
@@ -94,6 +102,20 @@ named!(pub build_response_record<BuildResponseRecord>,
         (BuildResponseRecord { reply })
     )
 );
+
+pub fn gen_build_response_record<'a>(
+    input: (&'a mut [u8], usize),
+    brr: &BuildResponseRecord,
+) -> Result<(&'a mut [u8], usize), GenError> {
+    let mut padding = vec![0; 495];
+    let mut rng = OsRng::new().expect("should be able to construct RNG");
+    rng.fill(&mut padding[..]);
+    let hash = calculate_build_response_record_hash(&padding, brr.reply);
+    do_gen!(
+        input,
+        gen_slice!(hash) >> gen_slice!(padding) >> gen_be_u8!(brr.reply)
+    )
+}
 
 //
 // Message payloads
@@ -834,6 +856,29 @@ mod tests {
                 Err(e) => panic!("Unexpected error: {:?}", e),
             }
         };
+    }
+
+    #[test]
+    fn test_build_response_record() {
+        macro_rules! eval {
+            ($value:expr) => {
+                let mut res = vec![0; 528];
+                if let Err(e) = gen_build_response_record((&mut res, 0), &$value) {
+                    panic!("Unexpected error: {:?}", e);
+                }
+                match build_response_record(&res) {
+                    Ok((_, m)) => assert_eq!(m, $value),
+                    Err(e) => panic!("Unexpected error: {:?}", e),
+                }
+            };
+        }
+
+        eval!(BuildResponseRecord { reply: 0 });
+        eval!(BuildResponseRecord { reply: 10 });
+        eval!(BuildResponseRecord { reply: 20 });
+        eval!(BuildResponseRecord { reply: 30 });
+        eval!(BuildResponseRecord { reply: 40 });
+        eval!(BuildResponseRecord { reply: 255 });
     }
 
     #[test]

@@ -45,6 +45,7 @@ pub struct BuildRequestRecord {
 
 /// Reply to a BuildRequestRecord stating whether or not a particular hop agrees
 /// to participate.
+#[derive(Debug, PartialEq)]
 pub struct BuildResponseRecord {
     reply: u8,
 }
