@@ -590,11 +590,7 @@ pub(crate) struct Aes256 {
 }
 
 impl Aes256 {
-    pub fn new(
-        key: &SessionKey,
-        iv_enc: &[u8; AES_BLOCK_SIZE],
-        iv_dec: &[u8; AES_BLOCK_SIZE],
-    ) -> Self {
+    pub fn new(key: &SessionKey, iv_enc: &[u8], iv_dec: &[u8]) -> Self {
         let key = AesGenericArray::from_slice(&key.0);
         Aes256 {
             cbc_enc: Cbc::new_fixkey(key, AesGenericArray::from_slice(iv_enc)),

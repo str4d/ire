@@ -330,7 +330,7 @@ impl Decoder for OutboundHandshakeCodec {
                             self.aes = Some(Aes256::new(
                                 &session_key,
                                 &self.iv_enc,
-                                array_ref![sce.0, sce.0.len() - AES_BLOCK_SIZE, AES_BLOCK_SIZE],
+                                &sce.0[sce.0.len() - AES_BLOCK_SIZE..sce.0.len()],
                             ));
                             // Decrypt remainder of SessionCreated message
                             match self.aes.as_mut().unwrap().decrypt_blocks(&mut sce.1) {
