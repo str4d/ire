@@ -36,41 +36,53 @@ fn iv<'a>(input: &'a [u8]) -> IResult<&'a [u8], [u8; 16]> {
 // Common structures
 //
 
-pub fn build_request_record<'a>(
-    input: &'a [u8],
-    to_peer: Hash,
-) -> IResult<&'a [u8], BuildRequestRecord> {
-    #[cfg_attr(rustfmt, rustfmt_skip)]
+named!(
+    pub build_request_record<BuildRequestRecord>,
     do_parse!(
-        input,
-        receive_tid:  tunnel_id >>
-        our_ident:    hash >>
-        next_tid:     tunnel_id >>
-        next_ident:   hash >>
-        layer_key:    session_key >>
-        iv_key:       session_key >>
-        reply_key:    session_key >>
-        reply_iv:     iv >>
-        flag:         be_u8 >>
-        request_time: be_u32 >>
-        send_msg_id:  be_u32 >>
-                      take!(29) >>
-        (BuildRequestRecord {
-            to_peer,
-            receive_tid,
-            our_ident,
-            next_tid,
-            next_ident,
-            layer_key,
-            iv_key,
-            reply_key,
-            reply_iv,
-            flag,
-            request_time,
-            send_msg_id,
-        })
+        receive_tid: tunnel_id
+            >> our_ident: hash
+            >> next_tid: tunnel_id
+            >> next_ident: hash
+            >> layer_key: session_key
+            >> iv_key: session_key
+            >> reply_key: session_key
+            >> reply_iv: iv
+            >> hop_type:
+                map!(
+                    verify!(
+                        bits!(do_parse!(
+                            ibgw: take_bits!(u8, 1)
+                                >> obep: take_bits!(u8, 1)
+                                >> take_bits!(u8, 6)
+                                >> ((ibgw > 0, obep > 0))
+                        )),
+                        |(ibgw, obep)| !(ibgw && obep)
+                    ),
+                    |(ibgw, obep)| match (ibgw, obep) {
+                        (false, false) => ParticipantType::Intermediate,
+                        (true, false) => ParticipantType::InboundGateway,
+                        (false, true) => ParticipantType::OutboundEndpoint,
+                        (true, true) => unreachable!(),
+                    }
+                )
+            >> request_time: be_u32
+            >> send_msg_id: be_u32
+            >> take!(29)
+            >> (BuildRequestRecord {
+                receive_tid,
+                our_ident,
+                next_tid,
+                next_ident,
+                layer_key,
+                iv_key,
+                reply_key,
+                reply_iv,
+                hop_type,
+                request_time,
+                send_msg_id,
+            })
     )
-}
+);
 
 fn calculate_build_response_record_hash(padding: &[u8], reply: u8) -> GenericArray<u8, U32> {
     let mut hasher = Sha256::default();
@@ -856,6 +868,84 @@ mod tests {
                 Err(e) => panic!("Unexpected error: {:?}", e),
             }
         };
+    }
+
+    #[test]
+    fn test_build_request_record() {
+        macro_rules! eval {
+            ($flag:expr, $value:expr) => {
+                let mut encoded = vec![0; 222];
+                encoded[184] = $flag;
+                assert_eq!(build_request_record(&encoded).map(|(_, v)| v), $value);
+            };
+        }
+
+        // No flag bits set
+        eval!(
+            0,
+            Ok(BuildRequestRecord {
+                receive_tid: TunnelId(0),
+                our_ident: Hash([0; 32]),
+                next_tid: TunnelId(0),
+                next_ident: Hash([0; 32]),
+                layer_key: SessionKey([0; 32]),
+                iv_key: SessionKey([0; 32]),
+                reply_key: SessionKey([0; 32]),
+                reply_iv: [0; 16],
+                hop_type: ParticipantType::Intermediate,
+                request_time: 0,
+                send_msg_id: 0,
+            })
+        );
+
+        // Flag bit 7 set
+        eval!(
+            0x80,
+            Ok(BuildRequestRecord {
+                receive_tid: TunnelId(0),
+                our_ident: Hash([0; 32]),
+                next_tid: TunnelId(0),
+                next_ident: Hash([0; 32]),
+                layer_key: SessionKey([0; 32]),
+                iv_key: SessionKey([0; 32]),
+                reply_key: SessionKey([0; 32]),
+                reply_iv: [0; 16],
+                hop_type: ParticipantType::InboundGateway,
+                request_time: 0,
+                send_msg_id: 0,
+            })
+        );
+
+        // Flag bit 6 set
+        eval!(
+            0x40,
+            Ok(BuildRequestRecord {
+                receive_tid: TunnelId(0),
+                our_ident: Hash([0; 32]),
+                next_tid: TunnelId(0),
+                next_ident: Hash([0; 32]),
+                layer_key: SessionKey([0; 32]),
+                iv_key: SessionKey([0; 32]),
+                reply_key: SessionKey([0; 32]),
+                reply_iv: [0; 16],
+                hop_type: ParticipantType::OutboundEndpoint,
+                request_time: 0,
+                send_msg_id: 0,
+            })
+        );
+
+        // Flag bits 7 and 6 set
+        eval!(
+            0xc0,
+            Err(nom::Err::Error(nom::Context::Code(
+                &vec![
+                    0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                ][..],
+                nom::ErrorKind::Verify
+            )))
+        );
     }
 
     #[test]

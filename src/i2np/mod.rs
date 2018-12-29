@@ -26,10 +26,17 @@ const MESSAGE_EXPIRATION_MS: u64 = 60 * 1000;
 // Common structures
 //
 
+#[derive(Debug, PartialEq)]
+enum ParticipantType {
+    InboundGateway,
+    Intermediate,
+    OutboundEndpoint,
+}
+
 /// One record in a set of multiple records to request the creation of one hop
 /// in the tunnel.
+#[derive(Debug, PartialEq)]
 pub struct BuildRequestRecord {
-    to_peer: Hash,
     receive_tid: TunnelId,
     our_ident: Hash,
     next_tid: TunnelId,
@@ -38,7 +45,7 @@ pub struct BuildRequestRecord {
     iv_key: SessionKey,
     reply_key: SessionKey,
     reply_iv: [u8; 16],
-    flag: u8,
+    hop_type: ParticipantType,
     request_time: u32,
     send_msg_id: u32,
 }
