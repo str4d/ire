@@ -10,6 +10,7 @@ use tokio_io::IoFuture;
 use crate::data::{Hash, RouterInfo, RouterSecretKeys};
 use crate::i2np::{Message, MessagePayload};
 use crate::netdb;
+use crate::tunnel;
 
 mod builder;
 pub mod config;
@@ -24,11 +25,21 @@ pub(crate) type DistributorTx = mpsc::Sender<(Hash, Message)>;
 #[derive(Clone)]
 struct Distributor {
     netdb: DistributorTx,
+    tunnel_acceptor: DistributorTx,
+    tunnel_processor: DistributorTx,
 }
 
 impl Distributor {
-    fn new(netdb: DistributorTx) -> Self {
-        Distributor { netdb }
+    fn new(
+        netdb: DistributorTx,
+        tunnel_acceptor: DistributorTx,
+        tunnel_processor: DistributorTx,
+    ) -> Self {
+        Distributor {
+            netdb,
+            tunnel_acceptor,
+            tunnel_processor,
+        }
     }
 }
 
@@ -40,6 +51,16 @@ impl types::Distributor for Distributor {
             | MessagePayload::DatabaseSearchReply(_) => {
                 let f: types::DistributorResult =
                     Box::new(self.netdb.clone().send((from, msg)).map(|_| ()));
+                f
+            }
+            MessagePayload::TunnelData(_) | MessagePayload::TunnelGateway(_) => {
+                let f: types::DistributorResult =
+                    Box::new(self.tunnel_processor.clone().send((from, msg)).map(|_| ()));
+                f
+            }
+            MessagePayload::TunnelBuild(_) | MessagePayload::VariableTunnelBuild(_) => {
+                let f: types::DistributorResult =
+                    Box::new(self.tunnel_acceptor.clone().send((from, msg)).map(|_| ()));
                 f
             }
             _ => {
@@ -55,6 +76,8 @@ impl types::Distributor for Distributor {
 pub struct Router {
     ctx: Arc<Context>,
     netdb_engine: Option<netdb::Engine>,
+    tunnel_listener: Option<tunnel::Listener>,
+    tunnel_participant: Option<tunnel::Participant>,
 }
 
 pub struct Context {
@@ -85,9 +108,25 @@ impl Router {
             .take()
             .expect("Can only call start() once");
 
+        let tunnel_listener = self
+            .tunnel_listener
+            .take()
+            .expect("Can only call start() once");
+
+        let tunnel_participant = self
+            .tunnel_participant
+            .take()
+            .expect("Can only call start() once");
+
         lazy(|| {
             // Start the transport system
             spawn(comms_engine);
+
+            // Start the TunnelBuildRequest listener subsystem
+            spawn(tunnel_listener);
+
+            // Start the tunnel participant subsystem
+            spawn(tunnel_participant);
 
             // Start network database operations
             spawn(netdb_engine);

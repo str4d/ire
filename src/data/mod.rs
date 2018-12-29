@@ -316,7 +316,7 @@ impl RouterIdentity {
 #[derive(Clone)]
 pub struct RouterSecretKeys {
     pub rid: RouterIdentity,
-    private_key: PrivateKey,
+    pub private_key: PrivateKey,
     pub signing_private_key: SigningPrivateKey,
 }
 
