@@ -4,6 +4,8 @@ use super::{cert_and_padding_from_keys, Certificate};
 use crate::crypto::{PublicKey, Signature, SigningPublicKey};
 use crate::data::{Hash, I2PDate, TunnelId};
 
+pub(crate) mod frame;
+
 /// A Destination defines a particular endpoint to which messages can be
 /// directed for secure delivery.
 #[derive(Clone)]
