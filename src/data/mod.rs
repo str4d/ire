@@ -21,8 +21,12 @@ use crate::crypto::{
     SigningPublicKey,
 };
 
+pub mod dest;
+
 #[allow(needless_pass_by_value)]
 pub(crate) mod frame;
+
+pub use self::dest::{Destination, Lease, LeaseSet};
 
 lazy_static! {
     pub(crate) static ref OPT_NET_ID: I2PString = "netId".into();
@@ -355,67 +359,6 @@ impl RouterSecretKeys {
     pub fn to_file(&self, path: &str) -> io::Result<()> {
         let mut rid = File::create(path)?;
         rid.write(&self.to_bytes()).map(|_| ())
-    }
-}
-
-/// A Destination defines a particular endpoint to which messages can be
-/// directed for secure delivery.
-#[derive(Clone)]
-pub struct Destination {
-    public_key: PublicKey,
-    padding: Option<Vec<u8>>,
-    signing_key: SigningPublicKey,
-    certificate: Certificate,
-}
-
-impl Destination {
-    pub fn from_keys(public_key: PublicKey, signing_key: SigningPublicKey) -> Self {
-        let (certificate, padding) = cert_and_padding_from_keys(&public_key, &signing_key);
-        Destination {
-            public_key,
-            padding,
-            signing_key,
-            certificate,
-        }
-    }
-}
-
-/// Defines the authorization for a particular tunnel to receive messages
-/// targeting a Destination.
-#[derive(Clone)]
-pub struct Lease {
-    tunnel_gw: Hash,
-    tid: TunnelId,
-    end_date: I2PDate,
-}
-
-/// Contains all of the currently authorized Leases for a particular Destination,
-/// the PublicKey to which garlic messages can be encrypted, and then the
-/// SigningPublicKey that can be used to revoke this particular version of the
-/// structure.
-///
-/// The LeaseSet is one of the two structures stored in the network database
-/// (the other being RouterInfo), and is keyed under the SHA-256 of the contained
-/// Destination.
-#[derive(Clone)]
-pub struct LeaseSet {
-    pub dest: Destination,
-    enc_key: PublicKey,
-    sig_key: SigningPublicKey,
-    leases: Vec<Lease>,
-    sig: Signature,
-}
-
-impl LeaseSet {
-    pub fn is_current(&self) -> bool {
-        let expiry = self.leases.iter().fold(I2PDate(1), |expiry, lease| {
-            if lease.end_date > expiry {
-                lease.end_date
-            } else {
-                expiry
-            }
-        });
-        expiry < I2PDate::from_system_time(SystemTime::now())
     }
 }
 
