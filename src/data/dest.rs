@@ -1,3 +1,5 @@
+use cookie_factory::GenError;
+use std::iter::repeat;
 use std::time::SystemTime;
 
 use super::{cert_and_padding_from_keys, Certificate};
@@ -25,6 +27,30 @@ impl Destination {
             signing_key,
             certificate,
         }
+    }
+
+    pub fn to_bytes(&self) -> Vec<u8> {
+        let base_len = 387;
+        let mut buf = Vec::with_capacity(base_len);
+        buf.extend(repeat(0).take(base_len));
+        loop {
+            match frame::gen_destination((&mut buf[..], 0), self).map(|tup| tup.1) {
+                Ok(sz) => {
+                    buf.truncate(sz);
+                    return buf;
+                }
+                Err(e) => match e {
+                    GenError::BufferTooSmall(sz) => {
+                        buf.extend(repeat(0).take(sz - base_len));
+                    }
+                    _ => panic!("Couldn't serialize Destination"),
+                },
+            }
+        }
+    }
+
+    pub fn hash(&self) -> Hash {
+        Hash::digest(&self.to_bytes()[..])
     }
 }
 
@@ -64,5 +90,32 @@ impl LeaseSet {
             }
         });
         expiry < I2PDate::from_system_time(SystemTime::now())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Destination;
+    use crate::{
+        crypto::{PublicKey, SigType, SigningPublicKey},
+        data::{Certificate, Hash},
+    };
+
+    #[test]
+    fn dest_hash() {
+        let dest = Destination {
+            public_key: PublicKey([1; 256]),
+            padding: None,
+            signing_key: SigningPublicKey::from_bytes(SigType::DsaSha1, &[2; 128][..]).unwrap(),
+            certificate: Certificate::Null,
+        };
+        assert_eq!(
+            dest.hash(),
+            Hash([
+                0xb1, 0x79, 0x22, 0x5a, 0xdc, 0x23, 0xcf, 0xba, 0x8d, 0xa5, 0xdf, 0xfd, 0x0b, 0x24,
+                0xca, 0xc1, 0xfd, 0x7a, 0x69, 0xe0, 0x20, 0x35, 0x45, 0xf6, 0x3c, 0xd8, 0xe1, 0x4d,
+                0x10, 0x99, 0xc4, 0xd8
+            ])
+        );
     }
 }
