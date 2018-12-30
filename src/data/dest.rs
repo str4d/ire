@@ -3,7 +3,9 @@ use std::iter::repeat;
 use std::time::SystemTime;
 
 use super::{cert_and_padding_from_keys, Certificate};
-use crate::crypto::{PublicKey, Signature, SigningPublicKey};
+use crate::crypto::{
+    elgamal, PrivateKey, PublicKey, Signature, SigningPrivateKey, SigningPublicKey,
+};
 use crate::data::{Hash, I2PDate, TunnelId};
 
 pub(crate) mod frame;
@@ -51,6 +53,26 @@ impl Destination {
 
     pub fn hash(&self) -> Hash {
         Hash::digest(&self.to_bytes()[..])
+    }
+}
+
+/// Key material for a Destination.
+pub struct DestinationSecretKeys {
+    pub dest: Destination,
+    private_key: PrivateKey,
+    pub signing_private_key: SigningPrivateKey,
+}
+
+impl DestinationSecretKeys {
+    pub fn new() -> Self {
+        let (private_key, public_key) = elgamal::KeyPairGenerator::generate();
+        let signing_private_key = SigningPrivateKey::new();
+        let signing_key = SigningPublicKey::from_secret(&signing_private_key).unwrap();
+        DestinationSecretKeys {
+            dest: Destination::from_keys(public_key, signing_key),
+            private_key,
+            signing_private_key,
+        }
     }
 }
 
