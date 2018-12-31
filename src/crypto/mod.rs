@@ -222,6 +222,10 @@ impl PartialEq for PublicKey {
 pub struct PrivateKey(pub [u8; 256]);
 
 impl PrivateKey {
+    pub fn new_keypair() -> (Self, PublicKey) {
+        elgamal::KeyPairGenerator::generate()
+    }
+
     fn from_bytes(buf: &[u8; 256]) -> Self {
         let mut x = [0u8; 256];
         x.copy_from_slice(buf);
