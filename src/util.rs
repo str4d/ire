@@ -1,6 +1,7 @@
 //! Helper functions
 
 use cookie_factory::GenError;
+use core::fmt;
 use std::iter::repeat;
 
 pub fn serialize<S>(serializer: S) -> Vec<u8>
@@ -24,4 +25,25 @@ where
         }
     }
     buf
+}
+
+/// Format a byte array as a colon-delimited hex string.
+///
+/// Source: https://github.com/tendermint/signatory
+/// License: MIT / Apache 2.0
+pub(crate) fn fmt_colon_delimited_hex<B>(f: &mut fmt::Formatter, bytes: B) -> fmt::Result
+where
+    B: AsRef<[u8]>,
+{
+    let len = bytes.as_ref().len();
+
+    for (i, byte) in bytes.as_ref().iter().enumerate() {
+        write!(f, "{:02x}", byte)?;
+
+        if i != len - 1 {
+            write!(f, ":")?;
+        }
+    }
+
+    Ok(())
 }

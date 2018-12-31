@@ -48,7 +48,7 @@ pub fn gen_destination<'a>(
         gen_public_key(&dest.public_key)
             >> gen_cond!(
                 dest.padding.is_some(),
-                gen_slice!(dest.padding.as_ref().unwrap())
+                gen_slice!(dest.padding.as_ref().unwrap().0)
             )
             >> gen_truncated_signing_key(&dest.signing_key)
             >> gen_certificate(&dest.certificate)
