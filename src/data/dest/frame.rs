@@ -96,23 +96,31 @@ named!(pub lease_set<LeaseSet>,
             dest,
             enc_key,
             leases,
-            sig,
+            signature: Some(sig),
         })
     )
 );
+
+pub fn gen_lease_set_minus_sig<'a>(
+    input: (&'a mut [u8], usize),
+    ls: &LeaseSet,
+) -> Result<(&'a mut [u8], usize), GenError> {
+    do_gen!(
+        input,
+        gen_destination(&ls.dest)
+            >> gen_public_key(&ls.enc_key)
+            >> gen_signing_key(&ls.sig_key)
+            >> gen_be_u8!(ls.leases.len() as u8)
+            >> gen_many!(&ls.leases, gen_lease)
+    )
+}
 
 pub fn gen_lease_set<'a>(
     input: (&'a mut [u8], usize),
     ls: &LeaseSet,
 ) -> Result<(&'a mut [u8], usize), GenError> {
-    #[cfg_attr(rustfmt, rustfmt_skip)]
     do_gen!(
         input,
-        gen_destination(&ls.dest) >>
-        gen_public_key(&ls.enc_key) >>
-        gen_signing_key(&ls.sig_key) >>
-        gen_be_u8!(ls.leases.len() as u8) >>
-        gen_many!(&ls.leases, gen_lease) >>
-        gen_signature(&ls.sig)
+        gen_lease_set_minus_sig(ls) >> gen_signature(ls.signature.as_ref().unwrap())
     )
 }
