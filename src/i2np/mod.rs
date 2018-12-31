@@ -182,6 +182,15 @@ impl DatabaseStore {
             data: DatabaseStoreData::LS(ls),
         }
     }
+
+    pub fn from_ls2(ls2: LeaseSet2, reply: Option<ReplyPath>) -> Self {
+        DatabaseStore {
+            key: ls2.header.dest.hash(),
+            ds_type: constants::NETDB_STORE_LS2,
+            reply,
+            data: DatabaseStoreData::LS2(ls2),
+        }
+    }
 }
 
 #[cfg_attr(tarpaulin, skip)]
