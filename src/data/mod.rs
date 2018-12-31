@@ -3,7 +3,6 @@
 //! [Common structures specification](https://geti2p.net/spec/common-structures)
 
 use chrono::{DateTime, Utc};
-use cookie_factory::GenError;
 use nom::{self, Needed};
 use rand::{rngs::OsRng, Rng};
 use sha2::{Digest, Sha256};
@@ -11,7 +10,6 @@ use std::collections::HashMap;
 use std::fmt;
 use std::fs::File;
 use std::io::{self, Read, Write};
-use std::iter::repeat;
 use std::net::SocketAddr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -20,6 +18,7 @@ use crate::crypto::{
     self, elgamal, EncType, PrivateKey, PublicKey, SigType, Signature, SigningPrivateKey,
     SigningPublicKey,
 };
+use crate::util::serialize;
 
 pub mod dest;
 
@@ -279,23 +278,7 @@ impl RouterIdentity {
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
-        let base_len = 387;
-        let mut buf = Vec::with_capacity(base_len);
-        buf.extend(repeat(0).take(base_len));
-        loop {
-            match frame::gen_router_identity((&mut buf[..], 0), self).map(|tup| tup.1) {
-                Ok(sz) => {
-                    buf.truncate(sz);
-                    return buf;
-                }
-                Err(e) => match e {
-                    GenError::BufferTooSmall(sz) => {
-                        buf.extend(repeat(0).take(sz - base_len));
-                    }
-                    _ => panic!("Couldn't serialize RouterIdentity"),
-                },
-            }
-        }
+        serialize(|input| frame::gen_router_identity(input, self))
     }
 
     pub fn to_file(&self, path: &str) -> io::Result<()> {
@@ -337,23 +320,7 @@ impl RouterSecretKeys {
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
-        let base_len = 387;
-        let mut buf = Vec::with_capacity(base_len);
-        buf.extend(repeat(0).take(base_len));
-        loop {
-            match frame::gen_router_secret_keys((&mut buf[..], 0), self).map(|tup| tup.1) {
-                Ok(sz) => {
-                    buf.truncate(sz);
-                    return buf;
-                }
-                Err(e) => match e {
-                    GenError::BufferTooSmall(sz) => {
-                        buf.extend(repeat(0).take(sz - base_len));
-                    }
-                    _ => panic!("Couldn't serialize RouterSecretKeys"),
-                },
-            }
-        }
+        serialize(|input| frame::gen_router_secret_keys(input, self))
     }
 
     pub fn to_file(&self, path: &str) -> io::Result<()> {
@@ -488,23 +455,7 @@ impl RouterInfo {
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
-        let base_len = 435; // 387 + 4 + 1 + 1 + 2 + 40
-        let mut buf = Vec::with_capacity(base_len);
-        buf.extend(repeat(0).take(base_len));
-        loop {
-            match frame::gen_router_info((&mut buf[..], 0), self).map(|tup| tup.1) {
-                Ok(sz) => {
-                    buf.truncate(sz);
-                    return buf;
-                }
-                Err(e) => match e {
-                    GenError::BufferTooSmall(sz) => {
-                        buf.extend(repeat(0).take(sz - base_len));
-                    }
-                    e => panic!("Couldn't serialize RouterInfo: {:?}", e),
-                },
-            }
-        }
+        serialize(|input| frame::gen_router_info(input, self))
     }
 
     pub fn to_file(&self, path: &str) -> io::Result<()> {
@@ -513,24 +464,7 @@ impl RouterInfo {
     }
 
     fn signature_bytes(&self) -> Vec<u8> {
-        let base_len = 395; // 387 + 4 + 1 + 1 + 2
-        let mut buf = Vec::with_capacity(base_len);
-        buf.extend(repeat(0).take(base_len));
-        loop {
-            match frame::gen_router_info_minus_sig((&mut buf[..], 0), self).map(|tup| tup.1) {
-                Ok(sz) => {
-                    buf.truncate(sz);
-                    break;
-                }
-                Err(e) => match e {
-                    GenError::BufferTooSmall(sz) => {
-                        buf.extend(repeat(0).take(sz - base_len));
-                    }
-                    _ => panic!("Couldn't serialize RouterInfo signature message"),
-                },
-            }
-        }
-        buf
+        serialize(|input| frame::gen_router_info_minus_sig(input, self))
     }
 
     pub fn sign(&mut self, spk: &SigningPrivateKey) {

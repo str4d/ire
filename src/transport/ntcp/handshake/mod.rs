@@ -13,6 +13,7 @@ use super::{Codec, NTCP_MTU};
 use crate::crypto::{Aes256, Signature, SigningPrivateKey, AES_BLOCK_SIZE};
 use crate::data::{Hash, RouterIdentity};
 use crate::transport::DHSessionKeyBuilder;
+use crate::util::serialize;
 
 #[allow(double_parens)]
 #[allow(needless_pass_by_value)]
@@ -497,33 +498,16 @@ fn gen_session_confirm_sig_msg(state: &SharedHandshakeState, own_ri: bool) -> Ve
     } else {
         &state.ri_remote.as_ref().unwrap()
     };
-    let base_len = 907; // 2*256 + 387 + 2*4
-    let mut buf = Vec::with_capacity(base_len);
-    buf.extend(repeat(0).take(base_len));
-    loop {
-        match frame::gen_session_confirm_sig_msg(
-            (&mut buf[..], 0),
+    serialize(|input| {
+        frame::gen_session_confirm_sig_msg(
+            input,
             &state.dh_x,
             &state.dh_y,
             ri,
             state.ts_a,
             state.ts_b,
         )
-        .map(|tup| tup.1)
-        {
-            Ok(sz) => {
-                buf.truncate(sz);
-                break;
-            }
-            Err(e) => match e {
-                GenError::BufferTooSmall(sz) => {
-                    buf.extend(repeat(0).take(sz - base_len));
-                }
-                _ => panic!("Couldn't serialize Signature message (Own RI?): {:?}", e),
-            },
-        }
-    }
-    buf
+    })
 }
 
 struct SharedHandshakeState {

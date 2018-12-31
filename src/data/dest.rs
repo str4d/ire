@@ -1,5 +1,3 @@
-use cookie_factory::GenError;
-use std::iter::repeat;
 use std::time::SystemTime;
 
 use super::{cert_and_padding_from_keys, Certificate};
@@ -7,6 +5,7 @@ use crate::crypto::{
     elgamal, PrivateKey, PublicKey, Signature, SigningPrivateKey, SigningPublicKey,
 };
 use crate::data::{Hash, I2PDate, TunnelId};
+use crate::util::serialize;
 
 pub(crate) mod frame;
 
@@ -32,23 +31,7 @@ impl Destination {
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
-        let base_len = 387;
-        let mut buf = Vec::with_capacity(base_len);
-        buf.extend(repeat(0).take(base_len));
-        loop {
-            match frame::gen_destination((&mut buf[..], 0), self).map(|tup| tup.1) {
-                Ok(sz) => {
-                    buf.truncate(sz);
-                    return buf;
-                }
-                Err(e) => match e {
-                    GenError::BufferTooSmall(sz) => {
-                        buf.extend(repeat(0).take(sz - base_len));
-                    }
-                    _ => panic!("Couldn't serialize Destination"),
-                },
-            }
-        }
+        serialize(|input| frame::gen_destination(input, self))
     }
 
     pub fn hash(&self) -> Hash {
