@@ -83,6 +83,15 @@ impl DatabaseStore {
             data: DatabaseStoreData::RI(ri),
         }
     }
+
+    pub fn from_ls(ls: LeaseSet, reply: Option<ReplyPath>) -> Self {
+        DatabaseStore {
+            key: ls.dest.hash(),
+            ds_type: 1,
+            reply,
+            data: DatabaseStoreData::LS(ls),
+        }
+    }
 }
 
 #[cfg_attr(tarpaulin, skip)]
