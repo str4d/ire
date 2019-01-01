@@ -2,6 +2,7 @@
 
 use futures::{sync::mpsc, Async, AsyncSink, Poll, Sink, StartSend, Stream};
 use std::collections::HashMap;
+use std::fmt;
 use std::io;
 use std::sync::{Arc, Mutex};
 
@@ -83,7 +84,7 @@ pub(super) struct SessionContext<F> {
     state: SessionState<F>,
 }
 
-impl<F> SessionContext<F> {
+impl<F: fmt::Debug> SessionContext<F> {
     pub(super) fn new(hash: Hash, state: SessionState<F>, tx: SessionTx<F>) -> Self {
         info!("Session established with {}", hash);
 
@@ -94,6 +95,7 @@ impl<F> SessionContext<F> {
             // open, queue them now for sending.
             if let Some(msgs) = s.pending_sessions.remove(&hash) {
                 for msg in msgs {
+                    debug!("Sending pending message: {:?}", msg);
                     tx.unbounded_send(msg).unwrap();
                 }
             }

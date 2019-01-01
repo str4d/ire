@@ -112,18 +112,19 @@ pub enum Block {
 
 #[cfg_attr(tarpaulin, skip)]
 impl fmt::Debug for Block {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
-            Block::DateTime(ts) => format!("DateTime ({})", ts).fmt(formatter),
-            Block::Options(_) => "Options".fmt(formatter),
-            Block::RouterInfo(ref ri, ref flags) => format!(
+            Block::DateTime(ts) => write!(f, "DateTime ({})", ts),
+            Block::Options(_) => write!(f, "Options"),
+            Block::RouterInfo(ref ri, ref flags) => write!(
+                f,
                 "RouterInfo ({}, flood: {})",
                 ri.router_id.hash(),
                 flags.flood
-            )
-            .fmt(formatter),
-            Block::Message(_) => "I2NP message".fmt(formatter),
-            Block::Termination(_, rsn, _) => format!(
+            ),
+            Block::Message(ref msg) => write!(f, "I2NP message:\n{}", msg),
+            Block::Termination(_, rsn, _) => write!(
+                f,
                 "Termination (reason: {} - {})",
                 rsn,
                 match rsn {
@@ -147,11 +148,10 @@ impl fmt::Debug for Block {
                     17 => "banned",
                     _ => "unknown",
                 }
-            )
-            .fmt(formatter),
-            Block::Padding(size) => format!("Padding ({} bytes)", size).fmt(formatter),
+            ),
+            Block::Padding(size) => write!(f, "Padding ({} bytes)", size),
             Block::Unknown(blk, ref data) => {
-                format!("Unknown (type: {}, {} bytes)", blk, data.len()).fmt(formatter)
+                write!(f, "Unknown (type: {}, {} bytes)", blk, data.len())
             }
         }
     }

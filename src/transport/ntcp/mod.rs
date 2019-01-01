@@ -58,10 +58,10 @@ use std::fmt;
 
 #[cfg_attr(tarpaulin, skip)]
 impl fmt::Debug for Frame {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
-            Frame::Standard(_) => "Standard message".fmt(formatter),
-            Frame::TimeSync(ts) => format!("Timesync ({})", ts).fmt(formatter),
+            Frame::Standard(ref msg) => write!(f, "I2NP message:\n{}", msg),
+            Frame::TimeSync(ts) => write!(f, "Timesync ({})", ts),
         }
     }
 }
