@@ -3,7 +3,6 @@
 //! [Common structures specification](https://geti2p.net/spec/common-structures)
 
 use chrono::{DateTime, Utc};
-use cookie_factory::GenError;
 use nom::{self, Needed};
 use rand::{rngs::OsRng, Rng};
 use sha2::{Digest, Sha256};
@@ -11,7 +10,6 @@ use std::collections::HashMap;
 use std::fmt;
 use std::fs::File;
 use std::io::{self, Read, Write};
-use std::iter::repeat;
 use std::net::SocketAddr;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -20,9 +18,14 @@ use crate::crypto::{
     self, elgamal, EncType, PrivateKey, PublicKey, SigType, Signature, SigningPrivateKey,
     SigningPublicKey,
 };
+use crate::util::serialize;
+
+pub mod dest;
 
 #[allow(needless_pass_by_value)]
 pub(crate) mod frame;
+
+pub use self::dest::{Destination, Lease, LeaseSet};
 
 lazy_static! {
     pub(crate) static ref OPT_NET_ID: I2PString = "netId".into();
@@ -219,6 +222,33 @@ impl Certificate {
     }
 }
 
+fn cert_and_padding_from_keys(
+    _public_key: &PublicKey,
+    signing_key: &SigningPublicKey,
+) -> (Certificate, Option<Vec<u8>>) {
+    let certificate = match signing_key.sig_type() {
+        SigType::DsaSha1 => Certificate::Null,
+        SigType::Ed25519 => Certificate::Key(KeyCertificate {
+            sig_type: SigType::Ed25519,
+            enc_type: EncType::ElGamal2048,
+            sig_data: vec![],
+            enc_data: vec![],
+        }),
+        _ => panic!("Not implemented!"),
+    };
+    let padding = match signing_key.sig_type().pad_len(EncType::ElGamal2048) {
+        0 => None,
+        sz => {
+            let mut rng = OsRng::new().expect("should be able to construct RNG");
+            let mut padding = Vec::new();
+            padding.resize(sz, 0);
+            rng.fill(&mut padding[..]);
+            Some(padding)
+        }
+    };
+    (certificate, padding)
+}
+
 /// Defines the way to uniquely identify a particular router.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RouterIdentity {
@@ -238,26 +268,7 @@ impl RouterIdentity {
     }
 
     fn from_keys(public_key: PublicKey, signing_key: SigningPublicKey) -> Self {
-        let certificate = match signing_key.sig_type() {
-            SigType::DsaSha1 => Certificate::Null,
-            SigType::Ed25519 => Certificate::Key(KeyCertificate {
-                sig_type: SigType::Ed25519,
-                enc_type: EncType::ElGamal2048,
-                sig_data: vec![],
-                enc_data: vec![],
-            }),
-            _ => panic!("Not implemented!"),
-        };
-        let padding = match signing_key.sig_type().pad_len(EncType::ElGamal2048) {
-            0 => None,
-            sz => {
-                let mut rng = OsRng::new().expect("should be able to construct RNG");
-                let mut padding = Vec::new();
-                padding.resize(sz, 0);
-                rng.fill(&mut padding[..]);
-                Some(padding)
-            }
-        };
+        let (certificate, padding) = cert_and_padding_from_keys(&public_key, &signing_key);
         RouterIdentity {
             public_key,
             padding,
@@ -267,23 +278,7 @@ impl RouterIdentity {
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
-        let base_len = 387;
-        let mut buf = Vec::with_capacity(base_len);
-        buf.extend(repeat(0).take(base_len));
-        loop {
-            match frame::gen_router_identity((&mut buf[..], 0), self).map(|tup| tup.1) {
-                Ok(sz) => {
-                    buf.truncate(sz);
-                    return buf;
-                }
-                Err(e) => match e {
-                    GenError::BufferTooSmall(sz) => {
-                        buf.extend(repeat(0).take(sz - base_len));
-                    }
-                    _ => panic!("Couldn't serialize RouterIdentity"),
-                },
-            }
-        }
+        serialize(|input| frame::gen_router_identity(input, self))
     }
 
     pub fn to_file(&self, path: &str) -> io::Result<()> {
@@ -325,77 +320,12 @@ impl RouterSecretKeys {
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
-        let base_len = 387;
-        let mut buf = Vec::with_capacity(base_len);
-        buf.extend(repeat(0).take(base_len));
-        loop {
-            match frame::gen_router_secret_keys((&mut buf[..], 0), self).map(|tup| tup.1) {
-                Ok(sz) => {
-                    buf.truncate(sz);
-                    return buf;
-                }
-                Err(e) => match e {
-                    GenError::BufferTooSmall(sz) => {
-                        buf.extend(repeat(0).take(sz - base_len));
-                    }
-                    _ => panic!("Couldn't serialize RouterSecretKeys"),
-                },
-            }
-        }
+        serialize(|input| frame::gen_router_secret_keys(input, self))
     }
 
     pub fn to_file(&self, path: &str) -> io::Result<()> {
         let mut rid = File::create(path)?;
         rid.write(&self.to_bytes()).map(|_| ())
-    }
-}
-
-/// A Destination defines a particular endpoint to which messages can be
-/// directed for secure delivery.
-#[derive(Clone)]
-pub struct Destination {
-    public_key: PublicKey,
-    padding: Option<Vec<u8>>,
-    signing_key: SigningPublicKey,
-    certificate: Certificate,
-}
-
-/// Defines the authorization for a particular tunnel to receive messages
-/// targeting a Destination.
-#[derive(Clone)]
-pub struct Lease {
-    tunnel_gw: Hash,
-    tid: TunnelId,
-    end_date: I2PDate,
-}
-
-/// Contains all of the currently authorized Leases for a particular Destination,
-/// the PublicKey to which garlic messages can be encrypted, and then the
-/// SigningPublicKey that can be used to revoke this particular version of the
-/// structure.
-///
-/// The LeaseSet is one of the two structures stored in the network database
-/// (the other being RouterInfo), and is keyed under the SHA-256 of the contained
-/// Destination.
-#[derive(Clone)]
-pub struct LeaseSet {
-    pub dest: Destination,
-    enc_key: PublicKey,
-    sig_key: SigningPublicKey,
-    leases: Vec<Lease>,
-    sig: Signature,
-}
-
-impl LeaseSet {
-    pub fn is_current(&self) -> bool {
-        let expiry = self.leases.iter().fold(I2PDate(1), |expiry, lease| {
-            if lease.end_date > expiry {
-                lease.end_date
-            } else {
-                expiry
-            }
-        });
-        expiry < I2PDate::from_system_time(SystemTime::now())
     }
 }
 
@@ -525,23 +455,7 @@ impl RouterInfo {
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
-        let base_len = 435; // 387 + 4 + 1 + 1 + 2 + 40
-        let mut buf = Vec::with_capacity(base_len);
-        buf.extend(repeat(0).take(base_len));
-        loop {
-            match frame::gen_router_info((&mut buf[..], 0), self).map(|tup| tup.1) {
-                Ok(sz) => {
-                    buf.truncate(sz);
-                    return buf;
-                }
-                Err(e) => match e {
-                    GenError::BufferTooSmall(sz) => {
-                        buf.extend(repeat(0).take(sz - base_len));
-                    }
-                    e => panic!("Couldn't serialize RouterInfo: {:?}", e),
-                },
-            }
-        }
+        serialize(|input| frame::gen_router_info(input, self))
     }
 
     pub fn to_file(&self, path: &str) -> io::Result<()> {
@@ -550,24 +464,7 @@ impl RouterInfo {
     }
 
     fn signature_bytes(&self) -> Vec<u8> {
-        let base_len = 395; // 387 + 4 + 1 + 1 + 2
-        let mut buf = Vec::with_capacity(base_len);
-        buf.extend(repeat(0).take(base_len));
-        loop {
-            match frame::gen_router_info_minus_sig((&mut buf[..], 0), self).map(|tup| tup.1) {
-                Ok(sz) => {
-                    buf.truncate(sz);
-                    break;
-                }
-                Err(e) => match e {
-                    GenError::BufferTooSmall(sz) => {
-                        buf.extend(repeat(0).take(sz - base_len));
-                    }
-                    _ => panic!("Couldn't serialize RouterInfo signature message"),
-                },
-            }
-        }
-        buf
+        serialize(|input| frame::gen_router_info_minus_sig(input, self))
     }
 
     pub fn sign(&mut self, spk: &SigningPrivateKey) {

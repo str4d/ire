@@ -8,14 +8,13 @@
 //!
 //! [I2NP specification](https://geti2p.net/spec/i2np)
 
-use cookie_factory::GenError;
 use rand::{thread_rng, Rng};
 use std::fmt;
-use std::iter::repeat;
 use std::time::{Duration, SystemTime};
 
 use crate::crypto::SessionKey;
 use crate::data::{Certificate, Hash, I2PDate, LeaseSet, RouterInfo, SessionTag, TunnelId};
+use crate::util::serialize;
 
 #[allow(double_parens)]
 #[allow(needless_pass_by_value)]
@@ -81,6 +80,15 @@ impl DatabaseStore {
             ds_type: 0,
             reply,
             data: DatabaseStoreData::RI(ri),
+        }
+    }
+
+    pub fn from_ls(ls: LeaseSet, reply: Option<ReplyPath>) -> Self {
+        DatabaseStore {
+            key: ls.dest.hash(),
+            ds_type: 1,
+            reply,
+            data: DatabaseStoreData::LS(ls),
         }
     }
 }
@@ -349,30 +357,6 @@ impl PartialEq for Message {
     }
 }
 
-macro_rules! measure_size {
-    ($gen_item:ident, $item:expr) => {{
-        let size;
-        let mut buf_len = 1024;
-        let mut buf = vec![0; buf_len];
-        loop {
-            match frame::$gen_item((&mut buf, 0), $item) {
-                Ok((_, sz)) => {
-                    size = sz;
-                    break;
-                }
-                Err(e) => match e {
-                    GenError::BufferTooSmall(sz) => {
-                        buf.extend(repeat(0).take(sz - buf_len));
-                        buf_len = buf.len();
-                    }
-                    e => panic!("Couldn't serialize Message: {:?}", e),
-                },
-            }
-        }
-        size
-    }};
-}
-
 impl Message {
     pub fn from_payload(payload: MessagePayload) -> Self {
         Message {
@@ -393,11 +377,11 @@ impl Message {
     }
 
     pub fn size(&self) -> usize {
-        measure_size!(gen_message, self)
+        serialize(|input| frame::gen_message(input, self)).len()
     }
 
     pub fn ntcp2_size(&self) -> usize {
-        measure_size!(gen_ntcp2_message, self)
+        serialize(|input| frame::gen_ntcp2_message(input, self)).len()
     }
 }
 
