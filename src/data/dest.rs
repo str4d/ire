@@ -1,6 +1,6 @@
 use std::time::SystemTime;
 
-use super::{cert_and_padding_from_keys, Certificate};
+use super::{cert_and_padding_from_keys, Certificate, Padding};
 use crate::crypto::{
     self, elgamal, PrivateKey, PublicKey, Signature, SigningPrivateKey, SigningPublicKey,
 };
@@ -14,7 +14,7 @@ pub(crate) mod frame;
 #[derive(Clone)]
 pub struct Destination {
     pub(super) public_key: PublicKey,
-    pub(super) padding: Option<Vec<u8>>,
+    pub(super) padding: Option<Padding>,
     pub(super) signing_key: SigningPublicKey,
     pub(super) certificate: Certificate,
 }

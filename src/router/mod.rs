@@ -5,6 +5,7 @@ use futures::{
 };
 use std::sync::{Arc, RwLock};
 use tokio_executor::spawn;
+use tokio_io::IoFuture;
 
 use crate::data::{Hash, RouterInfo, RouterSecretKeys};
 use crate::i2np::{Message, MessagePayload};
@@ -66,6 +67,13 @@ pub struct Context {
 }
 
 impl Router {
+    /// Returns a handle that can be used to interact with the router.
+    pub fn handle(&self) -> Handle {
+        Handle {
+            ctx: self.ctx.clone(),
+        }
+    }
+
     /// Start the router.
     ///
     /// This returns a Future that must be polled in order to drive the Router.
@@ -91,5 +99,24 @@ impl Router {
 
             Ok(())
         })
+    }
+}
+
+#[derive(Clone)]
+pub struct Handle {
+    ctx: Arc<Context>,
+}
+
+impl Handle {
+    pub fn hash(&self) -> Hash {
+        self.ctx.keys.rid.hash()
+    }
+
+    pub fn send(
+        &self,
+        peer: RouterInfo,
+        msg: Message,
+    ) -> Result<IoFuture<()>, (RouterInfo, Message)> {
+        self.ctx.comms.read().unwrap().send(peer, msg)
     }
 }

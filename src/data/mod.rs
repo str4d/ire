@@ -18,7 +18,7 @@ use crate::crypto::{
     self, elgamal, EncType, PrivateKey, PublicKey, SigType, Signature, SigningPrivateKey,
     SigningPublicKey,
 };
-use crate::util::serialize;
+use crate::util::{fmt_colon_delimited_hex, serialize};
 
 pub mod dest;
 
@@ -78,7 +78,7 @@ impl<T> From<nom::Err<T>> for ReadError {
 //
 
 /// The SHA-256 hash of some data.
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Eq, Hash, PartialEq)]
 pub struct Hash(pub [u8; 32]);
 
 impl Hash {
@@ -99,6 +99,15 @@ impl Hash {
         for i in 0..32 {
             self.0[i] ^= other.0[i];
         }
+    }
+}
+
+#[cfg_attr(tarpaulin, skip)]
+impl fmt::Debug for Hash {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(f, "Hash(")?;
+        fmt_colon_delimited_hex(f, &self.0[..])?;
+        write!(f, ")")
     }
 }
 
@@ -222,10 +231,22 @@ impl Certificate {
     }
 }
 
+#[derive(Clone, PartialEq)]
+pub(crate) struct Padding(Vec<u8>);
+
+#[cfg_attr(tarpaulin, skip)]
+impl fmt::Debug for Padding {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(f, "Padding(")?;
+        fmt_colon_delimited_hex(f, &self.0[..])?;
+        write!(f, ")")
+    }
+}
+
 fn cert_and_padding_from_keys(
     _public_key: &PublicKey,
     signing_key: &SigningPublicKey,
-) -> (Certificate, Option<Vec<u8>>) {
+) -> (Certificate, Option<Padding>) {
     let certificate = match signing_key.sig_type() {
         SigType::DsaSha1 => Certificate::Null,
         SigType::Ed25519 => Certificate::Key(KeyCertificate {
@@ -243,7 +264,7 @@ fn cert_and_padding_from_keys(
             let mut padding = Vec::new();
             padding.resize(sz, 0);
             rng.fill(&mut padding[..]);
-            Some(padding)
+            Some(Padding(padding))
         }
     };
     (certificate, padding)
@@ -253,7 +274,7 @@ fn cert_and_padding_from_keys(
 #[derive(Clone, Debug, PartialEq)]
 pub struct RouterIdentity {
     public_key: PublicKey,
-    padding: Option<Vec<u8>>,
+    padding: Option<Padding>,
     pub signing_key: SigningPublicKey,
     pub certificate: Certificate,
 }

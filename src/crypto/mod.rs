@@ -18,6 +18,7 @@ use std::fmt;
 use untrusted;
 
 use crate::constants;
+use crate::util::fmt_colon_delimited_hex;
 
 #[allow(needless_pass_by_value)]
 pub(crate) mod frame;
@@ -204,8 +205,10 @@ impl Clone for PublicKey {
 
 #[cfg_attr(tarpaulin, skip)]
 impl fmt::Debug for PublicKey {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        self.0[..].fmt(formatter)
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(f, "PublicKey(")?;
+        fmt_colon_delimited_hex(f, &self.0[..])?;
+        write!(f, ")")
     }
 }
 
@@ -222,6 +225,10 @@ impl PartialEq for PublicKey {
 pub struct PrivateKey(pub [u8; 256]);
 
 impl PrivateKey {
+    pub fn new_keypair() -> (Self, PublicKey) {
+        elgamal::KeyPairGenerator::generate()
+    }
+
     fn from_bytes(buf: &[u8; 256]) -> Self {
         let mut x = [0u8; 256];
         x.copy_from_slice(buf);
@@ -237,8 +244,10 @@ impl Clone for PrivateKey {
 
 #[cfg_attr(tarpaulin, skip)]
 impl fmt::Debug for PrivateKey {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
-        self.0[..].fmt(formatter)
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(f, "PrivateKey(")?;
+        fmt_colon_delimited_hex(f, &self.0[..])?;
+        write!(f, ")")
     }
 }
 
@@ -415,11 +424,36 @@ impl Clone for SigningPrivateKey {
 }
 
 /// The public component of an offline signature keypair.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub enum OfflineSigningPublicKey {
     Rsa2048Sha256(Vec<u8>),
     Rsa3072Sha384(Vec<u8>),
     Rsa4096Sha512(Vec<u8>),
+}
+
+#[cfg_attr(tarpaulin, skip)]
+impl fmt::Debug for OfflineSigningPublicKey {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
+        write!(f, "OfflineSigningPublicKey(")?;
+        match self {
+            OfflineSigningPublicKey::Rsa2048Sha256(key) => {
+                write!(f, "Rsa2048Sha256(")?;
+                fmt_colon_delimited_hex(f, key)?;
+                write!(f, ")")?;
+            }
+            OfflineSigningPublicKey::Rsa3072Sha384(key) => {
+                write!(f, "Rsa3072Sha384(")?;
+                fmt_colon_delimited_hex(f, key)?;
+                write!(f, ")")?;
+            }
+            OfflineSigningPublicKey::Rsa4096Sha512(key) => {
+                write!(f, "Rsa4096Sha512(")?;
+                fmt_colon_delimited_hex(f, key)?;
+                write!(f, ")")?;
+            }
+        };
+        write!(f, ")")
+    }
 }
 
 impl OfflineSigningPublicKey {

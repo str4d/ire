@@ -147,12 +147,12 @@ pub(crate) fn keycert_padding<'a>(
     input: &'a [u8],
     base_data: &[u8; 128],
     cert: &Certificate,
-) -> IResult<&'a [u8], Option<Vec<u8>>> {
+) -> IResult<&'a [u8], Option<Padding>> {
     let spk = match *cert {
         Certificate::Key(ref kc) => {
             let pad_len = kc.sig_type.pad_len(kc.enc_type);
             if pad_len > 0 {
-                Some(Vec::from(&base_data[0..pad_len]))
+                Some(Padding(Vec::from(&base_data[0..pad_len])))
             } else {
                 None
             }
@@ -300,7 +300,7 @@ pub fn gen_router_identity<'a>(
         gen_public_key(&rid.public_key) >>
         gen_cond!(
             rid.padding.is_some(),
-            gen_slice!(rid.padding.as_ref().unwrap())
+            gen_slice!(rid.padding.as_ref().unwrap().0)
         ) >>
         gen_truncated_signing_key(&rid.signing_key) >>
         gen_certificate(&rid.certificate)
