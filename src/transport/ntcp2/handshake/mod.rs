@@ -114,10 +114,10 @@ where
                     // SessionRequest
                     let (padlen, sclen, _ts_a) = match frame::session_request(&buf) {
                         Err(e) => {
-                            return io_err!(Other, format!("SessionRequest parse error: {:?}", e))
+                            return io_err!(Other, format!("SessionRequest parse error: {:?}", e));
                         }
                         Ok((_, (ver, _, _, _))) if ver != 2 => {
-                            return io_err!(InvalidData, "Unsupported version")
+                            return io_err!(InvalidData, "Unsupported version");
                         }
                         Ok((_, (_, padlen, sclen, ts_a))) => {
                             (padlen as usize, sclen as usize, ts_a)
@@ -156,7 +156,7 @@ where
                             GenError::InvalidOffset
                             | GenError::CustomError(_)
                             | GenError::NotYetImplemented => {
-                                return io_err!(InvalidData, "could not generate")
+                                return io_err!(InvalidData, "could not generate");
                             }
                         },
                     };
@@ -192,10 +192,10 @@ where
                             return io_err!(
                                 Other,
                                 format!("received incomplete SessionConfirmed, needed: {:?}", n)
-                            )
+                            );
                         }
                         Err(Err::Error(e)) | Err(Err::Failure(e)) => {
-                            return io_err!(Other, format!("SessionConfirmed parse error: {:?}", e))
+                            return io_err!(Other, format!("SessionConfirmed parse error: {:?}", e));
                         }
                         Ok((_, frames)) => frames,
                     };
@@ -346,7 +346,7 @@ where
                         "SessionConfirmed message ({}) larger than MTU ({})",
                         sz,
                         NTCP2_MTU - 16
-                    ))
+                    ));
                 }
                 GenError::InvalidOffset
                 | GenError::CustomError(_)
@@ -419,7 +419,7 @@ where
                             GenError::InvalidOffset
                             | GenError::CustomError(_)
                             | GenError::NotYetImplemented => {
-                                return io_err!(InvalidData, "could not generate")
+                                return io_err!(InvalidData, "could not generate");
                             }
                         },
                     };
@@ -453,7 +453,7 @@ where
                     // SessionCreated
                     let (padlen, _ts_b) = match frame::session_created(&buf) {
                         Err(e) => {
-                            return io_err!(Other, format!("SessionCreated parse error: {:?}", e))
+                            return io_err!(Other, format!("SessionCreated parse error: {:?}", e));
                         }
                         Ok((_, (padlen, ts_b))) => (padlen as usize, ts_b),
                     };
