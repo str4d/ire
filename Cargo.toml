@@ -25,7 +25,7 @@ data-encoding = "2.1"
 env_logger = { version = "0.6", optional = true }
 flate2 = "1.0"
 futures = "0.1"
-i2p_ring = { git = "https://github.com/str4d/ring.git", rev = "b389a90d0e1097c6703b241dc5c67b9b1d699551" }
+i2p_ring = { git = "https://github.com/str4d/ring.git", rev = "7fe5a141201e4931ea2bbcd7eb3302fbf22867e9" }
 i2p_snow = "0.5.1"
 itertools = "0.8"
 lazy_static = "1.0"
@@ -35,12 +35,12 @@ nom = "4.0"
 num-bigint = { version = "0.2", features = ["rand"] }
 num-traits = "0.2"
 rand = "0.6"
-ring = "0.13"
+ring = "0.14"
 sha1 = "0.6"
 sha2 = "0.8"
-signatory = { version = "0.10", features = ["ecdsa", "ed25519"] }
-signatory-dalek = "0.10"
-signatory-ring = "0.10"
+signatory = { version = "0.11", features = ["ecdsa", "ed25519"] }
+signatory-dalek = "0.11"
+signatory-ring = "0.11"
 siphasher = "0.2"
 tokio = { version = "0.1", optional = true }
 tokio-codec = "0.1"
