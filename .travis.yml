@@ -7,12 +7,11 @@ cache: cargo
 rust:
   - stable
   - beta
-  - nightly-2018-12-31
+  - nightly
 
 matrix:
   allow_failures:
-    - rust: nightly-2018-12-31
-  fast_finish: true
+    - rust: nightly
 
 env:
   global:
@@ -33,12 +32,12 @@ before_script:
   - cargo install-update -a # update outdated cached binaries
 
 before_cache: |
-  if [[ "$TRAVIS_RUST_VERSION" == nightly-2018-12-31 ]]; then
+  if [[ "$TRAVIS_RUST_VERSION" == nightly ]]; then
     RUSTFLAGS="--cfg procmacro2_semver_exempt" cargo install cargo-tarpaulin
   fi
 
 after_success: |
-  if [[ "$TRAVIS_RUST_VERSION" == nightly-2018-12-31 ]]; then
+  if [[ "$TRAVIS_RUST_VERSION" == nightly ]]; then
     cargo tarpaulin --timeout 180 --out Xml
     bash <(curl -s https://codecov.io/bash)
   fi
