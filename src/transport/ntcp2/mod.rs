@@ -206,10 +206,10 @@ impl Decoder for Codec {
                         return io_err!(
                             Other,
                             format!("received incomplete message, needed: {:?}", n)
-                        )
+                        );
                     }
                     Err(Err::Error(e)) | Err(Err::Failure(e)) => {
-                        return io_err!(Other, format!("parse error: {:?}", e))
+                        return io_err!(Other, format!("parse error: {:?}", e));
                     }
                     Ok((_, frame)) => frame,
                 };
@@ -870,7 +870,7 @@ mod tests {
                     return Err(io::Error::new(
                         io::ErrorKind::Other,
                         format!("parse error: {:?}", e),
-                    ))
+                    ));
                 }
                 Ok((i, frame)) => (buf.offset(i), frame),
             };

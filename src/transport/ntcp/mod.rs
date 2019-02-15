@@ -93,7 +93,7 @@ impl Decoder for Codec {
                 return Err(io::Error::new(
                     io::ErrorKind::Other,
                     format!("parse error: {:?}", e),
-                ))
+                ));
             }
             Ok((i, frame)) => (buf.offset(i), frame),
         };
@@ -281,7 +281,7 @@ where
             match try_ready!(self.upstream.poll()) {
                 Some(frame) => match frame {
                     Frame::Standard(msg) => {
-                        return Ok(Async::Ready(Some((self.ctx.hash.clone(), msg))))
+                        return Ok(Async::Ready(Some((self.ctx.hash.clone(), msg))));
                     }
                     frame => {
                         // TODO: Do something
@@ -428,7 +428,7 @@ fn connect<D: Distributor>(
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "No valid NTCP addresses",
-            ))
+            ));
         }
     };
 
@@ -549,7 +549,7 @@ mod tests {
                     return Err(io::Error::new(
                         io::ErrorKind::Other,
                         format!("parse error: {:?}", e),
-                    ))
+                    ));
                 }
                 Ok((i, frame)) => (buf.offset(i), frame),
             };

@@ -5,8 +5,10 @@ use block_modes::{block_padding::ZeroPadding, BlockMode, BlockModeIv, Cbc};
 use i2p_ring::signature as ring_signature;
 use nom::Err;
 use signatory::{
-    curve::{NistP256, NistP384, WeierstrassCurve},
-    ecdsa::FixedSignature,
+    ecdsa::{
+        curve::{NistP256, NistP384, WeierstrassCurve},
+        FixedSignature,
+    },
     ed25519,
     generic_array::{typenum::Unsigned, GenericArray as SignatoryGenericArray},
     public_key, sign, verify, verify_sha256, verify_sha384, EcdsaPublicKey, Ed25519PublicKey,

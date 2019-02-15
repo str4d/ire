@@ -145,7 +145,7 @@ impl Decoder for InboundHandshakeCodec {
                     return Err(io::Error::new(
                         io::ErrorKind::Other,
                         format!("parse error: {:?}", e),
-                    ))
+                    ));
                 }
                 Ok((i, frame)) => (buf.offset(i), frame),
             }
@@ -229,7 +229,7 @@ impl Encoder for InboundHandshakeCodec {
                                 return Err(io::Error::new(
                                     io::ErrorKind::InvalidData,
                                     "invalid serialization",
-                                ))
+                                ));
                             }
                         }
                     }
@@ -240,7 +240,7 @@ impl Encoder for InboundHandshakeCodec {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
                     "incorrect state for sending",
-                ))
+                ));
             }
         };
 
@@ -320,7 +320,7 @@ impl Decoder for OutboundHandshakeCodec {
                             return Err(io::Error::new(
                                 io::ErrorKind::Other,
                                 format!("parse error: {:?}", e),
-                            ))
+                            ));
                         }
                         Ok((i, mut sce)) => {
                             // Set up cryptor
@@ -340,13 +340,13 @@ impl Decoder for OutboundHandshakeCodec {
                                             return Err(io::Error::new(
                                                 io::ErrorKind::Other,
                                                 "incomplete parse error".to_string(),
-                                            ))
+                                            ));
                                         }
                                         Err(Err::Error(e)) | Err(Err::Failure(e)) => {
                                             return Err(io::Error::new(
                                                 io::ErrorKind::Other,
                                                 format!("parse error: {:?}", e),
-                                            ))
+                                            ));
                                         }
                                         Ok((_, scd)) => Ok((
                                             i,
@@ -366,7 +366,7 @@ impl Decoder for OutboundHandshakeCodec {
                                             sz,
                                             sce.1.len()
                                         ),
-                                    ))
+                                    ));
                                 }
                                 None => return Ok(None),
                             }
@@ -395,7 +395,7 @@ impl Decoder for OutboundHandshakeCodec {
                     return Err(io::Error::new(
                         io::ErrorKind::Other,
                         format!("parse error: {:?}", e),
-                    ))
+                    ));
                 }
                 Ok((i, frame)) => (buf.offset(i), frame),
             }
@@ -447,7 +447,7 @@ impl Encoder for OutboundHandshakeCodec {
                                 return Err(io::Error::new(
                                     io::ErrorKind::InvalidData,
                                     "invalid serialization",
-                                ))
+                                ));
                             }
                         }
                     }
@@ -458,7 +458,7 @@ impl Encoder for OutboundHandshakeCodec {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
                     "incorrect state for sending",
-                ))
+                ));
             }
         };
 
@@ -668,7 +668,7 @@ where
                             return Err(io::Error::new(
                                 io::ErrorKind::Other,
                                 "Could not create SessionConfirmB signature",
-                            ))
+                            ));
                         }
                     };
                     let scb = HandshakeFrame::SessionConfirmB(SessionConfirmB { sig });
@@ -814,7 +814,7 @@ where
                             return Err(io::Error::new(
                                 io::ErrorKind::Other,
                                 "Could not create SessionConfirmA signature",
-                            ))
+                            ));
                         }
                     };
                     let sca = HandshakeFrame::SessionConfirmA(SessionConfirmA {
