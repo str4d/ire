@@ -576,7 +576,7 @@ dependencies = [
  "signatory 0.11.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "signatory-dalek 0.11.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "signatory-ring 0.11.0 (registry+https://github.com/rust-lang/crates.io-index)",
- "siphasher 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
+ "siphasher 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "tempfile 3.0.6 (registry+https://github.com/rust-lang/crates.io-index)",
  "tokio 0.1.15 (registry+https://github.com/rust-lang/crates.io-index)",
  "tokio-codec 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -1226,7 +1226,7 @@ dependencies = [
 
 [[package]]
 name = "siphasher"
-version = "0.2.3"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
@@ -1818,7 +1818,7 @@ dependencies = [
 "checksum signatory 0.11.0 (registry+https://github.com/rust-lang/crates.io-index)" = "b2edc08ebe757a7b45352fa63c75c107fb569cc281779b0db0f8d6a384eaddd8"
 "checksum signatory-dalek 0.11.0 (registry+https://github.com/rust-lang/crates.io-index)" = "d9b5ed7678eaeb98cb23e1efdb5e961021b02d3bd9f8bab4d4e30c53ebb3dd50"
 "checksum signatory-ring 0.11.0 (registry+https://github.com/rust-lang/crates.io-index)" = "b1fe1646f9b7d9ff24158c1da5a9dd1fab6fcfddc9bef2c57fe017bd97b0b904"
-"checksum siphasher 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)" = "0b8de496cf83d4ed58b6be86c3a275b8602f6ffe98d3024a869e124147a9a3ac"
+"checksum siphasher 0.3.0 (registry+https://github.com/rust-lang/crates.io-index)" = "9913c75df657d84a03fa689c016b0bb2863ff0b497b26a8d6e9703f8d5df03a8"
 "checksum slab 0.4.2 (registry+https://github.com/rust-lang/crates.io-index)" = "c111b5bd5695e56cffe5129854aa230b39c93a305372fdbb2668ca2394eea9f8"
 "checksum smallvec 0.6.8 (registry+https://github.com/rust-lang/crates.io-index)" = "88aea073965ab29f6edb5493faf96ad662fb18aa9eeb186a3b7057951605ed15"
 "checksum spin 0.5.0 (registry+https://github.com/rust-lang/crates.io-index)" = "44363f6f51401c34e7be73db0db371c04705d35efbe9f7d6082e03a921a32c55"
