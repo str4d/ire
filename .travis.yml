@@ -28,8 +28,14 @@ addons:
 
 before_script:
   - export PATH=$HOME/.cargo/bin:$PATH
+  - rustup component add rustfmt
   - cargo install cargo-update || echo "cargo-update already installed"
   - cargo install-update -a # update outdated cached binaries
+
+script:
+  - cargo fmt -- --check
+  - cargo build --verbose --release
+  - cargo test --verbose --release
 
 before_cache: |
   if [[ "$TRAVIS_RUST_VERSION" == nightly ]]; then

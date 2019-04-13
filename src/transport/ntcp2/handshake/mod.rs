@@ -195,7 +195,10 @@ where
                             );
                         }
                         Err(Err::Error(e)) | Err(Err::Failure(e)) => {
-                            return io_err!(Other, format!("SessionConfirmed parse error: {:?}", e));
+                            return io_err!(
+                                Other,
+                                format!("SessionConfirmed parse error: {:?}", e)
+                            );
                         }
                         Ok((_, frames)) => frames,
                     };
