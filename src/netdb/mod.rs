@@ -24,6 +24,7 @@ use crate::router::{
     Context,
 };
 
+pub mod client;
 mod lookup;
 pub mod reseed;
 
@@ -132,6 +133,39 @@ impl Future for MessageHandler {
             } else {
                 // ib_rx.poll() returned None, so we are done
                 return Ok(Async::Ready(()));
+            }
+        }
+    }
+}
+
+pub struct ClientHandler {
+    netdb: Arc<RwLock<dyn NetworkDatabase>>,
+    ctx: Arc<Context>,
+    client_rx: mpsc::UnboundedReceiver<client::Query>,
+}
+
+impl ClientHandler {
+    pub fn new(
+        netdb: Arc<RwLock<dyn NetworkDatabase>>,
+        ctx: Arc<Context>,
+        client_rx: mpsc::UnboundedReceiver<client::Query>,
+    ) -> Self {
+        ClientHandler {
+            netdb,
+            ctx,
+            client_rx,
+        }
+    }
+}
+
+impl Future for ClientHandler {
+    type Item = ();
+    type Error = ();
+
+    fn poll(&mut self) -> Poll<(), ()> {
+        loop {
+            if let Some(query) = try_ready!(self.client_rx.poll()) {
+                query.handle(&self.netdb, &self.ctx);
             }
         }
     }
