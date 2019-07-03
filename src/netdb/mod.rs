@@ -402,9 +402,9 @@ impl NetworkDatabase for LocalNetworkDatabase {
         key: &Hash,
         timeout_ms: u64,
         _from_local_dest: Option<Hash>,
-    ) -> Box<dyn Future<Item = LeaseSet, Error = LookupError>> {
+    ) -> Box<dyn Future<Item = LeaseSet, Error = LookupError> + Send> {
         // First look for it locally, either available or pending
-        let local: Option<Box<dyn Future<Item = LeaseSet, Error = LookupError>>> =
+        let local: Option<Box<dyn Future<Item = LeaseSet, Error = LookupError> + Send>> =
             match self.ls_ds.get(key) {
                 Some(ls) => Some(Box::new(future::ok(ls.clone()))),
                 None => match self.pending_ls.get_mut(key) {

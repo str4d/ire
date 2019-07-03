@@ -118,7 +118,7 @@ pub trait NetworkDatabase: Send + Sync {
         key: &Hash,
         timeout_ms: u64,
         from_local_dest: Option<Hash>,
-    ) -> Box<dyn Future<Item = LeaseSet, Error = LookupError>>;
+    ) -> Box<dyn Future<Item = LeaseSet, Error = LookupError> + Send>;
 
     /// Stores a RouterInfo locally.
     ///
