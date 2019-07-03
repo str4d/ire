@@ -173,6 +173,7 @@ impl Future for ClientHandler {
 
 /// Performs network database maintenance operations.
 struct Engine {
+    netdb: Arc<RwLock<dyn NetworkDatabase>>,
     ctx: Arc<Context>,
     register_pending: PendingTx,
     expire_ri_timer: Delay,
@@ -181,8 +182,13 @@ struct Engine {
 }
 
 impl Engine {
-    fn new(ctx: Arc<Context>, register_pending: PendingTx) -> Self {
+    fn new(
+        netdb: Arc<RwLock<dyn NetworkDatabase>>,
+        ctx: Arc<Context>,
+        register_pending: PendingTx,
+    ) -> Self {
         Engine {
+            netdb,
             ctx,
             register_pending,
             expire_ri_timer: sleep(Duration::from_secs(EXPIRE_RI_INTERVAL)),
@@ -204,9 +210,9 @@ impl Engine {
             .unwrap()
             .get_bool(config::RESEED_ENABLE)
             .unwrap();
-        if enabled && self.ctx.netdb.read().unwrap().known_routers() < MINIMUM_ROUTERS {
+        if enabled && self.netdb.read().unwrap().known_routers() < MINIMUM_ROUTERS {
             // Reseed "synchronously" within the engine, as we can't do much without peers
-            Box::new(reseed::HttpsReseeder::new(self.ctx.netdb.clone()).and_then(|()| future::ok(self)))
+            Box::new(reseed::HttpsReseeder::new(self.netdb.clone()).and_then(|()| future::ok(self)))
         } else {
             Box::new(future::ok(self))
         }
@@ -215,9 +221,8 @@ impl Engine {
     fn expire_router_infos(mut self) -> Box<dyn Future<Item = Self, Error = ()> + Send> {
         if let Ok(Async::Ready(())) = self.expire_ri_timer.poll() {
             // Expire RouterInfos
-            if self.ctx.netdb.read().unwrap().known_routers() >= KEEP_ROUTERS {
-                self.ctx
-                    .netdb
+            if self.netdb.read().unwrap().known_routers() >= KEEP_ROUTERS {
+                self.netdb
                     .write()
                     .unwrap()
                     .expire_router_infos(Some(self.ctx.clone()));
@@ -231,7 +236,7 @@ impl Engine {
     fn expire_lease_sets(mut self) -> Box<dyn Future<Item = Self, Error = ()> + Send> {
         if let Ok(Async::Ready(())) = self.expire_ls_timer.poll() {
             // Expire LeaseSets
-            self.ctx.netdb.write().unwrap().expire_lease_sets();
+            self.netdb.write().unwrap().expire_lease_sets();
             // Reset timer
             self.expire_ls_timer = sleep(Duration::from_secs(EXPIRE_LS_INTERVAL));
         }
@@ -240,7 +245,7 @@ impl Engine {
 
     fn explore(mut self) -> Box<dyn Future<Item = Self, Error = ()> + Send> {
         if let Ok(Async::Ready(())) = self.explore_timer.poll() {
-            let netdb = self.ctx.netdb.read().unwrap();
+            let netdb = self.netdb.read().unwrap();
             debug!("Known routers before exploring: {}", netdb.known_routers());
 
             // Pick a random key to search for
@@ -287,11 +292,12 @@ impl Engine {
 }
 
 pub fn netdb_engine(
+    netdb: Arc<RwLock<dyn NetworkDatabase>>,
     ctx: Arc<Context>,
     register_pending: PendingTx,
 ) -> Box<dyn Future<Item = (), Error = ()> + Send> {
     Box::new(future::loop_fn(
-        Engine::new(ctx, register_pending),
+        Engine::new(netdb, ctx, register_pending),
         |engine| {
             engine
                 .start_cycle()

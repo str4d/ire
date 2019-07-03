@@ -5,12 +5,11 @@ use std::fs;
 use std::io;
 use std::sync::{Arc, RwLock};
 
-use super::{
-    types::{CommSystem, NetworkDatabase},
-    Context, Distributor, Router,
-};
+use super::{types::CommSystem, Context, Distributor, Router};
 use crate::data::{ReadError, RouterInfo, RouterSecretKeys};
-use crate::netdb::{LocalNetworkDatabase, MessageHandler};
+use crate::netdb::{
+    client::Client as NetDbClient, ClientHandler, LocalNetworkDatabase, MessageHandler,
+};
 use crate::router::config;
 use crate::transport;
 
@@ -47,7 +46,6 @@ pub struct Builder {
     cfg_file: Option<String>,
     keys: Option<RouterSecretKeys>,
     ri_file: Option<String>,
-    netdb: Option<Arc<RwLock<dyn NetworkDatabase>>>,
     comms: Option<Arc<RwLock<dyn CommSystem>>>,
 }
 
@@ -58,7 +56,6 @@ impl Builder {
             cfg_file: None,
             keys: None,
             ri_file: None,
-            netdb: None,
             comms: None,
         }
     }
@@ -75,11 +72,6 @@ impl Builder {
 
     pub fn router_info_file(mut self, ri_file: String) -> Self {
         self.ri_file = Some(ri_file);
-        self
-    }
-
-    pub fn network_database(mut self, netdb: Arc<RwLock<dyn NetworkDatabase>>) -> Self {
-        self.netdb = Some(netdb);
         self
     }
 
@@ -126,15 +118,14 @@ impl Builder {
 
         let (netdb_pending_tx, netdb_pending_rx) = mpsc::channel(1024);
         let (netdb_ib_tx, netdb_ib_rx) = mpsc::channel(1024);
+        let (netdb_client_tx, netdb_client_rx) = mpsc::unbounded();
 
-        let netdb = match self.netdb {
-            Some(netdb) => netdb,
-            None => Arc::new(RwLock::new(LocalNetworkDatabase::new(
-                netdb_pending_tx.clone(),
-            ))),
-        };
+        let netdb = Arc::new(RwLock::new(LocalNetworkDatabase::new(
+            netdb_pending_tx.clone(),
+        )));
 
         let distributor = Distributor::new(netdb_ib_tx);
+        let netdb_client = NetDbClient::new(netdb_client_tx);
 
         let comms = match self.comms {
             Some(comms) => comms,
@@ -163,16 +154,26 @@ impl Builder {
             Err(e) => panic!(e),
         }
 
+        let ctx = Arc::new(Context {
+            config: RwLock::new(settings),
+            keys,
+            ri: Arc::new(RwLock::new(ri)),
+            netdb: netdb_client,
+            comms,
+        });
+
+        let netdb_client_handler = Some(ClientHandler::new(
+            netdb.clone(),
+            ctx.clone(),
+            netdb_client_rx,
+        ));
+
         Ok(Router {
-            ctx: Arc::new(Context {
-                config: RwLock::new(settings),
-                keys,
-                ri: Arc::new(RwLock::new(ri)),
-                netdb,
-                comms,
-            }),
+            ctx,
+            netdb,
             netdb_pending_tx,
             netdb_msg_handler,
+            netdb_client_handler,
         })
     }
 }
