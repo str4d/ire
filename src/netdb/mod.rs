@@ -172,7 +172,7 @@ impl Engine {
             .unwrap();
         if enabled && self.ctx.netdb.read().unwrap().known_routers() < MINIMUM_ROUTERS {
             // Reseed "synchronously" within the engine, as we can't do much without peers
-            Box::new(reseed::HttpsReseeder::new(self.ctx.clone()).and_then(|()| future::ok(self)))
+            Box::new(reseed::HttpsReseeder::new(self.ctx.netdb.clone()).and_then(|()| future::ok(self)))
         } else {
             Box::new(future::ok(self))
         }

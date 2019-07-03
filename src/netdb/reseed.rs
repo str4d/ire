@@ -4,7 +4,7 @@ use rand::{seq::SliceRandom, thread_rng};
 use std::collections::HashMap;
 use std::io;
 use std::net::ToSocketAddrs;
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tokio_io::{self, IoFuture};
 use tokio_tcp::TcpStream;
@@ -13,7 +13,7 @@ use tokio_tls;
 
 use crate::crypto::{OfflineSigningPublicKey, SigType};
 use crate::file::{Error as FileError, Su3Content, Su3File};
-use crate::router::Context;
+use crate::router::types::NetworkDatabase;
 
 // newest first, please add new ones at the top
 //
@@ -158,7 +158,7 @@ fn reseed_from_host(
 
 /// Fetches RouterInfos from reseed servers via HTTPS.
 pub struct HttpsReseeder {
-    ctx: Arc<Context>,
+    netdb: Arc<RwLock<dyn NetworkDatabase>>,
     cx: TlsConnector,
     pending: Vec<((&'static str, u16), &'static str)>,
     active: IoFuture<Su3File>,
@@ -168,7 +168,7 @@ pub struct HttpsReseeder {
 }
 
 impl HttpsReseeder {
-    pub fn new(ctx: Arc<Context>) -> Self {
+    pub fn new(netdb: Arc<RwLock<dyn NetworkDatabase>>) -> Self {
         // Build TLS context with the necessary self-signed certificates
         let mut cx = TlsConnector::builder();
         cx.add_root_certificate(Certificate::from_pem(SSL_CERT_CREATIVECOWPAT_NET).unwrap());
@@ -182,7 +182,7 @@ impl HttpsReseeder {
         let active = reseed_from_host(&cx, hosts.swap_remove(0));
 
         HttpsReseeder {
-            ctx,
+            netdb,
             cx,
             pending: hosts,
             active,
@@ -206,7 +206,7 @@ impl Future for HttpsReseeder {
                         self.succeeded += 1;
                         self.fetched += new_ri.len();
 
-                        let mut db = self.ctx.netdb.write().unwrap();
+                        let mut db = self.netdb.write().unwrap();
                         for ri in new_ri {
                             let hash = ri.router_id.hash();
                             if let Err(e) = db.store_router_info(hash.clone(), ri) {
