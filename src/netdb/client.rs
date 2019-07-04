@@ -363,6 +363,7 @@ impl Future for StoreLeaseSet {
     }
 }
 
+/// A client for interacting with I2P's network database.
 #[derive(Clone)]
 pub struct Client(Arc<mpsc::UnboundedSender<Query>>);
 
@@ -375,14 +376,18 @@ impl Client {
         self.0.unbounded_send(query).map_err(|_| Error::Closed)
     }
 
+    /// Returns the number of RouterInfos that this database contains.
     pub fn known_routers(&self) -> KnownRouters {
         KnownRouters::new(self.clone())
     }
 
+    /// Returns the closest floodfill router to the given netDb key.
     pub fn select_closest_ff(&self, key: Hash) -> SelectClosestFloodfill {
         SelectClosestFloodfill::new(self.clone(), key)
     }
 
+    /// Finds the RouterInfo stored at the given key. A remote lookup will be performed if
+    /// the key is not found locally.
     pub fn lookup_router_info(
         &self,
         key: Hash,
@@ -392,6 +397,9 @@ impl Client {
         LookupRouterInfo::new(self.clone(), key, timeout_ms, from_peer)
     }
 
+    /// Finds the LeaseSet stored at the given key. If not known locally, the LeaseSet is
+    /// looked up using the client tunnels for `from_local_dest` if provided, or
+    /// exploratory tunnels otherwise.
     pub fn lookup_lease_set(
         &self,
         key: Hash,
