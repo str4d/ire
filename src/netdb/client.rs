@@ -11,13 +11,14 @@ use tokio_executor::spawn;
 use crate::{
     data::{Hash, LeaseSet, RouterInfo},
     router::{
-        types::{LookupError, NetworkDatabase},
+        types::{LookupError, NetworkDatabase, StoreError},
         Context,
     },
 };
 
 pub enum Error {
     Lookup(LookupError),
+    Store(StoreError),
     Closed,
 }
 
@@ -27,11 +28,18 @@ impl From<LookupError> for Error {
     }
 }
 
+impl From<StoreError> for Error {
+    fn from(e: StoreError) -> Self {
+        Error::Store(e)
+    }
+}
+
 #[cfg_attr(tarpaulin, skip)]
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Error::Lookup(e) => write!(f, "Lookup error: {}", e),
+            Error::Store(e) => write!(f, "Store error: {}", e),
             Error::Closed => write!(f, "NetDB closed"),
         }
     }
@@ -51,6 +59,17 @@ pub enum Query {
         u64,
         Option<Hash>,
         oneshot::Sender<Result<LeaseSet, LookupError>>,
+    ),
+    StoreRouterInfo(
+        Hash,
+        RouterInfo,
+        bool,
+        oneshot::Sender<Result<Option<RouterInfo>, StoreError>>,
+    ),
+    StoreLeaseSet(
+        Hash,
+        LeaseSet,
+        oneshot::Sender<Result<Option<LeaseSet>, StoreError>>,
     ),
 }
 
@@ -93,6 +112,27 @@ impl Query {
                             warn!("Completed LeaseSet lookup on {}, but client gave up", key)
                         }),
                 );
+            }
+            Query::StoreRouterInfo(key, ri, from_reseed, ret) => {
+                if ret
+                    .send(
+                        netdb
+                            .write()
+                            .unwrap()
+                            .store_router_info(key.clone(), ri, from_reseed),
+                    )
+                    .is_err()
+                {
+                    warn!("Completed RouterInfo store at {}, but client gave up", key);
+                }
+            }
+            Query::StoreLeaseSet(key, ls, ret) => {
+                if ret
+                    .send(netdb.write().unwrap().store_lease_set(key.clone(), ls))
+                    .is_err()
+                {
+                    warn!("Completed LeaseSet store at {}, but client gave up", key);
+                }
             }
         }
     }
@@ -249,6 +289,80 @@ impl Future for LookupLeaseSet {
     }
 }
 
+pub struct StoreRouterInfo {
+    client: Client,
+    query: Option<(Hash, RouterInfo, bool)>,
+    response_rx: Option<oneshot::Receiver<Result<Option<RouterInfo>, StoreError>>>,
+}
+
+impl StoreRouterInfo {
+    fn new(client: Client, key: Hash, ri: RouterInfo, from_reseed: bool) -> Self {
+        StoreRouterInfo {
+            client,
+            query: Some((key, ri, from_reseed)),
+            response_rx: None,
+        }
+    }
+}
+
+impl Future for StoreRouterInfo {
+    type Item = Option<RouterInfo>;
+    type Error = Error;
+
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        if let Some((key, ri, from_reseed)) = self.query.take() {
+            let (response_tx, response_rx) = oneshot::channel();
+            self.response_rx = Some(response_rx);
+            self.client
+                .send(Query::StoreRouterInfo(key, ri, from_reseed, response_tx))?;
+        }
+
+        match self.response_rx.as_mut().unwrap().poll() {
+            Ok(Async::Ready(Ok(ret))) => Ok(Async::Ready(ret)),
+            Ok(Async::Ready(Err(e))) => Err(e.into()),
+            Ok(Async::NotReady) => Ok(Async::NotReady),
+            Err(_) => Err(Error::Closed),
+        }
+    }
+}
+
+pub struct StoreLeaseSet {
+    client: Client,
+    query: Option<(Hash, LeaseSet)>,
+    response_rx: Option<oneshot::Receiver<Result<Option<LeaseSet>, StoreError>>>,
+}
+
+impl StoreLeaseSet {
+    fn new(client: Client, key: Hash, ls: LeaseSet) -> Self {
+        StoreLeaseSet {
+            client,
+            query: Some((key, ls)),
+            response_rx: None,
+        }
+    }
+}
+
+impl Future for StoreLeaseSet {
+    type Item = Option<LeaseSet>;
+    type Error = Error;
+
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        if let Some((key, ls)) = self.query.take() {
+            let (response_tx, response_rx) = oneshot::channel();
+            self.response_rx = Some(response_rx);
+            self.client
+                .send(Query::StoreLeaseSet(key, ls, response_tx))?;
+        }
+
+        match self.response_rx.as_mut().unwrap().poll() {
+            Ok(Async::Ready(Ok(ret))) => Ok(Async::Ready(ret)),
+            Ok(Async::Ready(Err(e))) => Err(e.into()),
+            Ok(Async::NotReady) => Ok(Async::NotReady),
+            Err(_) => Err(Error::Closed),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Client(Arc<mpsc::UnboundedSender<Query>>);
 
@@ -285,5 +399,24 @@ impl Client {
         from_local_dest: Option<Hash>,
     ) -> LookupLeaseSet {
         LookupLeaseSet::new(self.clone(), key, timeout_ms, from_local_dest)
+    }
+
+    /// Stores a RouterInfo locally.
+    ///
+    /// Returns the RouterInfo that was previously at this key.
+    pub fn store_router_info(
+        &self,
+        key: Hash,
+        ri: RouterInfo,
+        from_reseed: bool,
+    ) -> StoreRouterInfo {
+        StoreRouterInfo::new(self.clone(), key, ri, from_reseed)
+    }
+
+    /// Stores a LeaseSet locally.
+    ///
+    /// Returns the LeaseSet that was previously at this key.
+    pub fn store_lease_set(&self, key: Hash, ls: LeaseSet) -> StoreLeaseSet {
+        StoreLeaseSet::new(self.clone(), key, ls)
     }
 }
