@@ -24,6 +24,7 @@ use crate::router::{
     Context,
 };
 
+pub mod client;
 mod lookup;
 pub mod reseed;
 
@@ -97,7 +98,7 @@ impl Future for MessageHandler {
                             self.netdb
                                 .write()
                                 .unwrap()
-                                .store_router_info(ds.key, ri)
+                                .store_router_info(ds.key, ri, false)
                                 .expect("Failed to store RouterInfo");
                         }
                         DatabaseStoreData::LS(ls) => {
@@ -137,8 +138,42 @@ impl Future for MessageHandler {
     }
 }
 
+pub struct ClientHandler {
+    netdb: Arc<RwLock<dyn NetworkDatabase>>,
+    ctx: Arc<Context>,
+    client_rx: mpsc::UnboundedReceiver<client::Query>,
+}
+
+impl ClientHandler {
+    pub fn new(
+        netdb: Arc<RwLock<dyn NetworkDatabase>>,
+        ctx: Arc<Context>,
+        client_rx: mpsc::UnboundedReceiver<client::Query>,
+    ) -> Self {
+        ClientHandler {
+            netdb,
+            ctx,
+            client_rx,
+        }
+    }
+}
+
+impl Future for ClientHandler {
+    type Item = ();
+    type Error = ();
+
+    fn poll(&mut self) -> Poll<(), ()> {
+        loop {
+            if let Some(query) = try_ready!(self.client_rx.poll()) {
+                query.handle(&self.netdb, &self.ctx);
+            }
+        }
+    }
+}
+
 /// Performs network database maintenance operations.
 struct Engine {
+    netdb: Arc<RwLock<dyn NetworkDatabase>>,
     ctx: Arc<Context>,
     register_pending: PendingTx,
     expire_ri_timer: Delay,
@@ -147,8 +182,13 @@ struct Engine {
 }
 
 impl Engine {
-    fn new(ctx: Arc<Context>, register_pending: PendingTx) -> Self {
+    fn new(
+        netdb: Arc<RwLock<dyn NetworkDatabase>>,
+        ctx: Arc<Context>,
+        register_pending: PendingTx,
+    ) -> Self {
         Engine {
+            netdb,
             ctx,
             register_pending,
             expire_ri_timer: sleep(Duration::from_secs(EXPIRE_RI_INTERVAL)),
@@ -170,9 +210,9 @@ impl Engine {
             .unwrap()
             .get_bool(config::RESEED_ENABLE)
             .unwrap();
-        if enabled && self.ctx.netdb.read().unwrap().known_routers() < MINIMUM_ROUTERS {
+        if enabled && self.netdb.read().unwrap().known_routers() < MINIMUM_ROUTERS {
             // Reseed "synchronously" within the engine, as we can't do much without peers
-            Box::new(reseed::HttpsReseeder::new(self.ctx.clone()).and_then(|()| future::ok(self)))
+            Box::new(reseed::HttpsReseeder::new(self.netdb.clone()).and_then(|()| future::ok(self)))
         } else {
             Box::new(future::ok(self))
         }
@@ -181,9 +221,8 @@ impl Engine {
     fn expire_router_infos(mut self) -> Box<dyn Future<Item = Self, Error = ()> + Send> {
         if let Ok(Async::Ready(())) = self.expire_ri_timer.poll() {
             // Expire RouterInfos
-            if self.ctx.netdb.read().unwrap().known_routers() >= KEEP_ROUTERS {
-                self.ctx
-                    .netdb
+            if self.netdb.read().unwrap().known_routers() >= KEEP_ROUTERS {
+                self.netdb
                     .write()
                     .unwrap()
                     .expire_router_infos(Some(self.ctx.clone()));
@@ -197,7 +236,7 @@ impl Engine {
     fn expire_lease_sets(mut self) -> Box<dyn Future<Item = Self, Error = ()> + Send> {
         if let Ok(Async::Ready(())) = self.expire_ls_timer.poll() {
             // Expire LeaseSets
-            self.ctx.netdb.write().unwrap().expire_lease_sets();
+            self.netdb.write().unwrap().expire_lease_sets();
             // Reset timer
             self.expire_ls_timer = sleep(Duration::from_secs(EXPIRE_LS_INTERVAL));
         }
@@ -206,7 +245,7 @@ impl Engine {
 
     fn explore(mut self) -> Box<dyn Future<Item = Self, Error = ()> + Send> {
         if let Ok(Async::Ready(())) = self.explore_timer.poll() {
-            let netdb = self.ctx.netdb.read().unwrap();
+            let netdb = self.netdb.read().unwrap();
             debug!("Known routers before exploring: {}", netdb.known_routers());
 
             // Pick a random key to search for
@@ -253,11 +292,12 @@ impl Engine {
 }
 
 pub fn netdb_engine(
+    netdb: Arc<RwLock<dyn NetworkDatabase>>,
     ctx: Arc<Context>,
     register_pending: PendingTx,
 ) -> Box<dyn Future<Item = (), Error = ()> + Send> {
     Box::new(future::loop_fn(
-        Engine::new(ctx, register_pending),
+        Engine::new(netdb, ctx, register_pending),
         |engine| {
             engine
                 .start_cycle()
@@ -402,9 +442,9 @@ impl NetworkDatabase for LocalNetworkDatabase {
         key: &Hash,
         timeout_ms: u64,
         _from_local_dest: Option<Hash>,
-    ) -> Box<dyn Future<Item = LeaseSet, Error = LookupError>> {
+    ) -> Box<dyn Future<Item = LeaseSet, Error = LookupError> + Send> {
         // First look for it locally, either available or pending
-        let local: Option<Box<dyn Future<Item = LeaseSet, Error = LookupError>>> =
+        let local: Option<Box<dyn Future<Item = LeaseSet, Error = LookupError> + Send>> =
             match self.ls_ds.get(key) {
                 Some(ls) => Some(Box::new(future::ok(ls.clone()))),
                 None => match self.pending_ls.get_mut(key) {
@@ -447,6 +487,7 @@ impl NetworkDatabase for LocalNetworkDatabase {
         &mut self,
         key: Hash,
         ri: RouterInfo,
+        from_reseed: bool,
     ) -> Result<Option<RouterInfo>, StoreError> {
         // Validate the RouterInfo
         if key != ri.router_id.hash() {
@@ -460,7 +501,11 @@ impl NetworkDatabase for LocalNetworkDatabase {
         {
             return Err(StoreError::WrongNetwork);
         }
-        router_info_is_current(&ri)?;
+
+        // Don't require RouterInfos from reseeds to satisfy liveness
+        if !from_reseed {
+            router_info_is_current(&ri)?;
+        }
 
         // If anyone was waiting on this RouterInfo, notify them
         if let Some(pending) = self.pending_ri.remove(&key) {
@@ -576,28 +621,31 @@ mod tests {
 
         // Storing with an invalid key should fail
         assert_eq!(
-            netdb.store_router_info(Hash([0u8; 32]), ri.clone()),
+            netdb.store_router_info(Hash([0u8; 32]), ri.clone(), false),
             Err(StoreError::InvalidKey)
         );
 
         // Storing a RouterInfo modified after signing should fail
         let old_netid = ri.options.0.insert(OPT_NET_ID.clone(), "0".into()).unwrap();
         assert_eq!(
-            netdb.store_router_info(key.clone(), ri.clone()),
+            netdb.store_router_info(key.clone(), ri.clone(), false),
             Err(StoreError::Crypto(crypto::Error::InvalidSignature))
         );
         ri.sign(&rsk.signing_private_key);
 
         // Storing with a different netId should fail
         assert_eq!(
-            netdb.store_router_info(key.clone(), ri.clone()),
+            netdb.store_router_info(key.clone(), ri.clone(), false),
             Err(StoreError::WrongNetwork)
         );
         ri.options.0.insert(OPT_NET_ID.clone(), old_netid);
         ri.sign(&rsk.signing_private_key);
 
         // Storing the new RouterInfo should return no data
-        assert_eq!(netdb.store_router_info(key.clone(), ri.clone()), Ok(None));
+        assert_eq!(
+            netdb.store_router_info(key.clone(), ri.clone(), false),
+            Ok(None)
+        );
         assert_eq!(netdb.known_routers(), 1);
 
         match netdb.lookup_router_info(None, &key, 100, None).poll() {

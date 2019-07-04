@@ -43,6 +43,7 @@ pub trait CommSystem: Send + Sync {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum LookupError {
     NotFound,
+    NoPath,
     SendFailure,
     TimedOut,
     TimerFailure,
@@ -53,6 +54,7 @@ impl fmt::Display for LookupError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             LookupError::NotFound => "Key not found".fmt(f),
+            LookupError::NoPath => "No path to send lookup".fmt(f),
             LookupError::SendFailure => "Send failure".fmt(f),
             LookupError::TimedOut => "Lookup timed out".fmt(f),
             LookupError::TimerFailure => "Timer failure".fmt(f),
@@ -118,7 +120,7 @@ pub trait NetworkDatabase: Send + Sync {
         key: &Hash,
         timeout_ms: u64,
         from_local_dest: Option<Hash>,
-    ) -> Box<dyn Future<Item = LeaseSet, Error = LookupError>>;
+    ) -> Box<dyn Future<Item = LeaseSet, Error = LookupError> + Send>;
 
     /// Stores a RouterInfo locally.
     ///
@@ -127,6 +129,7 @@ pub trait NetworkDatabase: Send + Sync {
         &mut self,
         key: Hash,
         ri: RouterInfo,
+        from_reseed: bool,
     ) -> Result<Option<RouterInfo>, StoreError>;
 
     /// Stores a LeaseSet locally.

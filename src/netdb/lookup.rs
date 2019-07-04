@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio_timer::Timeout;
 
-use super::{create_routing_key, PendingLookup, PendingTx, XorMetric};
+use super::{client::Error, create_routing_key, PendingLookup, PendingTx, XorMetric};
 use crate::data::{Hash, RouterInfo};
 use crate::i2np::{DatabaseLookup, DatabaseLookupType, DatabaseSearchReply, Message};
 use crate::router::{types::LookupError, Context};
@@ -27,7 +27,7 @@ fn wait_for_search_reply(
     peer: RouterInfo,
     key: Hash,
     dlm: Message,
-) -> LookupFuture<Option<DatabaseSearchReply>, LookupError> {
+) -> LookupFuture<Option<DatabaseSearchReply>, Error> {
     let peer_hash = peer.router_id.hash();
     match ctx.comms.read().unwrap().send(peer, dlm) {
         Ok(f) => {
@@ -35,15 +35,16 @@ fn wait_for_search_reply(
             let (tx_dsr, rx_dsr) = oneshot::channel();
             let received_dsr = register_pending
                 .send((peer_hash, key, tx_dsr))
-                .map_err(|_| LookupError::SendFailure)
+                .map_err(|_| Error::Closed)
                 .and_then(|_| {
-                    f.map_err(|_| LookupError::SendFailure).and_then(|_| {
-                        // Wait on the DatabaseSearchReply. If the lookup succeeds
-                        // (returning a DatabaseStore), this future will hang, but the
-                        // rx_store future in lookup_db_entry() will fire, causing this
-                        // future to be dropped.
-                        rx_dsr.map(Some).map_err(|_| LookupError::TimedOut)
-                    })
+                    f.map_err(|_| LookupError::SendFailure.into())
+                        .and_then(|_| {
+                            // Wait on the DatabaseSearchReply. If the lookup succeeds
+                            // (returning a DatabaseStore), this future will hang, but the
+                            // rx_store future in lookup_db_entry() will fire, causing this
+                            // future to be dropped.
+                            rx_dsr.map(Some).map_err(|_| LookupError::TimedOut.into())
+                        })
                 });
 
             Box::new(
@@ -56,13 +57,13 @@ fn wait_for_search_reply(
                             debug!("Timed out waiting for DatabaseSearchReply message");
                             Ok(None)
                         } else {
-                            Err(LookupError::TimerFailure)
+                            Err(LookupError::TimerFailure.into())
                         }
                     },
                 ),
             )
         }
-        Err((_, _)) => Box::new(future::err(LookupError::SendFailure)),
+        Err((_, _)) => Box::new(future::err(LookupError::NoPath.into())),
     }
 }
 
@@ -70,7 +71,7 @@ fn process_dsr(
     ctx: Arc<Context>,
     tried: &HashSet<Hash>,
     dsr: DatabaseSearchReply,
-) -> LookupFuture<Vec<RouterInfo>, LookupError> {
+) -> LookupFuture<Vec<RouterInfo>, Error> {
     if dsr.peers.is_empty() {
         Box::new(future::ok(vec![]))
     } else if !tried.contains(&dsr.from) {
@@ -79,12 +80,9 @@ fn process_dsr(
         Box::new(future::ok(vec![]))
     } else {
         // Get RouterInfo for peer we queried
-        let from_ri = ctx.netdb.write().unwrap().lookup_router_info(
-            Some(ctx.clone()),
-            &dsr.from,
-            SINGLE_LOOKUP_TIMEOUT * 1000,
-            None,
-        );
+        let from_ri =
+            ctx.netdb
+                .lookup_router_info(dsr.from.clone(), SINGLE_LOOKUP_TIMEOUT * 1000, None);
 
         let processed = from_ri.and_then(move |from| {
             // Look up each of the returned peers with the router that sent us the DSR
@@ -92,9 +90,8 @@ fn process_dsr(
                 .peers
                 .into_iter()
                 .map(|peer| {
-                    ctx.netdb.write().unwrap().lookup_router_info(
-                        Some(ctx.clone()),
-                        &peer,
+                    ctx.netdb.lookup_router_info(
+                        peer,
                         SINGLE_LOOKUP_TIMEOUT * 1000,
                         Some(from.clone()),
                     )

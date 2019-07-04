@@ -54,15 +54,17 @@ impl types::Distributor for Distributor {
 /// An I2P router.
 pub struct Router {
     ctx: Arc<Context>,
+    netdb: Arc<RwLock<dyn types::NetworkDatabase>>,
     netdb_pending_tx: PendingTx,
     netdb_msg_handler: Option<netdb::MessageHandler>,
+    netdb_client_handler: Option<netdb::ClientHandler>,
 }
 
 pub struct Context {
     pub config: RwLock<Config>,
     pub keys: RouterSecretKeys,
     pub ri: Arc<RwLock<RouterInfo>>,
-    pub netdb: Arc<RwLock<dyn types::NetworkDatabase>>,
+    pub netdb: netdb::client::Client,
     pub comms: Arc<RwLock<dyn types::CommSystem>>,
 }
 
@@ -85,14 +87,23 @@ impl Router {
             .netdb_msg_handler
             .take()
             .expect("Can only call start() once");
-        let netdb_engine = netdb_engine(self.ctx.clone(), self.netdb_pending_tx.clone());
+        let netdb_client_handler = self
+            .netdb_client_handler
+            .take()
+            .expect("Can only call start() once");
+        let netdb_engine = netdb_engine(
+            self.netdb.clone(),
+            self.ctx.clone(),
+            self.netdb_pending_tx.clone(),
+        );
 
         lazy(|| {
             // Start the transport system
             spawn(comms_engine);
 
-            // Start the network database subsystem
+            // Start the network database subsystems
             spawn(netdb_msg_handler);
+            spawn(netdb_client_handler);
 
             // Start network database operations
             spawn(netdb_engine);
