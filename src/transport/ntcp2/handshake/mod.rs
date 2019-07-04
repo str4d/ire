@@ -109,7 +109,10 @@ where
                     // <- e, es
                     debug!("S <- e, es");
                     let mut buf = [0u8; SESSION_REQUEST_PT_LEN];
-                    noise.read_message(&msg, &mut buf).unwrap();
+                    match noise.read_message(&msg, &mut buf) {
+                        Ok(len) => assert_eq!(len, SESSION_REQUEST_PT_LEN),
+                        Err(_) => return io_err!(Other, "Couldn't decrypt SessionRequest"),
+                    }
 
                     // SessionRequest
                     let (padlen, sclen, _ts_a) = match frame::session_request(&buf) {
@@ -184,7 +187,10 @@ where
                     // <- s, se
                     debug!("S <- s, se");
                     let mut buf = vec![0u8; msg.len()];
-                    let len = noise.read_message(&msg, &mut buf).unwrap();
+                    let len = match noise.read_message(&msg, &mut buf) {
+                        Ok(len) => len,
+                        Err(_) => return io_err!(Other, "Couldn't decrypt SessionConfirmed"),
+                    };
 
                     // SessionConfirmed
                     let mut frames = match frame::session_confirmed(&buf[..len]) {
@@ -451,7 +457,10 @@ where
                     // <- e, ee
                     debug!("C <- e, ee");
                     let mut buf = [0u8; SESSION_CREATED_PT_LEN];
-                    noise.read_message(&msg, &mut buf).unwrap();
+                    match noise.read_message(&msg, &mut buf) {
+                        Ok(len) => assert_eq!(len, SESSION_CREATED_PT_LEN),
+                        Err(e) => return io_err!(Other, format!("Couldn't decrypt SessionCreated: {}", e)),
+                    }
 
                     // SessionCreated
                     let (padlen, _ts_b) = match frame::session_created(&buf) {
