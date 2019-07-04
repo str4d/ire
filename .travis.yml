@@ -35,6 +35,7 @@ script:
   - cargo test --verbose --release
 
 before_cache: |
+  rm -rf "$TRAVIS_HOME/.cargo/registry/src"
   if [[ "$TRAVIS_RUST_VERSION" == stable ]]; then
     cargo install cargo-tarpaulin
   fi
