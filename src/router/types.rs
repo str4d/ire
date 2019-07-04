@@ -129,6 +129,7 @@ pub trait NetworkDatabase: Send + Sync {
         &mut self,
         key: Hash,
         ri: RouterInfo,
+        from_reseed: bool,
     ) -> Result<Option<RouterInfo>, StoreError>;
 
     /// Stores a LeaseSet locally.

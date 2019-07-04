@@ -98,7 +98,7 @@ impl Future for MessageHandler {
                             self.netdb
                                 .write()
                                 .unwrap()
-                                .store_router_info(ds.key, ri)
+                                .store_router_info(ds.key, ri, false)
                                 .expect("Failed to store RouterInfo");
                         }
                         DatabaseStoreData::LS(ls) => {
@@ -487,6 +487,7 @@ impl NetworkDatabase for LocalNetworkDatabase {
         &mut self,
         key: Hash,
         ri: RouterInfo,
+        from_reseed: bool,
     ) -> Result<Option<RouterInfo>, StoreError> {
         // Validate the RouterInfo
         if key != ri.router_id.hash() {
@@ -500,7 +501,11 @@ impl NetworkDatabase for LocalNetworkDatabase {
         {
             return Err(StoreError::WrongNetwork);
         }
-        router_info_is_current(&ri)?;
+
+        // Don't require RouterInfos from reseeds to satisfy liveness
+        if !from_reseed {
+            router_info_is_current(&ri)?;
+        }
 
         // If anyone was waiting on this RouterInfo, notify them
         if let Some(pending) = self.pending_ri.remove(&key) {
@@ -616,28 +621,31 @@ mod tests {
 
         // Storing with an invalid key should fail
         assert_eq!(
-            netdb.store_router_info(Hash([0u8; 32]), ri.clone()),
+            netdb.store_router_info(Hash([0u8; 32]), ri.clone(), false),
             Err(StoreError::InvalidKey)
         );
 
         // Storing a RouterInfo modified after signing should fail
         let old_netid = ri.options.0.insert(OPT_NET_ID.clone(), "0".into()).unwrap();
         assert_eq!(
-            netdb.store_router_info(key.clone(), ri.clone()),
+            netdb.store_router_info(key.clone(), ri.clone(), false),
             Err(StoreError::Crypto(crypto::Error::InvalidSignature))
         );
         ri.sign(&rsk.signing_private_key);
 
         // Storing with a different netId should fail
         assert_eq!(
-            netdb.store_router_info(key.clone(), ri.clone()),
+            netdb.store_router_info(key.clone(), ri.clone(), false),
             Err(StoreError::WrongNetwork)
         );
         ri.options.0.insert(OPT_NET_ID.clone(), old_netid);
         ri.sign(&rsk.signing_private_key);
 
         // Storing the new RouterInfo should return no data
-        assert_eq!(netdb.store_router_info(key.clone(), ri.clone()), Ok(None));
+        assert_eq!(
+            netdb.store_router_info(key.clone(), ri.clone(), false),
+            Ok(None)
+        );
         assert_eq!(netdb.known_routers(), 1);
 
         match netdb.lookup_router_info(None, &key, 100, None).poll() {

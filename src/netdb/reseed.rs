@@ -209,7 +209,7 @@ impl Future for HttpsReseeder {
                         let mut db = self.netdb.write().unwrap();
                         for ri in new_ri {
                             let hash = ri.router_id.hash();
-                            if let Err(e) = db.store_router_info(hash.clone(), ri) {
+                            if let Err(e) = db.store_router_info(hash.clone(), ri, true) {
                                 error!("Invalid RouterInfo {} received from reseed: {}", hash, e);
                             } else {
                                 self.valid += 1;
