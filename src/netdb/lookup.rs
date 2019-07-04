@@ -27,7 +27,7 @@ fn wait_for_search_reply(
     peer: RouterInfo,
     key: Hash,
     dlm: Message,
-) -> LookupFuture<Option<DatabaseSearchReply>, LookupError> {
+) -> LookupFuture<Option<DatabaseSearchReply>, Error> {
     let peer_hash = peer.router_id.hash();
     match ctx.comms.read().unwrap().send(peer, dlm) {
         Ok(f) => {
@@ -35,15 +35,16 @@ fn wait_for_search_reply(
             let (tx_dsr, rx_dsr) = oneshot::channel();
             let received_dsr = register_pending
                 .send((peer_hash, key, tx_dsr))
-                .map_err(|_| LookupError::SendFailure)
+                .map_err(|_| Error::Closed)
                 .and_then(|_| {
-                    f.map_err(|_| LookupError::SendFailure).and_then(|_| {
-                        // Wait on the DatabaseSearchReply. If the lookup succeeds
-                        // (returning a DatabaseStore), this future will hang, but the
-                        // rx_store future in lookup_db_entry() will fire, causing this
-                        // future to be dropped.
-                        rx_dsr.map(Some).map_err(|_| LookupError::TimedOut)
-                    })
+                    f.map_err(|_| LookupError::SendFailure.into())
+                        .and_then(|_| {
+                            // Wait on the DatabaseSearchReply. If the lookup succeeds
+                            // (returning a DatabaseStore), this future will hang, but the
+                            // rx_store future in lookup_db_entry() will fire, causing this
+                            // future to be dropped.
+                            rx_dsr.map(Some).map_err(|_| LookupError::TimedOut.into())
+                        })
                 });
 
             Box::new(
@@ -56,13 +57,13 @@ fn wait_for_search_reply(
                             debug!("Timed out waiting for DatabaseSearchReply message");
                             Ok(None)
                         } else {
-                            Err(LookupError::TimerFailure)
+                            Err(LookupError::TimerFailure.into())
                         }
                     },
                 ),
             )
         }
-        Err((_, _)) => Box::new(future::err(LookupError::SendFailure)),
+        Err((_, _)) => Box::new(future::err(LookupError::NoPath.into())),
     }
 }
 
