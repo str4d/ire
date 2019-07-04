@@ -17,13 +17,10 @@ env:
   global:
   - RUSTFLAGS="-C link-dead-code"
 
-# Dependencies of kcov, used by coverage
 addons:
   apt:
     packages:
       - libssl-dev
-      - pkg-config
-      - zlib1g-dev
       - cmake # also required for cargo-update
 
 before_script:
@@ -38,12 +35,12 @@ script:
   - cargo test --verbose --release
 
 before_cache: |
-  if [[ "$TRAVIS_RUST_VERSION" == nightly ]]; then
-    RUSTFLAGS="--cfg procmacro2_semver_exempt" cargo install cargo-tarpaulin
+  if [[ "$TRAVIS_RUST_VERSION" == stable ]]; then
+    cargo install cargo-tarpaulin
   fi
 
 after_success: |
-  if [[ "$TRAVIS_RUST_VERSION" == nightly ]]; then
+  if [[ "$TRAVIS_RUST_VERSION" == stable ]]; then
     cargo tarpaulin --timeout 180 --out Xml
     bash <(curl -s https://codecov.io/bash)
   fi
