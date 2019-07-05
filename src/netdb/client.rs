@@ -8,10 +8,7 @@ use std::sync::Arc;
 use tokio_executor::spawn;
 
 use super::{errors::*, LocalNetworkDatabase};
-use crate::{
-    data::{Hash, LeaseSet, RouterInfo},
-    router::Context,
-};
+use crate::data::{Hash, LeaseSet, RouterInfo};
 
 pub enum Query {
     KnownRouters(oneshot::Sender<usize>),
@@ -42,7 +39,7 @@ pub enum Query {
 }
 
 impl Query {
-    pub(super) fn handle(self, netdb: &mut LocalNetworkDatabase, ctx: &Arc<Context>) {
+    pub(super) fn handle(self, netdb: &mut LocalNetworkDatabase) {
         match self {
             Query::KnownRouters(ret) => {
                 if ret.send(netdb.known_routers()).is_err() {
@@ -57,7 +54,7 @@ impl Query {
             Query::LookupRouterInfo(key, timeout_ms, from_peer, ret) => {
                 spawn(
                     netdb
-                        .lookup_router_info(Some(ctx.clone()), &key, timeout_ms, from_peer)
+                        .lookup_router_info(&key, timeout_ms, from_peer)
                         .then(|res| ret.send(res))
                         .map_err(move |_| {
                             warn!("Completed RouterInfo lookup on {}, but client gave up", key)
@@ -67,7 +64,7 @@ impl Query {
             Query::LookupLeaseSet(key, timeout_ms, from_local_dest, ret) => {
                 spawn(
                     netdb
-                        .lookup_lease_set(Some(ctx.clone()), &key, timeout_ms, from_local_dest)
+                        .lookup_lease_set(&key, timeout_ms, from_local_dest)
                         .then(|res| ret.send(res))
                         .map_err(move |_| {
                             warn!("Completed LeaseSet lookup on {}, but client gave up", key)

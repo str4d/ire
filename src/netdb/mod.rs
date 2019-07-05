@@ -81,7 +81,7 @@ impl Engine {
     ) -> Self {
         Engine {
             state: Some(EngineState::CheckReseed),
-            netdb: LocalNetworkDatabase::new(register_pending.clone()),
+            netdb: LocalNetworkDatabase::new(ctx.clone(), register_pending.clone()),
             ctx,
             active_reseed: None,
             pending_lookups: HashMap::new(),
@@ -256,7 +256,7 @@ impl Future for Engine {
 
                     // Handle the client message
                     if let Some(query) = next_client {
-                        query.handle(&mut self.netdb, &self.ctx);
+                        query.handle(&mut self.netdb);
                     }
 
                     EngineState::CheckReseed
@@ -307,6 +307,7 @@ type PendingLookup<T> = HashMap<Hash, Vec<oneshot::Sender<T>>>;
 
 /// A NetworkDatabase that never publishes data to the network.
 pub struct LocalNetworkDatabase {
+    ctx: Arc<Context>,
     ri_ds: HashMap<Hash, RouterInfo>,
     ls_ds: HashMap<Hash, LeaseSet>,
     pending_ri: PendingLookup<RouterInfo>,
@@ -315,8 +316,9 @@ pub struct LocalNetworkDatabase {
 }
 
 impl LocalNetworkDatabase {
-    pub(super) fn new(pending_tx: PendingTx) -> Self {
+    pub(super) fn new(ctx: Arc<Context>, pending_tx: PendingTx) -> Self {
         LocalNetworkDatabase {
+            ctx,
             ri_ds: HashMap::new(),
             ls_ds: HashMap::new(),
             pending_ri: HashMap::new(),
@@ -340,7 +342,6 @@ impl LocalNetworkDatabase {
 
     fn lookup_router_info(
         &mut self,
-        ctx: Option<Arc<Context>>,
         key: &Hash,
         timeout_ms: u64,
         from_peer: Option<RouterInfo>,
@@ -363,22 +364,18 @@ impl LocalNetworkDatabase {
         match local {
             Some(f) => f,
             None => {
-                if let Some(ctx) = ctx {
-                    // TODO: Handle case where we don't know any floodfills
-                    match from_peer.or_else(|| self.select_closest_ff(key)) {
-                        Some(ff) => lookup::lookup_db_entry(
-                            ctx,
-                            self.register_pending.clone(),
-                            key.clone(),
-                            DatabaseLookupType::RouterInfo,
-                            ff,
-                            &mut self.pending_ri,
-                            timeout_ms,
-                        ),
-                        None => Box::new(future::err(LookupError::NotFound)),
-                    }
-                } else {
-                    Box::new(future::err(LookupError::NotFound))
+                // TODO: Handle case where we don't know any floodfills
+                match from_peer.or_else(|| self.select_closest_ff(key)) {
+                    Some(ff) => lookup::lookup_db_entry(
+                        self.ctx.clone(),
+                        self.register_pending.clone(),
+                        key.clone(),
+                        DatabaseLookupType::RouterInfo,
+                        ff,
+                        &mut self.pending_ri,
+                        timeout_ms,
+                    ),
+                    None => Box::new(future::err(LookupError::NotFound)),
                 }
             }
         }
@@ -386,7 +383,6 @@ impl LocalNetworkDatabase {
 
     fn lookup_lease_set(
         &mut self,
-        ctx: Option<Arc<Context>>,
         key: &Hash,
         timeout_ms: u64,
         _from_local_dest: Option<Hash>,
@@ -409,23 +405,19 @@ impl LocalNetworkDatabase {
         match local {
             Some(f) => f,
             None => {
-                if let Some(ctx) = ctx {
-                    // TODO: Handle case where we don't know any floodfills
-                    // TODO: Handle from_local_dest case
-                    match self.select_closest_ff(key) {
-                        Some(ff) => lookup::lookup_db_entry(
-                            ctx,
-                            self.register_pending.clone(),
-                            key.clone(),
-                            DatabaseLookupType::LeaseSet,
-                            ff,
-                            &mut self.pending_ls,
-                            timeout_ms,
-                        ),
-                        None => Box::new(future::err(LookupError::NotFound)),
-                    }
-                } else {
-                    Box::new(future::err(LookupError::NotFound))
+                // TODO: Handle case where we don't know any floodfills
+                // TODO: Handle from_local_dest case
+                match self.select_closest_ff(key) {
+                    Some(ff) => lookup::lookup_db_entry(
+                        self.ctx.clone(),
+                        self.register_pending.clone(),
+                        key.clone(),
+                        DatabaseLookupType::LeaseSet,
+                        ff,
+                        &mut self.pending_ls,
+                        timeout_ms,
+                    ),
+                    None => Box::new(future::err(LookupError::NotFound)),
                 }
             }
         }
@@ -523,6 +515,7 @@ mod tests {
     };
     use crate::crypto;
     use crate::data::{Hash, I2PDate, RouterInfo, RouterSecretKeys, OPT_NET_ID};
+    use crate::router::mock::mock_context;
 
     #[test]
     fn xor_metric() {
@@ -559,7 +552,7 @@ mod tests {
     #[test]
     fn store_and_retrieve() {
         let (tx, _) = mpsc::channel(0);
-        let mut netdb = LocalNetworkDatabase::new(tx);
+        let mut netdb = LocalNetworkDatabase::new(mock_context(), tx);
 
         let rsk = RouterSecretKeys::new();
         let mut ri = RouterInfo::new(rsk.rid);
@@ -598,7 +591,7 @@ mod tests {
         );
         assert_eq!(netdb.known_routers(), 1);
 
-        match netdb.lookup_router_info(None, &key, 100, None).poll() {
+        match netdb.lookup_router_info(&key, 100, None).poll() {
             Ok(Async::Ready(entry)) => assert_eq!(entry, ri),
             Ok(_) => panic!("Local lookup should complete immediately"),
             Err(e) => panic!("Unexpected error: {}", e),
