@@ -48,6 +48,19 @@ const EXPLORE_MAX_INTERVAL: u64 = 15 * 60;
 /// Explore quickly if we have fewer than this many routers.
 const EXPLORE_MIN_ROUTERS: usize = 250;
 
+macro_rules! try_poll {
+    ($f:expr, $parent:expr, $state:expr) => {
+        match $f {
+            Ok(Async::Ready(t)) => Ok(t),
+            Ok(Async::NotReady) => {
+                $parent.state = Some($state);
+                return Ok(Async::NotReady);
+            }
+            Err(e) => Err(e),
+        }
+    };
+}
+
 type PendingLookups = HashMap<(Hash, Hash), oneshot::Sender<DatabaseSearchReply>>;
 pub(crate) type PendingTx = mpsc::Sender<(Hash, Hash, oneshot::Sender<DatabaseSearchReply>)>;
 type PendingRx = mpsc::Receiver<(Hash, Hash, oneshot::Sender<DatabaseSearchReply>)>;
@@ -171,8 +184,16 @@ impl Future for ClientHandler {
     }
 }
 
+enum EngineState {
+    CheckReseed,
+    Reseeding(reseed::HttpsReseeder),
+    Timers,
+    Sleep(Delay),
+}
+
 /// Performs network database maintenance operations.
-struct Engine {
+pub struct Engine {
+    state: Option<EngineState>,
     netdb: Arc<RwLock<dyn NetworkDatabase>>,
     ctx: Arc<Context>,
     register_pending: PendingTx,
@@ -182,12 +203,13 @@ struct Engine {
 }
 
 impl Engine {
-    fn new(
+    pub fn new(
         netdb: Arc<RwLock<dyn NetworkDatabase>>,
         ctx: Arc<Context>,
         register_pending: PendingTx,
     ) -> Self {
         Engine {
+            state: Some(EngineState::CheckReseed),
             netdb,
             ctx,
             register_pending,
@@ -196,127 +218,108 @@ impl Engine {
             explore_timer: sleep(Duration::from_secs(0)),
         }
     }
-
-    fn start_cycle(self) -> future::FutureResult<Self, ()> {
-        trace!("Starting NetDB engine cycle");
-        future::ok(self)
-    }
-
-    fn check_reseed(self) -> Box<dyn Future<Item = Self, Error = ()> + Send> {
-        let enabled = self
-            .ctx
-            .config
-            .read()
-            .unwrap()
-            .get_bool(config::RESEED_ENABLE)
-            .unwrap();
-        if enabled && self.netdb.read().unwrap().known_routers() < MINIMUM_ROUTERS {
-            // Reseed "synchronously" within the engine, as we can't do much without peers
-            Box::new(
-                reseed::HttpsReseeder::new(self.ctx.netdb.clone()).and_then(|()| future::ok(self)),
-            )
-        } else {
-            Box::new(future::ok(self))
-        }
-    }
-
-    fn expire_router_infos(mut self) -> Box<dyn Future<Item = Self, Error = ()> + Send> {
-        if let Ok(Async::Ready(())) = self.expire_ri_timer.poll() {
-            // Expire RouterInfos
-            if self.netdb.read().unwrap().known_routers() >= KEEP_ROUTERS {
-                self.netdb
-                    .write()
-                    .unwrap()
-                    .expire_router_infos(Some(self.ctx.clone()));
-            }
-            // Reset timer
-            self.expire_ri_timer = sleep(Duration::from_secs(EXPIRE_RI_INTERVAL));
-        }
-        Box::new(future::ok(self))
-    }
-
-    fn expire_lease_sets(mut self) -> Box<dyn Future<Item = Self, Error = ()> + Send> {
-        if let Ok(Async::Ready(())) = self.expire_ls_timer.poll() {
-            // Expire LeaseSets
-            self.netdb.write().unwrap().expire_lease_sets();
-            // Reset timer
-            self.expire_ls_timer = sleep(Duration::from_secs(EXPIRE_LS_INTERVAL));
-        }
-        Box::new(future::ok(self))
-    }
-
-    fn explore(mut self) -> Box<dyn Future<Item = Self, Error = ()> + Send> {
-        if let Ok(Async::Ready(())) = self.explore_timer.poll() {
-            let netdb = self.netdb.read().unwrap();
-            debug!("Known routers before exploring: {}", netdb.known_routers());
-
-            // Pick a random key to search for
-            let mut key = Hash([0u8; 32]);
-            thread_rng().fill(&mut key.0);
-            debug!("Exploring netDB for RouterInfo with key {}", key);
-            let ff = netdb.select_closest_ff(&key).unwrap();
-
-            // Fire off an exploration job
-            let explore = lookup::explore_netdb(
-                self.ctx.clone(),
-                self.register_pending.clone(),
-                key,
-                ff,
-                30 * 1000,
-            );
-            spawn(
-                explore
-                    .map(|_| ())
-                    .map_err(|e| error!("Error while exploring: {}", e)),
-            );
-
-            // Reset timer
-            let interval = if netdb.known_routers() < EXPLORE_MIN_ROUTERS {
-                EXPLORE_MIN_INTERVAL
-            } else {
-                EXPLORE_MAX_INTERVAL
-            };
-            self.explore_timer = sleep(Duration::from_secs(interval));
-        }
-        Box::new(future::ok(self))
-    }
-
-    fn finish_cycle(self) -> Box<dyn Future<Item = (Self, bool), Error = ()> + Send> {
-        trace!("Finished NetDB engine cycle");
-        Box::new(
-            sleep(Duration::from_secs(ENGINE_DOWNTIME))
-                .map_err(|e| {
-                    error!("NetDB timer error: {}", e);
-                })
-                .and_then(|_| future::ok((self, false))),
-        )
-    }
 }
 
-pub fn netdb_engine(
-    netdb: Arc<RwLock<dyn NetworkDatabase>>,
-    ctx: Arc<Context>,
-    register_pending: PendingTx,
-) -> Box<dyn Future<Item = (), Error = ()> + Send> {
-    Box::new(future::loop_fn(
-        Engine::new(netdb, ctx, register_pending),
-        |engine| {
-            engine
-                .start_cycle()
-                .and_then(|engine| engine.check_reseed())
-                .and_then(|engine| engine.expire_router_infos())
-                .and_then(|engine| engine.expire_lease_sets())
-                .and_then(|engine| engine.explore())
-                .and_then(|engine| engine.finish_cycle())
-                .and_then(|(engine, done)| {
-                    if done {
-                        Ok(future::Loop::Break(()))
+impl Future for Engine {
+    type Item = ();
+    type Error = ();
+
+    fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
+        loop {
+            let next_state = match self.state.take().unwrap() {
+                EngineState::CheckReseed => {
+                    let enabled = self
+                        .ctx
+                        .config
+                        .read()
+                        .unwrap()
+                        .get_bool(config::RESEED_ENABLE)
+                        .unwrap();
+                    if enabled && self.netdb.read().unwrap().known_routers() < MINIMUM_ROUTERS {
+                        // Reseed "synchronously" within the engine, as we can't do much without peers
+                        EngineState::Reseeding(reseed::HttpsReseeder::new(self.ctx.netdb.clone()))
                     } else {
-                        Ok(future::Loop::Continue(engine))
+                        EngineState::Timers
                     }
-                })
-        },
-    ))
+                }
+                EngineState::Reseeding(mut f) => {
+                    if try_poll!(f.poll(), self, EngineState::Reseeding(f)).is_err()
+                        && self.netdb.read().unwrap().known_routers() == 0
+                    {
+                        error!("We have no routers to connect to! Shutting down NetDB engine.");
+                        return Err(());
+                    } else {
+                        EngineState::Timers
+                    }
+                }
+                EngineState::Timers => {
+                    if let Ok(Async::Ready(())) = self.expire_ri_timer.poll() {
+                        // Expire RouterInfos
+                        if self.netdb.read().unwrap().known_routers() >= KEEP_ROUTERS {
+                            self.netdb
+                                .write()
+                                .unwrap()
+                                .expire_router_infos(Some(self.ctx.clone()));
+                        }
+                        // Reset timer
+                        self.expire_ri_timer = sleep(Duration::from_secs(EXPIRE_RI_INTERVAL));
+                    }
+
+                    if let Ok(Async::Ready(())) = self.expire_ls_timer.poll() {
+                        // Expire LeaseSets
+                        self.netdb.write().unwrap().expire_lease_sets();
+                        // Reset timer
+                        self.expire_ls_timer = sleep(Duration::from_secs(EXPIRE_LS_INTERVAL));
+                    }
+
+                    if let Ok(Async::Ready(())) = self.explore_timer.poll() {
+                        let netdb = self.netdb.read().unwrap();
+                        debug!("Known routers before exploring: {}", netdb.known_routers());
+
+                        // Pick a random key to search for
+                        let mut key = Hash([0u8; 32]);
+                        thread_rng().fill(&mut key.0);
+                        debug!("Exploring netDB for RouterInfo with key {}", key);
+                        let ff = netdb.select_closest_ff(&key).unwrap();
+
+                        // Fire off an exploration job
+                        let explore = lookup::explore_netdb(
+                            self.ctx.clone(),
+                            self.register_pending.clone(),
+                            key,
+                            ff,
+                            30 * 1000,
+                        );
+                        spawn(
+                            explore
+                                .map(|_| ())
+                                .map_err(|e| error!("Error while exploring: {}", e)),
+                        );
+
+                        // Reset timer
+                        let interval = if netdb.known_routers() < EXPLORE_MIN_ROUTERS {
+                            EXPLORE_MIN_INTERVAL
+                        } else {
+                            EXPLORE_MAX_INTERVAL
+                        };
+                        self.explore_timer = sleep(Duration::from_secs(interval));
+                    }
+
+                    EngineState::Sleep(sleep(Duration::from_secs(ENGINE_DOWNTIME)))
+                }
+                EngineState::Sleep(mut f) => {
+                    match try_poll!(f.poll(), self, EngineState::Sleep(f)) {
+                        Ok(()) => EngineState::CheckReseed,
+                        Err(e) => {
+                            error!("NetDB timer error: {}", e);
+                            return Err(());
+                        }
+                    }
+                }
+            };
+            self.state = Some(next_state);
+        }
+    }
 }
 
 fn router_info_is_current(ri: &RouterInfo) -> Result<(), StoreError> {

@@ -9,7 +9,7 @@ use tokio_io::IoFuture;
 
 use crate::data::{Hash, RouterInfo, RouterSecretKeys};
 use crate::i2np::{Message, MessagePayload};
-use crate::netdb::{self, netdb_engine, PendingTx};
+use crate::netdb::{self, PendingTx};
 
 mod builder;
 pub mod config;
@@ -91,7 +91,7 @@ impl Router {
             .netdb_client_handler
             .take()
             .expect("Can only call start() once");
-        let netdb_engine = netdb_engine(
+        let netdb_engine = netdb::Engine::new(
             self.netdb.clone(),
             self.ctx.clone(),
             self.netdb_pending_tx.clone(),
