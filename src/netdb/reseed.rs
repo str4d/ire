@@ -1,19 +1,18 @@
-use futures::{Async, Future, Poll};
+use futures::{future, Async, Future, Poll};
 use native_tls::{Certificate, TlsConnector};
 use rand::{seq::SliceRandom, thread_rng};
 use std::collections::HashMap;
 use std::io;
 use std::net::ToSocketAddrs;
-use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use tokio_io::{self, IoFuture};
 use tokio_tcp::TcpStream;
 use tokio_timer::Timeout;
 use tokio_tls;
 
+use super::client::{Client, StoreRouterInfo};
 use crate::crypto::{OfflineSigningPublicKey, SigType};
 use crate::file::{Error as FileError, Su3Content, Su3File};
-use crate::router::types::NetworkDatabase;
 
 // newest first, please add new ones at the top
 //
@@ -89,6 +88,19 @@ const MIN_RESEED_SERVERS: usize = 2;
 /// Maximum response time for a single reseed server, in seconds.
 const PER_RESEED_TIMEOUT: u64 = 10;
 
+macro_rules! try_poll {
+    ($f:expr, $parent:expr, $state:expr) => {
+        match $f {
+            Ok(Async::Ready(t)) => Ok(t),
+            Ok(Async::NotReady) => {
+                $parent.state = Some($state);
+                return Ok(Async::NotReady);
+            }
+            Err(e) => Err(e),
+        }
+    };
+}
+
 fn reseed_from_host(
     cx: &TlsConnector,
     (host, path): ((&'static str, u16), &'static str),
@@ -156,19 +168,25 @@ fn reseed_from_host(
     Box::new(timed)
 }
 
+enum ReseedState {
+    Fetching(IoFuture<Su3File>),
+    Storing(future::SelectAll<StoreRouterInfo>),
+    NextHost,
+}
+
 /// Fetches RouterInfos from reseed servers via HTTPS.
 pub struct HttpsReseeder {
-    netdb: Arc<RwLock<dyn NetworkDatabase>>,
+    state: Option<ReseedState>,
+    netdb: Client,
     cx: TlsConnector,
     pending: Vec<((&'static str, u16), &'static str)>,
-    active: IoFuture<Su3File>,
     succeeded: usize,
     fetched: usize,
     valid: usize,
 }
 
 impl HttpsReseeder {
-    pub fn new(netdb: Arc<RwLock<dyn NetworkDatabase>>) -> Self {
+    pub fn new(netdb: Client) -> Self {
         // Build TLS context with the necessary self-signed certificates
         let mut cx = TlsConnector::builder();
         cx.add_root_certificate(Certificate::from_pem(SSL_CERT_CREATIVECOWPAT_NET).unwrap());
@@ -182,10 +200,10 @@ impl HttpsReseeder {
         let active = reseed_from_host(&cx, hosts.swap_remove(0));
 
         HttpsReseeder {
+            state: Some(ReseedState::Fetching(active)),
             netdb,
             cx,
             pending: hosts,
-            active,
             succeeded: 0,
             fetched: 0,
             valid: 0,
@@ -199,23 +217,41 @@ impl Future for HttpsReseeder {
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         loop {
-            // Check the currently-active reseed request
-            match self.active.poll() {
-                Ok(Async::Ready(su3)) => match su3.content {
-                    Su3Content::Reseed(new_ri) => {
-                        self.succeeded += 1;
-                        self.fetched += new_ri.len();
+            let next_state = match self.state.take().unwrap() {
+                ReseedState::Fetching(mut f) => {
+                    match try_poll!(f.poll(), self, ReseedState::Fetching(f)) {
+                        Ok(su3) => match su3.content {
+                            Su3Content::Reseed(new_ri) => {
+                                self.succeeded += 1;
+                                self.fetched += new_ri.len();
 
-                        let mut db = self.netdb.write().unwrap();
-                        for ri in new_ri {
-                            let hash = ri.router_id.hash();
-                            if let Err(e) = db.store_router_info(hash.clone(), ri, true) {
-                                error!("Invalid RouterInfo {} received from reseed: {}", hash, e);
-                            } else {
-                                self.valid += 1;
+                                ReseedState::Storing(future::select_all(new_ri.into_iter().map(
+                                    |ri| {
+                                        let hash = ri.router_id.hash();
+                                        self.netdb.store_router_info(hash, ri, true)
+                                    },
+                                )))
                             }
+                        },
+                        Err(e) => {
+                            error!("Error while reseeding: {}", e);
+                            ReseedState::NextHost
                         }
+                    }
+                }
+                ReseedState::Storing(mut f) => {
+                    let remaining = match try_poll!(f.poll(), self, ReseedState::Storing(f)) {
+                        Ok((_, _, remaining)) => {
+                            self.valid += 1;
+                            remaining
+                        }
+                        Err((e, _, remaining)) => {
+                            error!("Invalid RouterInfo received from reseed: {}", e);
+                            remaining
+                        }
+                    };
 
+                    if remaining.is_empty() {
                         // Check if we are done reseeding
                         if self.valid >= MIN_RI_WANTED && self.succeeded >= MIN_RESEED_SERVERS {
                             info!(
@@ -223,28 +259,35 @@ impl Future for HttpsReseeder {
                                 self.fetched, self.succeeded, self.valid
                             );
                             return Ok(Async::Ready(()));
+                        } else {
+                            ReseedState::NextHost
                         }
+                    } else {
+                        ReseedState::Storing(future::select_all(remaining))
                     }
-                },
-                Ok(Async::NotReady) => return Ok(Async::NotReady),
-                Err(e) => error!("Error while reseeding: {}", e),
-            }
-
-            // If we reach here, the active reseed has finished
-            if self.pending.is_empty() {
-                if self.valid == 0 {
-                    error!("Failed to reseed from any server");
-                    return Err(());
-                } else {
-                    info!(
-                        "Fetched {} RouterInfos from {} servers ({} valid)",
-                        self.fetched, self.succeeded, self.valid
-                    );
-                    return Ok(Async::Ready(()));
                 }
-            } else {
-                self.active = reseed_from_host(&self.cx, self.pending.swap_remove(0));
-            }
+                ReseedState::NextHost => {
+                    // If we reach here, the active reseed has finished
+                    if self.pending.is_empty() {
+                        if self.valid == 0 {
+                            error!("Failed to reseed from any server");
+                            return Err(());
+                        } else {
+                            info!(
+                                "Fetched {} RouterInfos from {} servers ({} valid)",
+                                self.fetched, self.succeeded, self.valid
+                            );
+                            return Ok(Async::Ready(()));
+                        }
+                    } else {
+                        ReseedState::Fetching(reseed_from_host(
+                            &self.cx,
+                            self.pending.swap_remove(0),
+                        ))
+                    }
+                }
+            };
+            self.state = Some(next_state);
         }
     }
 }

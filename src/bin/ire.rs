@@ -13,7 +13,7 @@ use ire::{
     data, i2np,
     netdb::reseed::HttpsReseeder,
     router::{
-        mock::{mock_context, mock_netdb, MockDistributor},
+        mock::{mock_context, MockDistributor},
         Builder,
     },
     transport,
@@ -158,7 +158,7 @@ fn cli_client(args: &ArgMatches) -> i32 {
 }
 
 fn cli_reseed() -> i32 {
-    let reseeder = HttpsReseeder::new(mock_netdb());
+    let reseeder = HttpsReseeder::new(mock_context().netdb.clone());
     tokio::run(reseeder);
     0
 }
