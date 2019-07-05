@@ -7,9 +7,7 @@ use std::sync::{Arc, RwLock};
 
 use super::{types::CommSystem, Context, Distributor, Router};
 use crate::data::{ReadError, RouterInfo, RouterSecretKeys};
-use crate::netdb::{
-    client::Client as NetDbClient, ClientHandler, LocalNetworkDatabase, MessageHandler,
-};
+use crate::netdb::{client::Client as NetDbClient, Engine as NetDbEngine};
 use crate::router::config;
 use crate::transport;
 
@@ -120,10 +118,6 @@ impl Builder {
         let (netdb_ib_tx, netdb_ib_rx) = mpsc::channel(1024);
         let (netdb_client_tx, netdb_client_rx) = mpsc::unbounded();
 
-        let netdb = Arc::new(RwLock::new(LocalNetworkDatabase::new(
-            netdb_pending_tx.clone(),
-        )));
-
         let distributor = Distributor::new(netdb_ib_tx);
         let netdb_client = NetDbClient::new(netdb_client_tx);
 
@@ -134,12 +128,6 @@ impl Builder {
                 distributor,
             ))),
         };
-
-        let netdb_msg_handler = Some(MessageHandler::new(
-            netdb.clone(),
-            netdb_pending_rx,
-            netdb_ib_rx,
-        ));
 
         let mut ri = RouterInfo::new(keys.rid.clone());
         ri.set_addresses(comms.read().unwrap().addresses());
@@ -162,18 +150,14 @@ impl Builder {
             comms,
         });
 
-        let netdb_client_handler = Some(ClientHandler::new(
-            netdb.clone(),
+        let netdb_engine = Some(NetDbEngine::new(
             ctx.clone(),
+            netdb_pending_tx,
+            netdb_pending_rx,
+            netdb_ib_rx,
             netdb_client_rx,
         ));
 
-        Ok(Router {
-            ctx,
-            netdb,
-            netdb_pending_tx,
-            netdb_msg_handler,
-            netdb_client_handler,
-        })
+        Ok(Router { ctx, netdb_engine })
     }
 }

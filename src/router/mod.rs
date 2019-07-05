@@ -9,7 +9,7 @@ use tokio_io::IoFuture;
 
 use crate::data::{Hash, RouterInfo, RouterSecretKeys};
 use crate::i2np::{Message, MessagePayload};
-use crate::netdb::{self, netdb_engine, PendingTx};
+use crate::netdb;
 
 mod builder;
 pub mod config;
@@ -54,10 +54,7 @@ impl types::Distributor for Distributor {
 /// An I2P router.
 pub struct Router {
     ctx: Arc<Context>,
-    netdb: Arc<RwLock<dyn types::NetworkDatabase>>,
-    netdb_pending_tx: PendingTx,
-    netdb_msg_handler: Option<netdb::MessageHandler>,
-    netdb_client_handler: Option<netdb::ClientHandler>,
+    netdb_engine: Option<netdb::Engine>,
 }
 
 pub struct Context {
@@ -83,27 +80,14 @@ impl Router {
         info!("Our router hash is {}", self.ctx.keys.rid.hash());
 
         let comms_engine = self.ctx.comms.write().unwrap().start(self.ctx.clone());
-        let netdb_msg_handler = self
-            .netdb_msg_handler
+        let netdb_engine = self
+            .netdb_engine
             .take()
             .expect("Can only call start() once");
-        let netdb_client_handler = self
-            .netdb_client_handler
-            .take()
-            .expect("Can only call start() once");
-        let netdb_engine = netdb_engine(
-            self.netdb.clone(),
-            self.ctx.clone(),
-            self.netdb_pending_tx.clone(),
-        );
 
         lazy(|| {
             // Start the transport system
             spawn(comms_engine);
-
-            // Start the network database subsystems
-            spawn(netdb_msg_handler);
-            spawn(netdb_client_handler);
 
             // Start network database operations
             spawn(netdb_engine);

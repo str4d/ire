@@ -11,8 +11,8 @@ use tokio_io::IoFuture;
 use super::types::{CommSystem, Distributor, DistributorResult};
 use crate::data::{Hash, RouterAddress, RouterInfo, RouterSecretKeys};
 use crate::i2np::Message;
-use crate::netdb::{client::Client as NetDbClient, LocalNetworkDatabase};
-use crate::router::{types::NetworkDatabase, Context};
+use crate::netdb::client::Client as NetDbClient;
+use crate::router::Context;
 
 #[derive(Clone)]
 pub struct MockDistributor {
@@ -62,11 +62,6 @@ impl CommSystem for MockCommSystem {
     ) -> Result<IoFuture<()>, (RouterInfo, Message)> {
         Ok(Box::new(future::ok(())))
     }
-}
-
-pub fn mock_netdb() -> Arc<RwLock<dyn NetworkDatabase>> {
-    let (tx, _) = mpsc::channel(0);
-    Arc::new(RwLock::new(LocalNetworkDatabase::new(tx)))
 }
 
 pub fn mock_context() -> Arc<Context> {
