@@ -7,7 +7,7 @@ use std::sync::{Arc, RwLock};
 
 use super::{types::CommSystem, Context, Distributor, Router};
 use crate::data::{ReadError, RouterInfo, RouterSecretKeys};
-use crate::netdb::{client::Client as NetDbClient, Engine as NetDbEngine, LocalNetworkDatabase};
+use crate::netdb::{client::Client as NetDbClient, Engine as NetDbEngine};
 use crate::router::config;
 use crate::transport;
 
@@ -118,10 +118,6 @@ impl Builder {
         let (netdb_ib_tx, netdb_ib_rx) = mpsc::channel(1024);
         let (netdb_client_tx, netdb_client_rx) = mpsc::unbounded();
 
-        let netdb = Arc::new(RwLock::new(LocalNetworkDatabase::new(
-            netdb_pending_tx.clone(),
-        )));
-
         let distributor = Distributor::new(netdb_ib_tx);
         let netdb_client = NetDbClient::new(netdb_client_tx);
 
@@ -155,7 +151,6 @@ impl Builder {
         });
 
         let netdb_engine = Some(NetDbEngine::new(
-            netdb,
             ctx.clone(),
             netdb_pending_tx,
             netdb_pending_rx,

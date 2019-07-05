@@ -5,9 +5,10 @@ use futures::{
     Async, Future, Poll,
 };
 use std::fmt;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use tokio_executor::spawn;
 
+use super::LocalNetworkDatabase;
 use crate::{
     data::{Hash, LeaseSet, RouterInfo},
     router::{
@@ -74,26 +75,21 @@ pub enum Query {
 }
 
 impl Query {
-    pub(super) fn handle(self, netdb: &Arc<RwLock<dyn NetworkDatabase>>, ctx: &Arc<Context>) {
+    pub(super) fn handle(self, netdb: &mut LocalNetworkDatabase, ctx: &Arc<Context>) {
         match self {
             Query::KnownRouters(ret) => {
-                if ret.send(netdb.read().unwrap().known_routers()).is_err() {
+                if ret.send(netdb.known_routers()).is_err() {
                     warn!("Completed known routers query, but client gave up");
                 }
             }
             Query::SelectClosestFloodfill(key, ret) => {
-                if ret
-                    .send(netdb.read().unwrap().select_closest_ff(&key))
-                    .is_err()
-                {
+                if ret.send(netdb.select_closest_ff(&key)).is_err() {
                     warn!("Completed floodfill selection, but client gave up");
                 }
             }
             Query::LookupRouterInfo(key, timeout_ms, from_peer, ret) => {
                 spawn(
                     netdb
-                        .write()
-                        .unwrap()
                         .lookup_router_info(Some(ctx.clone()), &key, timeout_ms, from_peer)
                         .then(|res| ret.send(res))
                         .map_err(move |_| {
@@ -104,8 +100,6 @@ impl Query {
             Query::LookupLeaseSet(key, timeout_ms, from_local_dest, ret) => {
                 spawn(
                     netdb
-                        .write()
-                        .unwrap()
                         .lookup_lease_set(Some(ctx.clone()), &key, timeout_ms, from_local_dest)
                         .then(|res| ret.send(res))
                         .map_err(move |_| {
@@ -115,22 +109,14 @@ impl Query {
             }
             Query::StoreRouterInfo(key, ri, from_reseed, ret) => {
                 if ret
-                    .send(
-                        netdb
-                            .write()
-                            .unwrap()
-                            .store_router_info(key.clone(), ri, from_reseed),
-                    )
+                    .send(netdb.store_router_info(key.clone(), ri, from_reseed))
                     .is_err()
                 {
                     warn!("Completed RouterInfo store at {}, but client gave up", key);
                 }
             }
             Query::StoreLeaseSet(key, ls, ret) => {
-                if ret
-                    .send(netdb.write().unwrap().store_lease_set(key.clone(), ls))
-                    .is_err()
-                {
+                if ret.send(netdb.store_lease_set(key.clone(), ls)).is_err() {
                     warn!("Completed LeaseSet store at {}, but client gave up", key);
                 }
             }

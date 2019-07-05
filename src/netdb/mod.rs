@@ -9,7 +9,7 @@ use futures::{
 use rand::{thread_rng, Rng};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 use tokio_executor::{spawn, DefaultExecutor};
 use tokio_timer::{sleep, Delay};
@@ -59,7 +59,7 @@ enum EngineState {
 /// Performs network database maintenance operations.
 pub struct Engine {
     state: Option<EngineState>,
-    netdb: Arc<RwLock<dyn NetworkDatabase>>,
+    netdb: LocalNetworkDatabase,
     ctx: Arc<Context>,
     active_reseed: Option<oneshot::SpawnHandle<(), ()>>,
     pending_lookups: PendingLookups,
@@ -74,7 +74,6 @@ pub struct Engine {
 
 impl Engine {
     pub fn new(
-        netdb: Arc<RwLock<dyn NetworkDatabase>>,
         ctx: Arc<Context>,
         register_pending: PendingTx,
         pending_rx: PendingRx,
@@ -83,7 +82,7 @@ impl Engine {
     ) -> Self {
         Engine {
             state: Some(EngineState::CheckReseed),
-            netdb,
+            netdb: LocalNetworkDatabase::new(register_pending.clone()),
             ctx,
             active_reseed: None,
             pending_lookups: HashMap::new(),
@@ -123,7 +122,7 @@ impl Future for Engine {
                         .unwrap();
                     if enabled
                         && self.active_reseed.is_none()
-                        && self.netdb.read().unwrap().known_routers() < MINIMUM_ROUTERS
+                        && self.netdb.known_routers() < MINIMUM_ROUTERS
                     {
                         self.active_reseed = Some(oneshot::spawn(
                             reseed::HttpsReseeder::new(self.ctx.netdb.clone()),
@@ -136,11 +135,8 @@ impl Future for Engine {
                 EngineState::Timers => {
                     if let Ok(Async::Ready(())) = self.expire_ri_timer.poll() {
                         // Expire RouterInfos
-                        if self.netdb.read().unwrap().known_routers() >= KEEP_ROUTERS {
-                            self.netdb
-                                .write()
-                                .unwrap()
-                                .expire_router_infos(Some(self.ctx.clone()));
+                        if self.netdb.known_routers() >= KEEP_ROUTERS {
+                            self.netdb.expire_router_infos(Some(self.ctx.clone()));
                         }
                         // Reset timer
                         self.expire_ri_timer = sleep(Duration::from_secs(EXPIRE_RI_INTERVAL));
@@ -148,23 +144,24 @@ impl Future for Engine {
 
                     if let Ok(Async::Ready(())) = self.expire_ls_timer.poll() {
                         // Expire LeaseSets
-                        self.netdb.write().unwrap().expire_lease_sets();
+                        self.netdb.expire_lease_sets();
                         // Reset timer
                         self.expire_ls_timer = sleep(Duration::from_secs(EXPIRE_LS_INTERVAL));
                     }
 
                     if let Ok(Async::Ready(())) = self.explore_timer.poll() {
-                        let netdb = self.netdb.read().unwrap();
-
                         // Pick a random key to search for
                         let mut key = Hash([0u8; 32]);
                         thread_rng().fill(&mut key.0);
 
-                        if let Some(ff) = netdb.select_closest_ff(&key) {
+                        if let Some(ff) = self.netdb.select_closest_ff(&key) {
                             debug!("Exploring netDB for RouterInfo with key {}", key);
 
                             // Fire off an exploration job
-                            debug!("Known routers before exploring: {}", netdb.known_routers());
+                            debug!(
+                                "Known routers before exploring: {}",
+                                self.netdb.known_routers()
+                            );
                             let explore = lookup::explore_netdb(
                                 self.ctx.clone(),
                                 self.register_pending.clone(),
@@ -180,7 +177,7 @@ impl Future for Engine {
                         }
 
                         // Reset timer
-                        let interval = if netdb.known_routers() < EXPLORE_MIN_ROUTERS {
+                        let interval = if self.netdb.known_routers() < EXPLORE_MIN_ROUTERS {
                             EXPLORE_MIN_INTERVAL
                         } else {
                             EXPLORE_MAX_INTERVAL
@@ -226,15 +223,11 @@ impl Future for Engine {
                             MessagePayload::DatabaseStore(ds) => match ds.data {
                                 DatabaseStoreData::RI(ri) => {
                                     self.netdb
-                                        .write()
-                                        .unwrap()
                                         .store_router_info(ds.key, ri, false)
                                         .expect("Failed to store RouterInfo");
                                 }
                                 DatabaseStoreData::LS(ls) => {
                                     self.netdb
-                                        .write()
-                                        .unwrap()
                                         .store_lease_set(ds.key, ls)
                                         .expect("Failed to store LeaseSet");
                                 }
@@ -264,7 +257,7 @@ impl Future for Engine {
 
                     // Handle the client message
                     if let Some(query) = next_client {
-                        query.handle(&self.netdb, &self.ctx);
+                        query.handle(&mut self.netdb, &self.ctx);
                     }
 
                     EngineState::CheckReseed
