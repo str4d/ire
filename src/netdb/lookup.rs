@@ -8,10 +8,14 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio_timer::Timeout;
 
-use super::{client::Error, create_routing_key, PendingLookup, PendingTx, XorMetric};
+use super::{
+    create_routing_key,
+    errors::{Error, LookupError},
+    PendingLookup, PendingTx, XorMetric,
+};
 use crate::data::{Hash, RouterInfo};
 use crate::i2np::{DatabaseLookup, DatabaseLookupType, DatabaseSearchReply, Message};
-use crate::router::{types::LookupError, Context};
+use crate::router::Context;
 
 /// The time before we give up on a peer and try the next one.
 ///

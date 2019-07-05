@@ -4,47 +4,14 @@ use futures::{
     sync::{mpsc, oneshot},
     Async, Future, Poll,
 };
-use std::fmt;
 use std::sync::Arc;
 use tokio_executor::spawn;
 
-use super::LocalNetworkDatabase;
+use super::{errors::*, LocalNetworkDatabase};
 use crate::{
     data::{Hash, LeaseSet, RouterInfo},
-    router::{
-        types::{LookupError, NetworkDatabase, StoreError},
-        Context,
-    },
+    router::Context,
 };
-
-pub enum Error {
-    Lookup(LookupError),
-    Store(StoreError),
-    Closed,
-}
-
-impl From<LookupError> for Error {
-    fn from(e: LookupError) -> Self {
-        Error::Lookup(e)
-    }
-}
-
-impl From<StoreError> for Error {
-    fn from(e: StoreError) -> Self {
-        Error::Store(e)
-    }
-}
-
-#[cfg_attr(tarpaulin, skip)]
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Error::Lookup(e) => write!(f, "Lookup error: {}", e),
-            Error::Store(e) => write!(f, "Store error: {}", e),
-            Error::Closed => write!(f, "NetDB closed"),
-        }
-    }
-}
 
 pub enum Query {
     KnownRouters(oneshot::Sender<usize>),

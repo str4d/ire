@@ -18,15 +18,14 @@ use crate::data::{Hash, LeaseSet, RouterInfo, NET_ID};
 use crate::i2np::{
     DatabaseLookupType, DatabaseSearchReply, DatabaseStoreData, Message, MessagePayload,
 };
-use crate::router::{
-    config,
-    types::{LookupError, NetworkDatabase, StoreError},
-    Context,
-};
+use crate::router::{config, Context};
 
 pub mod client;
+mod errors;
 mod lookup;
 pub mod reseed;
+
+use errors::{LookupError, StoreError};
 
 /// Maximum age of a local RouterInfo.
 const ROUTER_INFO_EXPIRATION: u64 = 27 * 60 * 60;
@@ -325,9 +324,7 @@ impl LocalNetworkDatabase {
             register_pending: pending_tx,
         }
     }
-}
 
-impl NetworkDatabase for LocalNetworkDatabase {
     fn known_routers(&self) -> usize {
         self.ri_ds.len()
     }
@@ -520,10 +517,12 @@ mod tests {
     use futures::{sync::mpsc, Async};
     use std::time::{Duration, SystemTime};
 
-    use super::{router_info_is_current, LocalNetworkDatabase, XorMetric, ROUTER_INFO_EXPIRATION};
+    use super::{
+        errors::StoreError, router_info_is_current, LocalNetworkDatabase, XorMetric,
+        ROUTER_INFO_EXPIRATION,
+    };
     use crate::crypto;
     use crate::data::{Hash, I2PDate, RouterInfo, RouterSecretKeys, OPT_NET_ID};
-    use crate::router::types::{NetworkDatabase, StoreError};
 
     #[test]
     fn xor_metric() {
