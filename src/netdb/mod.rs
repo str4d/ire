@@ -31,8 +31,6 @@ pub mod reseed;
 /// Maximum age of a local RouterInfo.
 const ROUTER_INFO_EXPIRATION: u64 = 27 * 60 * 60;
 
-/// Minimum seconds per engine cycle.
-const ENGINE_DOWNTIME: u64 = 10;
 /// Interval on which we expire RouterInfos.
 const EXPIRE_RI_INTERVAL: u64 = 5 * 60;
 /// Interval on which we expire LeaseSets.
@@ -64,92 +62,6 @@ macro_rules! try_poll {
 type PendingLookups = HashMap<(Hash, Hash), oneshot::Sender<DatabaseSearchReply>>;
 pub(crate) type PendingTx = mpsc::Sender<(Hash, Hash, oneshot::Sender<DatabaseSearchReply>)>;
 type PendingRx = mpsc::Receiver<(Hash, Hash, oneshot::Sender<DatabaseSearchReply>)>;
-
-pub struct MessageHandler {
-    netdb: Arc<RwLock<dyn NetworkDatabase>>,
-    pending_lookups: PendingLookups,
-    pending_rx: PendingRx,
-    ib_rx: mpsc::Receiver<(Hash, Message)>,
-}
-
-impl MessageHandler {
-    pub fn new(
-        netdb: Arc<RwLock<dyn NetworkDatabase>>,
-        pending_rx: PendingRx,
-        ib_rx: mpsc::Receiver<(Hash, Message)>,
-    ) -> Self {
-        MessageHandler {
-            netdb,
-            pending_lookups: HashMap::new(),
-            pending_rx,
-            ib_rx,
-        }
-    }
-}
-
-impl Future for MessageHandler {
-    type Item = ();
-    type Error = ();
-
-    fn poll(&mut self) -> Poll<(), ()> {
-        loop {
-            // First update the pending lookup table
-            while let Async::Ready(f) = self.pending_rx.poll()? {
-                if let Some((from, key, tx)) = f {
-                    self.pending_lookups.insert((from, key), tx);
-                } else {
-                    // pending_rx.poll() returned None, so we are done
-                    return Ok(Async::Ready(()));
-                }
-            }
-
-            // Then handle the next message
-            if let Some((from, msg)) = try_ready!(self.ib_rx.poll()) {
-                match msg.payload {
-                    MessagePayload::DatabaseStore(ds) => match ds.data {
-                        DatabaseStoreData::RI(ri) => {
-                            self.netdb
-                                .write()
-                                .unwrap()
-                                .store_router_info(ds.key, ri, false)
-                                .expect("Failed to store RouterInfo");
-                        }
-                        DatabaseStoreData::LS(ls) => {
-                            self.netdb
-                                .write()
-                                .unwrap()
-                                .store_lease_set(ds.key, ls)
-                                .expect("Failed to store LeaseSet");
-                        }
-                    },
-                    MessagePayload::DatabaseSearchReply(dsr) => {
-                        if let Some(pending) = self
-                            .pending_lookups
-                            .remove(&(from.clone(), dsr.key.clone()))
-                        {
-                            debug!("Received msg {} from {}:\n{}", msg.id, from, dsr);
-                            if let Err(dsr) = pending.send(dsr) {
-                                warn!(
-                                    "Lookup task timed out waiting for DatabaseSearchReply on {}",
-                                    dsr.key
-                                );
-                            }
-                        } else {
-                            debug!(
-                                "Received msg {} from {} with no pending lookup:\n{}",
-                                msg.id, from, dsr
-                            )
-                        }
-                    }
-                    _ => debug!("Received message from {}:\n{}", from, msg),
-                }
-            } else {
-                // ib_rx.poll() returned None, so we are done
-                return Ok(Async::Ready(()));
-            }
-        }
-    }
-}
 
 pub struct ClientHandler {
     netdb: Arc<RwLock<dyn NetworkDatabase>>,
@@ -188,7 +100,7 @@ enum EngineState {
     CheckReseed,
     Reseeding(reseed::HttpsReseeder),
     Timers,
-    Sleep(Delay),
+    Messages,
 }
 
 /// Performs network database maintenance operations.
@@ -196,7 +108,10 @@ pub struct Engine {
     state: Option<EngineState>,
     netdb: Arc<RwLock<dyn NetworkDatabase>>,
     ctx: Arc<Context>,
+    pending_lookups: PendingLookups,
     register_pending: PendingTx,
+    pending_rx: PendingRx,
+    ib_rx: mpsc::Receiver<(Hash, Message)>,
     expire_ri_timer: Delay,
     expire_ls_timer: Delay,
     explore_timer: Delay,
@@ -207,12 +122,17 @@ impl Engine {
         netdb: Arc<RwLock<dyn NetworkDatabase>>,
         ctx: Arc<Context>,
         register_pending: PendingTx,
+        pending_rx: PendingRx,
+        ib_rx: mpsc::Receiver<(Hash, Message)>,
     ) -> Self {
         Engine {
             state: Some(EngineState::CheckReseed),
             netdb,
             ctx,
+            pending_lookups: HashMap::new(),
             register_pending,
+            pending_rx,
+            ib_rx,
             expire_ri_timer: sleep(Duration::from_secs(EXPIRE_RI_INTERVAL)),
             expire_ls_timer: sleep(Duration::from_secs(EXPIRE_LS_INTERVAL)),
             explore_timer: sleep(Duration::from_secs(0)),
@@ -305,15 +225,70 @@ impl Future for Engine {
                         self.explore_timer = sleep(Duration::from_secs(interval));
                     }
 
-                    EngineState::Sleep(sleep(Duration::from_secs(ENGINE_DOWNTIME)))
+                    EngineState::Messages
                 }
-                EngineState::Sleep(mut f) => {
-                    match try_poll!(f.poll(), self, EngineState::Sleep(f)) {
-                        Ok(()) => EngineState::CheckReseed,
-                        Err(e) => {
-                            error!("NetDB timer error: {}", e);
+                EngineState::Messages => {
+                    // First update the pending lookup table
+                    while let Async::Ready(f) = self.pending_rx.poll()? {
+                        if let Some((from, key, tx)) = f {
+                            self.pending_lookups.insert((from, key), tx);
+                        } else {
+                            // pending_rx.poll() returned None, so we are done
+                            return Ok(Async::Ready(()));
+                        }
+                    }
+
+                    // Then handle the next message
+                    let next = match try_poll!(self.ib_rx.poll(), self, EngineState::CheckReseed) {
+                        Ok(next) => next,
+                        Err(_) => {
+                            error!("Error while polling for incoming messages!");
                             return Err(());
                         }
+                    };
+                    if let Some((from, msg)) = next {
+                        match msg.payload {
+                            MessagePayload::DatabaseStore(ds) => match ds.data {
+                                DatabaseStoreData::RI(ri) => {
+                                    self.netdb
+                                        .write()
+                                        .unwrap()
+                                        .store_router_info(ds.key, ri, false)
+                                        .expect("Failed to store RouterInfo");
+                                }
+                                DatabaseStoreData::LS(ls) => {
+                                    self.netdb
+                                        .write()
+                                        .unwrap()
+                                        .store_lease_set(ds.key, ls)
+                                        .expect("Failed to store LeaseSet");
+                                }
+                            },
+                            MessagePayload::DatabaseSearchReply(dsr) => {
+                                if let Some(pending) = self
+                                    .pending_lookups
+                                    .remove(&(from.clone(), dsr.key.clone()))
+                                {
+                                    debug!("Received msg {} from {}:\n{}", msg.id, from, dsr);
+                                    if let Err(dsr) = pending.send(dsr) {
+                                        warn!(
+                                    "Lookup task timed out waiting for DatabaseSearchReply on {}",
+                                    dsr.key
+                                );
+                                    }
+                                } else {
+                                    debug!(
+                                        "Received msg {} from {} with no pending lookup:\n{}",
+                                        msg.id, from, dsr
+                                    )
+                                }
+                            }
+                            _ => debug!("Received message from {}:\n{}", from, msg),
+                        }
+                        EngineState::CheckReseed
+                    } else {
+                        // ib_rx.poll() returned None, so we are done
+                        return Ok(Async::Ready(()));
                     }
                 }
             };
