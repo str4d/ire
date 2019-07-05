@@ -4,14 +4,14 @@ use chrono::offset::Utc;
 use futures::{
     future,
     sync::{mpsc, oneshot},
-    try_ready, Async, Future, Poll, Stream,
+    Async, Future, Poll, Stream,
 };
 use rand::{thread_rng, Rng};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::{Duration, SystemTime};
-use tokio_executor::spawn;
+use tokio_executor::{spawn, DefaultExecutor};
 use tokio_timer::{sleep, Delay};
 
 use crate::data::{Hash, LeaseSet, RouterInfo, NET_ID};
@@ -46,59 +46,12 @@ const EXPLORE_MAX_INTERVAL: u64 = 15 * 60;
 /// Explore quickly if we have fewer than this many routers.
 const EXPLORE_MIN_ROUTERS: usize = 250;
 
-macro_rules! try_poll {
-    ($f:expr, $parent:expr, $state:expr) => {
-        match $f {
-            Ok(Async::Ready(t)) => Ok(t),
-            Ok(Async::NotReady) => {
-                $parent.state = Some($state);
-                return Ok(Async::NotReady);
-            }
-            Err(e) => Err(e),
-        }
-    };
-}
-
 type PendingLookups = HashMap<(Hash, Hash), oneshot::Sender<DatabaseSearchReply>>;
 pub(crate) type PendingTx = mpsc::Sender<(Hash, Hash, oneshot::Sender<DatabaseSearchReply>)>;
 type PendingRx = mpsc::Receiver<(Hash, Hash, oneshot::Sender<DatabaseSearchReply>)>;
 
-pub struct ClientHandler {
-    netdb: Arc<RwLock<dyn NetworkDatabase>>,
-    ctx: Arc<Context>,
-    client_rx: mpsc::UnboundedReceiver<client::Query>,
-}
-
-impl ClientHandler {
-    pub fn new(
-        netdb: Arc<RwLock<dyn NetworkDatabase>>,
-        ctx: Arc<Context>,
-        client_rx: mpsc::UnboundedReceiver<client::Query>,
-    ) -> Self {
-        ClientHandler {
-            netdb,
-            ctx,
-            client_rx,
-        }
-    }
-}
-
-impl Future for ClientHandler {
-    type Item = ();
-    type Error = ();
-
-    fn poll(&mut self) -> Poll<(), ()> {
-        loop {
-            if let Some(query) = try_ready!(self.client_rx.poll()) {
-                query.handle(&self.netdb, &self.ctx);
-            }
-        }
-    }
-}
-
 enum EngineState {
     CheckReseed,
-    Reseeding(reseed::HttpsReseeder),
     Timers,
     Messages,
 }
@@ -108,10 +61,12 @@ pub struct Engine {
     state: Option<EngineState>,
     netdb: Arc<RwLock<dyn NetworkDatabase>>,
     ctx: Arc<Context>,
+    active_reseed: Option<oneshot::SpawnHandle<(), ()>>,
     pending_lookups: PendingLookups,
     register_pending: PendingTx,
     pending_rx: PendingRx,
     ib_rx: mpsc::Receiver<(Hash, Message)>,
+    client_rx: mpsc::UnboundedReceiver<client::Query>,
     expire_ri_timer: Delay,
     expire_ls_timer: Delay,
     explore_timer: Delay,
@@ -124,15 +79,18 @@ impl Engine {
         register_pending: PendingTx,
         pending_rx: PendingRx,
         ib_rx: mpsc::Receiver<(Hash, Message)>,
+        client_rx: mpsc::UnboundedReceiver<client::Query>,
     ) -> Self {
         Engine {
             state: Some(EngineState::CheckReseed),
             netdb,
             ctx,
+            active_reseed: None,
             pending_lookups: HashMap::new(),
             register_pending,
             pending_rx,
             ib_rx,
+            client_rx,
             expire_ri_timer: sleep(Duration::from_secs(EXPIRE_RI_INTERVAL)),
             expire_ls_timer: sleep(Duration::from_secs(EXPIRE_LS_INTERVAL)),
             explore_timer: sleep(Duration::from_secs(0)),
@@ -148,6 +106,14 @@ impl Future for Engine {
         loop {
             let next_state = match self.state.take().unwrap() {
                 EngineState::CheckReseed => {
+                    // Update state of any ongoing reseed
+                    if let Some(mut active) = self.active_reseed.take() {
+                        if let Ok(Async::NotReady) = active.poll() {
+                            self.active_reseed = Some(active);
+                        }
+                    }
+
+                    // Fire off a new reseed if we need to
                     let enabled = self
                         .ctx
                         .config
@@ -155,22 +121,17 @@ impl Future for Engine {
                         .unwrap()
                         .get_bool(config::RESEED_ENABLE)
                         .unwrap();
-                    if enabled && self.netdb.read().unwrap().known_routers() < MINIMUM_ROUTERS {
-                        // Reseed "synchronously" within the engine, as we can't do much without peers
-                        EngineState::Reseeding(reseed::HttpsReseeder::new(self.ctx.netdb.clone()))
-                    } else {
-                        EngineState::Timers
-                    }
-                }
-                EngineState::Reseeding(mut f) => {
-                    if try_poll!(f.poll(), self, EngineState::Reseeding(f)).is_err()
-                        && self.netdb.read().unwrap().known_routers() == 0
+                    if enabled
+                        && self.active_reseed.is_none()
+                        && self.netdb.read().unwrap().known_routers() < MINIMUM_ROUTERS
                     {
-                        error!("We have no routers to connect to! Shutting down NetDB engine.");
-                        return Err(());
-                    } else {
-                        EngineState::Timers
+                        self.active_reseed = Some(oneshot::spawn(
+                            reseed::HttpsReseeder::new(self.ctx.netdb.clone()),
+                            &DefaultExecutor::current(),
+                        ));
                     }
+
+                    EngineState::Timers
                 }
                 EngineState::Timers => {
                     if let Ok(Async::Ready(())) = self.expire_ri_timer.poll() {
@@ -194,27 +155,29 @@ impl Future for Engine {
 
                     if let Ok(Async::Ready(())) = self.explore_timer.poll() {
                         let netdb = self.netdb.read().unwrap();
-                        debug!("Known routers before exploring: {}", netdb.known_routers());
 
                         // Pick a random key to search for
                         let mut key = Hash([0u8; 32]);
                         thread_rng().fill(&mut key.0);
-                        debug!("Exploring netDB for RouterInfo with key {}", key);
-                        let ff = netdb.select_closest_ff(&key).unwrap();
 
-                        // Fire off an exploration job
-                        let explore = lookup::explore_netdb(
-                            self.ctx.clone(),
-                            self.register_pending.clone(),
-                            key,
-                            ff,
-                            30 * 1000,
-                        );
-                        spawn(
-                            explore
-                                .map(|_| ())
-                                .map_err(|e| error!("Error while exploring: {}", e)),
-                        );
+                        if let Some(ff) = netdb.select_closest_ff(&key) {
+                            debug!("Exploring netDB for RouterInfo with key {}", key);
+
+                            // Fire off an exploration job
+                            debug!("Known routers before exploring: {}", netdb.known_routers());
+                            let explore = lookup::explore_netdb(
+                                self.ctx.clone(),
+                                self.register_pending.clone(),
+                                key,
+                                ff,
+                                30 * 1000,
+                            );
+                            spawn(
+                                explore
+                                    .map(|_| ())
+                                    .map_err(|e| error!("Error while exploring: {}", e)),
+                            );
+                        }
 
                         // Reset timer
                         let interval = if netdb.known_routers() < EXPLORE_MIN_ROUTERS {
@@ -238,15 +201,27 @@ impl Future for Engine {
                         }
                     }
 
-                    // Then handle the next message
-                    let next = match try_poll!(self.ib_rx.poll(), self, EngineState::CheckReseed) {
-                        Ok(next) => next,
-                        Err(_) => {
+                    // Fetch the next network and client messages
+                    let (next_ib, next_client) = match (self.ib_rx.poll(), self.client_rx.poll()) {
+                        (Err(_), _) | (_, Err(_)) => {
                             error!("Error while polling for incoming messages!");
                             return Err(());
                         }
+                        (Ok(Async::Ready(None)), _) | (_, Ok(Async::Ready(None))) => {
+                            // ib_rx.poll() or client_rx.poll() returned None, so we are done
+                            return Ok(Async::Ready(()));
+                        }
+                        (Ok(Async::NotReady), Ok(Async::NotReady)) => {
+                            self.state = Some(EngineState::CheckReseed);
+                            return Ok(Async::NotReady);
+                        }
+                        (Ok(Async::Ready(t)), Ok(Async::NotReady)) => (t, None),
+                        (Ok(Async::NotReady), Ok(Async::Ready(u))) => (None, u),
+                        (Ok(Async::Ready(t)), Ok(Async::Ready(u))) => (t, u),
                     };
-                    if let Some((from, msg)) = next {
+
+                    // Handle the network message
+                    if let Some((from, msg)) = next_ib {
                         match msg.payload {
                             MessagePayload::DatabaseStore(ds) => match ds.data {
                                 DatabaseStoreData::RI(ri) => {
@@ -285,11 +260,14 @@ impl Future for Engine {
                             }
                             _ => debug!("Received message from {}:\n{}", from, msg),
                         }
-                        EngineState::CheckReseed
-                    } else {
-                        // ib_rx.poll() returned None, so we are done
-                        return Ok(Async::Ready(()));
                     }
+
+                    // Handle the client message
+                    if let Some(query) = next_client {
+                        query.handle(&self.netdb, &self.ctx);
+                    }
+
+                    EngineState::CheckReseed
                 }
             };
             self.state = Some(next_state);

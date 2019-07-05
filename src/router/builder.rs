@@ -7,9 +7,7 @@ use std::sync::{Arc, RwLock};
 
 use super::{types::CommSystem, Context, Distributor, Router};
 use crate::data::{ReadError, RouterInfo, RouterSecretKeys};
-use crate::netdb::{
-    client::Client as NetDbClient, ClientHandler, Engine as NetDbEngine, LocalNetworkDatabase,
-};
+use crate::netdb::{client::Client as NetDbClient, Engine as NetDbEngine, LocalNetworkDatabase};
 use crate::router::config;
 use crate::transport;
 
@@ -156,24 +154,15 @@ impl Builder {
             comms,
         });
 
-        let netdb_client_handler = Some(ClientHandler::new(
-            netdb.clone(),
-            ctx.clone(),
-            netdb_client_rx,
-        ));
-
         let netdb_engine = Some(NetDbEngine::new(
             netdb,
             ctx.clone(),
             netdb_pending_tx,
             netdb_pending_rx,
             netdb_ib_rx,
+            netdb_client_rx,
         ));
 
-        Ok(Router {
-            ctx,
-            netdb_engine,
-            netdb_client_handler,
-        })
+        Ok(Router { ctx, netdb_engine })
     }
 }

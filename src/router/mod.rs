@@ -55,7 +55,6 @@ impl types::Distributor for Distributor {
 pub struct Router {
     ctx: Arc<Context>,
     netdb_engine: Option<netdb::Engine>,
-    netdb_client_handler: Option<netdb::ClientHandler>,
 }
 
 pub struct Context {
@@ -85,17 +84,10 @@ impl Router {
             .netdb_engine
             .take()
             .expect("Can only call start() once");
-        let netdb_client_handler = self
-            .netdb_client_handler
-            .take()
-            .expect("Can only call start() once");
 
         lazy(|| {
             // Start the transport system
             spawn(comms_engine);
-
-            // Start the network database subsystems
-            spawn(netdb_client_handler);
 
             // Start network database operations
             spawn(netdb_engine);
