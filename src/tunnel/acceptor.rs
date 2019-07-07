@@ -469,7 +469,7 @@ mod tests {
         crypto::elgamal,
         data::{Hash, RouterInfo, RouterSecretKeys, TunnelId},
         i2np::{BuildRequestRecord, ParticipantType},
-        router::mock::mock_context_and_netdb,
+        router::mock::{mock_context, mock_context_and_netdb},
         tunnel::HopData,
         util::DecayingBloomFilter,
     };
@@ -554,5 +554,103 @@ mod tests {
             }
             v => panic!("Unexpected returned value: {:?}", v),
         }
+    }
+
+    #[test]
+    fn build_request_loop_detection_adjacent() {
+        let ctx = mock_context();
+
+        let decryptor = elgamal::Decryptor::from(&ctx.keys.private_key);
+        let filter = Arc::new(Mutex::new(DecayingBloomFilter::new(10)));
+        let (new_participating_tx, mut new_participating_rx) = mpsc::channel(1);
+
+        // Generate a peer to go before us
+        let from_tid = TunnelId(1);
+        let from_ident = Hash([1; 32]);
+
+        // Try to use ourselves as the next hop
+        let next_tid = TunnelId(2);
+        let next_ident = ctx.keys.rid.hash();
+
+        let tb = {
+            let brr = BuildRequestRecord::new(
+                from_tid,
+                ctx.keys.rid.hash(),
+                next_tid,
+                next_ident,
+                ParticipantType::Intermediate,
+            );
+            vec![brr.encrypt(&elgamal::Encryptor::from(&ctx.keys.rid.public_key))]
+        };
+
+        let f = HopAcceptor::new(
+            from_ident.clone(),
+            tb,
+            0,
+            decryptor,
+            filter,
+            new_participating_tx,
+            ctx,
+        );
+
+        // The acceptor should run to completion without needing a NetDB lookup
+        let pool = Builder::new().pool_size(2).max_blocking(1).build();
+        assert_eq!(pool.spawn_handle(f).wait(), Ok(()));
+
+        // Shut down the threadpool, so that the test will not hang if subsequent
+        // assertions fail.
+        pool.shutdown_now().wait().unwrap();
+
+        // We should have not accepted the build request
+        assert_eq!(new_participating_rx.poll(), Ok(Async::Ready(None)));
+    }
+
+    #[test]
+    fn build_request_loop_detection_cycle() {
+        let ctx = mock_context();
+
+        let decryptor = elgamal::Decryptor::from(&ctx.keys.private_key);
+        let filter = Arc::new(Mutex::new(DecayingBloomFilter::new(10)));
+        let (new_participating_tx, mut new_participating_rx) = mpsc::channel(1);
+
+        // Generate a peer to go before us
+        let from_tid = TunnelId(1);
+        let from_ident = Hash([1; 32]);
+
+        // Try to use the same peer as the next hop
+        let next_tid = TunnelId(2);
+        let next_ident = from_ident.clone();
+
+        let tb = {
+            let brr = BuildRequestRecord::new(
+                from_tid,
+                ctx.keys.rid.hash(),
+                next_tid,
+                next_ident,
+                ParticipantType::Intermediate,
+            );
+            vec![brr.encrypt(&elgamal::Encryptor::from(&ctx.keys.rid.public_key))]
+        };
+
+        let f = HopAcceptor::new(
+            from_ident.clone(),
+            tb,
+            0,
+            decryptor,
+            filter,
+            new_participating_tx,
+            ctx,
+        );
+
+        // The acceptor should run to completion without needing a NetDB lookup
+        let pool = Builder::new().pool_size(2).max_blocking(1).build();
+        assert_eq!(pool.spawn_handle(f).wait(), Ok(()));
+
+        // Shut down the threadpool, so that the test will not hang if subsequent
+        // assertions fail.
+        pool.shutdown_now().wait().unwrap();
+
+        // We should have not accepted the build request
+        assert_eq!(new_participating_rx.poll(), Ok(Async::Ready(None)));
     }
 }
