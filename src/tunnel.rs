@@ -19,6 +19,7 @@ const TUNNEL_LIFETIME: u64 = 10 * 60;
 /// - InboundGateway contains `next_hop`
 /// - Intermediate contains `from_ident` and `next_hop`
 /// - OutboundEndpoint contains `from_ident`
+#[derive(Debug, PartialEq)]
 enum HopData {
     InboundGateway((RouterInfo, TunnelId)),
     Intermediate(Hash, (RouterInfo, TunnelId)),
@@ -29,10 +30,17 @@ enum HopData {
 ///
 /// Tunnels have a maximum lifetime of 10 minutes, so the [`RouterInfo`] of the next hop
 /// is looked up at tunnel build time and cached here.
+#[derive(Debug)]
 pub struct HopConfig {
     hop_data: HopData,
     layer_cipher: encryption::LayerCipher,
     expires: SystemTime,
+}
+
+impl PartialEq for HopConfig {
+    fn eq(&self, rhs: &HopConfig) -> bool {
+        self.hop_data == rhs.hop_data && self.expires == rhs.expires
+    }
 }
 
 #[derive(Debug, PartialEq)]

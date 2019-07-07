@@ -458,3 +458,102 @@ impl Future for Listener {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use futures::{lazy, sync::mpsc, Async, Future, Stream};
+    use std::sync::{Arc, Mutex};
+    use tokio_threadpool::Builder;
+
+    use super::HopAcceptor;
+    use crate::{
+        crypto::elgamal,
+        data::{Hash, RouterInfo, RouterSecretKeys, TunnelId},
+        i2np::{BuildRequestRecord, ParticipantType},
+        router::mock::mock_context_and_netdb,
+        tunnel::HopData,
+        util::DecayingBloomFilter,
+    };
+
+    #[test]
+    fn accepted_intermediate_build_request() {
+        let (ctx, mut netdb) = mock_context_and_netdb();
+
+        let decryptor = elgamal::Decryptor::from(&ctx.keys.private_key);
+        let filter = Arc::new(Mutex::new(DecayingBloomFilter::new(10)));
+        let (new_participating_tx, mut new_participating_rx) = mpsc::channel(1);
+
+        // Generate a peer to go before us
+        let from_tid = TunnelId(1);
+        let from_ident = Hash([1; 32]);
+
+        // Generate a peer to go after us
+        let next_tid = TunnelId(2);
+        let next_ri = {
+            let keys = RouterSecretKeys::new();
+            let mut ri = RouterInfo::new(keys.rid);
+            ri.sign(&keys.signing_private_key);
+            ri
+        };
+        let next_ident = next_ri.router_id.hash();
+
+        // Create a valid VariableTunnelBuild message
+        let tb = {
+            let brr = BuildRequestRecord::new(
+                from_tid,
+                ctx.keys.rid.hash(),
+                next_tid,
+                next_ident.clone(),
+                ParticipantType::Intermediate,
+            );
+            vec![brr.encrypt(&elgamal::Encryptor::from(&ctx.keys.rid.public_key))]
+        };
+
+        // Add the next hop to the NetDB
+        netdb.store_router_info(next_ident, next_ri.clone());
+
+        let f = HopAcceptor::new(
+            from_ident.clone(),
+            tb,
+            0,
+            decryptor,
+            filter,
+            new_participating_tx,
+            ctx,
+        );
+
+        // Run the acceptor on a threadpool
+        let pool = Builder::new().pool_size(2).max_blocking(1).build();
+        let mut res = pool.spawn_handle(f);
+
+        // The acceptor should be waiting on the NetDB
+        lazy(|| {
+            assert_eq!(res.poll(), Ok(Async::NotReady));
+            Ok::<(), ()>(())
+        })
+        .wait()
+        .unwrap();
+
+        // Start the NetDB
+        pool.spawn(netdb);
+
+        // The acceptor should now run to completion
+        assert_eq!(res.wait(), Ok(()));
+
+        // Shut down the threadpool, so that the test will not hang if subsequent
+        // assertions fail.
+        pool.shutdown_now().wait().unwrap();
+
+        // We should have accepted the build request
+        match new_participating_rx.poll() {
+            Ok(Async::Ready(Some((receive_tid, config)))) => {
+                assert_eq!(receive_tid, from_tid);
+                assert_eq!(
+                    config.hop_data,
+                    HopData::Intermediate(from_ident, (next_ri, next_tid))
+                )
+            }
+            v => panic!("Unexpected returned value: {:?}", v),
+        }
+    }
+}

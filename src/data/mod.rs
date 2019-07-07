@@ -273,7 +273,7 @@ fn cert_and_padding_from_keys(
 /// Defines the way to uniquely identify a particular router.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RouterIdentity {
-    public_key: PublicKey,
+    pub public_key: PublicKey,
     padding: Option<Padding>,
     pub signing_key: SigningPublicKey,
     pub certificate: Certificate,

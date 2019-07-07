@@ -14,7 +14,7 @@ use crate::i2np::TunnelData;
 /// documentation for details of the algorithm.
 ///
 /// [processing]: https://geti2p.net/en/docs/tunnels/implementation#tunnel.participant
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct LayerCipher {
     iv_cipher: aes::Aes256,
     layer_key: SessionKey,
