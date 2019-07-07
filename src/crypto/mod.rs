@@ -4,6 +4,7 @@ use aes::{self, block_cipher_trait::generic_array::GenericArray as AesGenericArr
 use block_modes::{block_padding::ZeroPadding, BlockMode, BlockModeIv, Cbc};
 use i2p_ring::signature as ring_signature;
 use nom::Err;
+use rand::Rng;
 use signatory::{
     ecdsa::{
         curve::{NistP256, NistP384, WeierstrassCurve},
@@ -573,6 +574,12 @@ impl Signature {
 pub struct SessionKey(pub [u8; 32]);
 
 impl SessionKey {
+    pub fn generate<R: Rng>(rng: &mut R) -> Self {
+        let mut x = [0; 32];
+        rng.fill(&mut x);
+        SessionKey(x)
+    }
+
     fn from_bytes(buf: &[u8; 32]) -> Self {
         let mut x = [0u8; 32];
         x.copy_from_slice(buf);

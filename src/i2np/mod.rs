@@ -9,9 +9,9 @@
 //! [I2NP specification](https://geti2p.net/spec/i2np)
 
 use nom;
-use rand::{thread_rng, Rng};
+use rand::{rngs::OsRng, thread_rng, Rng};
 use std::fmt;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::crypto::{self, elgamal, SessionKey};
 use crate::data::{
@@ -74,10 +74,52 @@ pub struct BuildRequestRecord {
 }
 
 impl BuildRequestRecord {
+    pub fn new(
+        receive_tid: TunnelId,
+        our_ident: Hash,
+        next_tid: TunnelId,
+        next_ident: Hash,
+        hop_type: ParticipantType,
+    ) -> Self {
+        let mut rng = OsRng::new().expect("should be able to construct RNG");
+        let reply_iv = {
+            let mut tmp = [0; 16];
+            rng.fill(&mut tmp);
+            tmp
+        };
+        BuildRequestRecord {
+            receive_tid,
+            our_ident,
+            next_tid,
+            next_ident,
+            layer_key: SessionKey::generate(&mut rng),
+            iv_key: SessionKey::generate(&mut rng),
+            reply_key: SessionKey::generate(&mut rng),
+            reply_iv,
+            hop_type,
+            request_time: (SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("System time is broken!")
+                .as_secs()
+                / 3600) as u32,
+            send_msg_id: 0,
+        }
+    }
+
     pub fn decrypt(ct: &[u8], decryptor: &elgamal::Decryptor) -> Result<Self, BuildRequestError> {
         let pt = decryptor.decrypt(&ct, false)?;
         let (_, brr) = frame::build_request_record(&pt)?;
         Ok(brr)
+    }
+
+    pub fn encrypt(&self, encryptor: &elgamal::Encryptor) -> [u8; 528] {
+        let mut pt = [0; 222];
+        frame::gen_build_request_record((&mut pt, 0), self).unwrap();
+
+        let mut ct = [0; 528];
+        ct[0..16].copy_from_slice(&self.our_ident.0[0..16]);
+        ct[16..].copy_from_slice(&encryptor.encrypt(&pt, false).unwrap());
+        ct
     }
 }
 
@@ -429,6 +471,24 @@ mod tests {
     use super::*;
 
     use std::time::SystemTime;
+
+    #[test]
+    fn build_request_record_encryption() {
+        let brr = BuildRequestRecord::new(
+            TunnelId(1),
+            Hash([2; 32]),
+            TunnelId(3),
+            Hash([4; 32]),
+            ParticipantType::Intermediate,
+        );
+
+        let (priv_key, pub_key) = elgamal::KeyPairGenerator::generate();
+        let ct = brr.encrypt(&elgamal::Encryptor::from(&pub_key));
+        assert_eq!(
+            BuildRequestRecord::decrypt(&ct[16..], &elgamal::Decryptor::from(&priv_key)),
+            Ok(brr)
+        );
+    }
 
     macro_rules! check_size {
         ($size_func:ident, $header_size:expr) => {{
