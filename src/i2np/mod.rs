@@ -30,6 +30,7 @@ const MESSAGE_EXPIRATION_MS: u64 = 60 * 1000;
 pub enum BuildRequestError {
     Crypto(crypto::Error),
     Read(ReadError),
+    Invalid,
     Duplicate,
 }
 
@@ -107,9 +108,13 @@ impl BuildRequestRecord {
     }
 
     pub fn decrypt(ct: &[u8], decryptor: &elgamal::Decryptor) -> Result<Self, BuildRequestError> {
-        let pt = decryptor.decrypt(&ct, false)?;
+        let pt = decryptor.decrypt(&ct[16..], false)?;
         let (_, brr) = frame::build_request_record(&pt)?;
-        Ok(brr)
+        if ct[0..16] == brr.our_ident.0[0..16] {
+            Ok(brr)
+        } else {
+            Err(BuildRequestError::Invalid)
+        }
     }
 
     pub fn encrypt(&self, encryptor: &elgamal::Encryptor) -> [u8; 528] {
@@ -485,7 +490,7 @@ mod tests {
         let (priv_key, pub_key) = elgamal::KeyPairGenerator::generate();
         let ct = brr.encrypt(&elgamal::Encryptor::from(&pub_key));
         assert_eq!(
-            BuildRequestRecord::decrypt(&ct[16..], &elgamal::Decryptor::from(&priv_key)),
+            BuildRequestRecord::decrypt(&ct, &elgamal::Decryptor::from(&priv_key)),
             Ok(brr)
         );
     }

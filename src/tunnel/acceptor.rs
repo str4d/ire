@@ -168,18 +168,14 @@ impl<TB: TunnelBuildRequest> Future for HopAcceptor<TB> {
                     // Attempt to decrypt the received TunnelBuildRequest
                     match try_poll!(
                         blocking(|| {
-                            let tb_entry = tb.entry_mut(i);
-                            match BuildRequestRecord::decrypt(&tb_entry[16..], &self.decryptor) {
-                                Ok(brr) => {
-                                    // Check for duplicates by feeding the reply key into a decaying
-                                    // Bloom filter.
-                                    if self.filter.lock().unwrap().feed(&brr.reply_key.0) {
-                                        Err(BuildRequestError::Duplicate)
-                                    } else {
-                                        Ok(brr)
-                                    }
-                                }
-                                Err(e) => Err(e),
+                            let brr =
+                                BuildRequestRecord::decrypt(tb.entry_mut(i), &self.decryptor)?;
+                            // Check for duplicates by feeding the reply key into a decaying
+                            // Bloom filter.
+                            if self.filter.lock().unwrap().feed(&brr.reply_key.0) {
+                                Err(BuildRequestError::Duplicate)
+                            } else {
+                                Ok(brr)
                             }
                         }),
                         self,
