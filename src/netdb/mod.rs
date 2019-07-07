@@ -23,6 +23,7 @@ use crate::router::{config, Context};
 pub mod client;
 mod errors;
 mod lookup;
+pub mod mock;
 pub mod reseed;
 
 use errors::{LookupError, StoreError};

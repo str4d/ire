@@ -10,6 +10,7 @@ use crate::data::{ReadError, RouterInfo, RouterSecretKeys};
 use crate::netdb::{client::Client as NetDbClient, Engine as NetDbEngine};
 use crate::router::config;
 use crate::transport;
+use crate::tunnel;
 
 /// Builder errors
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -114,11 +115,31 @@ impl Builder {
             },
         };
 
+        // The goal of the next section is to build this subsystem graph:
+        //
+        //                 Incoming messages
+        //                         |
+        //                         v
+        //           +------- Distributor -----+------------------------+
+        //           |                         |                        |
+        //           v                         v                        v
+        //     netdb::Engine <-----> tunnel::Listener ------> tunnel::Participant
+        //           |                         |                        |
+        //           |                         |                        |
+        //           +------> CommSystem <-----+------------------------+
+        //                         |
+        //                         v
+        //                 Outgoing messages
+
+        // Create channels between the various subsystems.
         let (netdb_pending_tx, netdb_pending_rx) = mpsc::channel(1024);
         let (netdb_ib_tx, netdb_ib_rx) = mpsc::channel(1024);
         let (netdb_client_tx, netdb_client_rx) = mpsc::unbounded();
+        let (tunnel_build_ib_tx, tunnel_build_ib_rx) = mpsc::channel(1024);
+        let (new_participating_tx, new_participating_rx) = mpsc::channel(1024);
+        let (tunnel_data_ib_tx, tunnel_data_ib_rx) = mpsc::channel(1024);
 
-        let distributor = Distributor::new(netdb_ib_tx);
+        let distributor = Distributor::new(netdb_ib_tx, tunnel_build_ib_tx, tunnel_data_ib_tx);
         let netdb_client = NetDbClient::new(netdb_client_tx);
 
         let comms = match self.comms {
@@ -128,6 +149,12 @@ impl Builder {
                 distributor,
             ))),
         };
+
+        let tunnel_participant = Some(tunnel::Participant::new(
+            new_participating_rx,
+            tunnel_data_ib_rx,
+            comms.clone(),
+        ));
 
         let mut ri = RouterInfo::new(keys.rid.clone());
         ri.set_addresses(comms.read().unwrap().addresses());
@@ -158,6 +185,17 @@ impl Builder {
             netdb_client_rx,
         ));
 
-        Ok(Router { ctx, netdb_engine })
+        let tunnel_listener = Some(tunnel::Listener::new(
+            ctx.clone(),
+            new_participating_tx,
+            tunnel_build_ib_rx,
+        ));
+
+        Ok(Router {
+            ctx,
+            netdb_engine,
+            tunnel_listener,
+            tunnel_participant,
+        })
     }
 }

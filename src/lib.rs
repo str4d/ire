@@ -21,6 +21,7 @@ pub mod i2np;
 pub mod netdb;
 pub mod router;
 pub mod transport;
+pub mod tunnel;
 mod util;
 
 #[cfg(test)]

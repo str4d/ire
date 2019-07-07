@@ -3,7 +3,11 @@ use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use nom::*;
-use sha2::{Digest, Sha256};
+use rand::rngs::OsRng;
+use sha2::{
+    digest::generic_array::{typenum::U32, GenericArray},
+    Digest, Sha256,
+};
 use std::io::{Read, Write};
 
 use super::*;
@@ -32,40 +36,88 @@ fn iv<'a>(input: &'a [u8]) -> IResult<&'a [u8], [u8; 16]> {
 // Common structures
 //
 
-pub fn build_request_record<'a>(
-    input: &'a [u8],
-    to_peer: Hash,
-) -> IResult<&'a [u8], BuildRequestRecord> {
-    #[cfg_attr(rustfmt, rustfmt_skip)]
+named!(
+    pub build_request_record<BuildRequestRecord>,
     do_parse!(
-        input,
-        receive_tid:  tunnel_id >>
-        our_ident:    hash >>
-        next_tid:     tunnel_id >>
-        next_ident:   hash >>
-        layer_key:    session_key >>
-        iv_key:       session_key >>
-        reply_key:    session_key >>
-        reply_iv:     iv >>
-        flag:         be_u8 >>
-        request_time: be_u32 >>
-        send_msg_id:  be_u32 >>
-                      take!(29) >>
-        (BuildRequestRecord {
-            to_peer,
-            receive_tid,
-            our_ident,
-            next_tid,
-            next_ident,
-            layer_key,
-            iv_key,
-            reply_key,
-            reply_iv,
-            flag,
-            request_time,
-            send_msg_id,
-        })
+        receive_tid: tunnel_id
+            >> our_ident: hash
+            >> next_tid: tunnel_id
+            >> next_ident: hash
+            >> layer_key: session_key
+            >> iv_key: session_key
+            >> reply_key: session_key
+            >> reply_iv: iv
+            >> hop_type:
+                map!(
+                    verify!(
+                        bits!(do_parse!(
+                            ibgw: take_bits!(u8, 1)
+                                >> obep: take_bits!(u8, 1)
+                                >> take_bits!(u8, 6)
+                                >> ((ibgw > 0, obep > 0))
+                        )),
+                        |(ibgw, obep)| !(ibgw && obep)
+                    ),
+                    |(ibgw, obep)| match (ibgw, obep) {
+                        (false, false) => ParticipantType::Intermediate,
+                        (true, false) => ParticipantType::InboundGateway,
+                        (false, true) => ParticipantType::OutboundEndpoint,
+                        (true, true) => unreachable!(),
+                    }
+                )
+            >> request_time: be_u32
+            >> send_msg_id: be_u32
+            >> take!(29)
+            >> (BuildRequestRecord {
+                receive_tid,
+                our_ident,
+                next_tid,
+                next_ident,
+                layer_key,
+                iv_key,
+                reply_key,
+                reply_iv,
+                hop_type,
+                request_time,
+                send_msg_id,
+            })
     )
+);
+
+pub fn gen_build_request_record<'a>(
+    input: (&'a mut [u8], usize),
+    brr: &BuildRequestRecord,
+) -> Result<(&'a mut [u8], usize), GenError> {
+    let flags: u8 = match brr.hop_type {
+        ParticipantType::Intermediate => 0b0000_0000,
+        ParticipantType::InboundGateway => 0b1000_0000,
+        ParticipantType::OutboundEndpoint => 0b0100_0000,
+    };
+    let mut padding = [0; 29];
+    let mut rng = OsRng::new().expect("should be able to construct RNG");
+    rng.fill(&mut padding[..]);
+    do_gen!(
+        input,
+        gen_tunnel_id(&brr.receive_tid)
+            >> gen_hash(&brr.our_ident)
+            >> gen_tunnel_id(&brr.next_tid)
+            >> gen_hash(&brr.next_ident)
+            >> gen_session_key(&brr.layer_key)
+            >> gen_session_key(&brr.iv_key)
+            >> gen_session_key(&brr.reply_key)
+            >> gen_slice!(&brr.reply_iv)
+            >> gen_be_u8!(flags)
+            >> gen_be_u32!(brr.request_time)
+            >> gen_be_u32!(brr.send_msg_id)
+            >> gen_slice!(&padding)
+    )
+}
+
+fn calculate_build_response_record_hash(padding: &[u8], reply: u8) -> GenericArray<u8, U32> {
+    let mut hasher = Sha256::default();
+    hasher.input(padding);
+    hasher.input(&[reply]);
+    hasher.result()
 }
 
 fn validate_build_response_record<'a>(
@@ -74,10 +126,7 @@ fn validate_build_response_record<'a>(
     padding: &[u8],
     reply: u8,
 ) -> IResult<&'a [u8], ()> {
-    let mut hasher = Sha256::default();
-    hasher.input(padding);
-    hasher.input(&[reply]);
-    let res = hasher.result();
+    let res = calculate_build_response_record_hash(padding, reply);
     if hash.eq(&Hash::from_bytes(array_ref![res, 0, 32])) {
         Ok((input, ()))
     } else {
@@ -94,6 +143,20 @@ named!(pub build_response_record<BuildResponseRecord>,
         (BuildResponseRecord { reply })
     )
 );
+
+pub fn gen_build_response_record<'a>(
+    input: (&'a mut [u8], usize),
+    brr: &BuildResponseRecord,
+) -> Result<(&'a mut [u8], usize), GenError> {
+    let mut padding = vec![0; 495];
+    let mut rng = OsRng::new().expect("should be able to construct RNG");
+    rng.fill(&mut padding[..]);
+    let hash = calculate_build_response_record_hash(&padding, brr.reply);
+    do_gen!(
+        input,
+        gen_slice!(hash) >> gen_slice!(padding) >> gen_be_u8!(brr.reply)
+    )
+}
 
 //
 // Message payloads
@@ -834,6 +897,165 @@ mod tests {
                 Err(e) => panic!("Unexpected error: {:?}", e),
             }
         };
+    }
+
+    #[test]
+    fn test_build_request_record() {
+        macro_rules! eval {
+            ($value:expr) => {
+                let mut res = vec![0; 222];
+                if let Err(e) = gen_build_request_record((&mut res, 0), &$value) {
+                    panic!("Unexpected error: {:?}", e);
+                }
+                match build_request_record(&res) {
+                    Ok((_, m)) => assert_eq!(m, $value),
+                    Err(e) => panic!("Unexpected error: {:?}", e),
+                }
+            };
+        }
+
+        eval!(BuildRequestRecord {
+            receive_tid: TunnelId(7),
+            our_ident: Hash([4; 32]),
+            next_tid: TunnelId(2),
+            next_ident: Hash([9; 32]),
+            layer_key: SessionKey([6; 32]),
+            iv_key: SessionKey([8; 32]),
+            reply_key: SessionKey([1; 32]),
+            reply_iv: [3; 16],
+            hop_type: ParticipantType::Intermediate,
+            request_time: 5,
+            send_msg_id: 12,
+        });
+
+        eval!(BuildRequestRecord {
+            receive_tid: TunnelId(0),
+            our_ident: Hash([0; 32]),
+            next_tid: TunnelId(0),
+            next_ident: Hash([0; 32]),
+            layer_key: SessionKey([0; 32]),
+            iv_key: SessionKey([0; 32]),
+            reply_key: SessionKey([0; 32]),
+            reply_iv: [0; 16],
+            hop_type: ParticipantType::InboundGateway,
+            request_time: 0,
+            send_msg_id: 0,
+        });
+
+        eval!(BuildRequestRecord {
+            receive_tid: TunnelId(1),
+            our_ident: Hash([2; 32]),
+            next_tid: TunnelId(3),
+            next_ident: Hash([4; 32]),
+            layer_key: SessionKey([5; 32]),
+            iv_key: SessionKey([6; 32]),
+            reply_key: SessionKey([7; 32]),
+            reply_iv: [8; 16],
+            hop_type: ParticipantType::OutboundEndpoint,
+            request_time: 9,
+            send_msg_id: 10,
+        });
+    }
+
+    #[test]
+    fn test_build_request_record_flags() {
+        macro_rules! eval {
+            ($flag:expr, $value:expr) => {
+                let mut encoded = vec![0; 222];
+                encoded[184] = $flag;
+                assert_eq!(build_request_record(&encoded).map(|(_, v)| v), $value);
+            };
+        }
+
+        // No flag bits set
+        eval!(
+            0,
+            Ok(BuildRequestRecord {
+                receive_tid: TunnelId(0),
+                our_ident: Hash([0; 32]),
+                next_tid: TunnelId(0),
+                next_ident: Hash([0; 32]),
+                layer_key: SessionKey([0; 32]),
+                iv_key: SessionKey([0; 32]),
+                reply_key: SessionKey([0; 32]),
+                reply_iv: [0; 16],
+                hop_type: ParticipantType::Intermediate,
+                request_time: 0,
+                send_msg_id: 0,
+            })
+        );
+
+        // Flag bit 7 set
+        eval!(
+            0x80,
+            Ok(BuildRequestRecord {
+                receive_tid: TunnelId(0),
+                our_ident: Hash([0; 32]),
+                next_tid: TunnelId(0),
+                next_ident: Hash([0; 32]),
+                layer_key: SessionKey([0; 32]),
+                iv_key: SessionKey([0; 32]),
+                reply_key: SessionKey([0; 32]),
+                reply_iv: [0; 16],
+                hop_type: ParticipantType::InboundGateway,
+                request_time: 0,
+                send_msg_id: 0,
+            })
+        );
+
+        // Flag bit 6 set
+        eval!(
+            0x40,
+            Ok(BuildRequestRecord {
+                receive_tid: TunnelId(0),
+                our_ident: Hash([0; 32]),
+                next_tid: TunnelId(0),
+                next_ident: Hash([0; 32]),
+                layer_key: SessionKey([0; 32]),
+                iv_key: SessionKey([0; 32]),
+                reply_key: SessionKey([0; 32]),
+                reply_iv: [0; 16],
+                hop_type: ParticipantType::OutboundEndpoint,
+                request_time: 0,
+                send_msg_id: 0,
+            })
+        );
+
+        // Flag bits 7 and 6 set
+        eval!(
+            0xc0,
+            Err(nom::Err::Error(nom::Context::Code(
+                &vec![
+                    0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                ][..],
+                nom::ErrorKind::Verify
+            )))
+        );
+    }
+
+    #[test]
+    fn test_build_response_record() {
+        macro_rules! eval {
+            ($value:expr) => {
+                let mut res = vec![0; 528];
+                if let Err(e) = gen_build_response_record((&mut res, 0), &$value) {
+                    panic!("Unexpected error: {:?}", e);
+                }
+                match build_response_record(&res) {
+                    Ok((_, m)) => assert_eq!(m, $value),
+                    Err(e) => panic!("Unexpected error: {:?}", e),
+                }
+            };
+        }
+
+        eval!(BuildResponseRecord { reply: 0 });
+        eval!(BuildResponseRecord { reply: 10 });
+        eval!(BuildResponseRecord { reply: 20 });
+        eval!(BuildResponseRecord { reply: 30 });
+        eval!(BuildResponseRecord { reply: 40 });
+        eval!(BuildResponseRecord { reply: 255 });
     }
 
     #[test]

@@ -181,7 +181,7 @@ impl SessionTag {
 /// Defines an identifier that is unique to each router in a tunnel. A TunnelId
 /// is generally greater than zero; do not use a value of zero except in
 /// special cases.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct TunnelId(pub u32);
 
 #[cfg_attr(tarpaulin, skip)]
@@ -273,7 +273,7 @@ fn cert_and_padding_from_keys(
 /// Defines the way to uniquely identify a particular router.
 #[derive(Clone, Debug, PartialEq)]
 pub struct RouterIdentity {
-    public_key: PublicKey,
+    pub public_key: PublicKey,
     padding: Option<Padding>,
     pub signing_key: SigningPublicKey,
     pub certificate: Certificate,
@@ -316,7 +316,7 @@ impl RouterIdentity {
 #[derive(Clone)]
 pub struct RouterSecretKeys {
     pub rid: RouterIdentity,
-    private_key: PrivateKey,
+    pub private_key: PrivateKey,
     pub signing_private_key: SigningPrivateKey,
 }
 

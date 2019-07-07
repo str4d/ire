@@ -8,12 +8,15 @@
 //!
 //! [I2NP specification](https://geti2p.net/spec/i2np)
 
-use rand::{thread_rng, Rng};
+use nom;
+use rand::{rngs::OsRng, thread_rng, Rng};
 use std::fmt;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use crate::crypto::SessionKey;
-use crate::data::{Certificate, Hash, I2PDate, LeaseSet, RouterInfo, SessionTag, TunnelId};
+use crate::crypto::{self, elgamal, SessionKey};
+use crate::data::{
+    Certificate, Hash, I2PDate, LeaseSet, ReadError, RouterInfo, SessionTag, TunnelId,
+};
 use crate::util::serialize;
 
 #[allow(double_parens)]
@@ -22,31 +25,114 @@ pub(crate) mod frame;
 
 const MESSAGE_EXPIRATION_MS: u64 = 60 * 1000;
 
+/// BuildRequestRecord errors
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum BuildRequestError {
+    Crypto(crypto::Error),
+    Read(ReadError),
+    Invalid,
+    Duplicate,
+}
+
+impl From<crypto::Error> for BuildRequestError {
+    fn from(e: crypto::Error) -> Self {
+        BuildRequestError::Crypto(e)
+    }
+}
+
+impl<T> From<nom::Err<T>> for BuildRequestError {
+    fn from(e: nom::Err<T>) -> Self {
+        BuildRequestError::Read(e.into())
+    }
+}
+
 //
 // Common structures
 //
 
+#[derive(Debug, PartialEq)]
+pub enum ParticipantType {
+    InboundGateway,
+    Intermediate,
+    OutboundEndpoint,
+}
+
 /// One record in a set of multiple records to request the creation of one hop
 /// in the tunnel.
+#[derive(Debug, PartialEq)]
 pub struct BuildRequestRecord {
-    to_peer: Hash,
-    receive_tid: TunnelId,
+    pub receive_tid: TunnelId,
     our_ident: Hash,
-    next_tid: TunnelId,
-    next_ident: Hash,
-    layer_key: SessionKey,
-    iv_key: SessionKey,
-    reply_key: SessionKey,
-    reply_iv: [u8; 16],
-    flag: u8,
-    request_time: u32,
-    send_msg_id: u32,
+    pub next_tid: TunnelId,
+    pub next_ident: Hash,
+    pub layer_key: SessionKey,
+    pub iv_key: SessionKey,
+    pub reply_key: SessionKey,
+    pub reply_iv: [u8; 16],
+    pub hop_type: ParticipantType,
+    pub request_time: u32,
+    pub send_msg_id: u32,
+}
+
+impl BuildRequestRecord {
+    pub fn new(
+        receive_tid: TunnelId,
+        our_ident: Hash,
+        next_tid: TunnelId,
+        next_ident: Hash,
+        hop_type: ParticipantType,
+    ) -> Self {
+        let mut rng = OsRng::new().expect("should be able to construct RNG");
+        let reply_iv = {
+            let mut tmp = [0; 16];
+            rng.fill(&mut tmp);
+            tmp
+        };
+        BuildRequestRecord {
+            receive_tid,
+            our_ident,
+            next_tid,
+            next_ident,
+            layer_key: SessionKey::generate(&mut rng),
+            iv_key: SessionKey::generate(&mut rng),
+            reply_key: SessionKey::generate(&mut rng),
+            reply_iv,
+            hop_type,
+            request_time: (SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .expect("System time is broken!")
+                .as_secs()
+                / 3600) as u32,
+            send_msg_id: 0,
+        }
+    }
+
+    pub fn decrypt(ct: &[u8], decryptor: &elgamal::Decryptor) -> Result<Self, BuildRequestError> {
+        let pt = decryptor.decrypt(&ct[16..], false)?;
+        let (_, brr) = frame::build_request_record(&pt)?;
+        if ct[0..16] == brr.our_ident.0[0..16] {
+            Ok(brr)
+        } else {
+            Err(BuildRequestError::Invalid)
+        }
+    }
+
+    pub fn encrypt(&self, encryptor: &elgamal::Encryptor) -> [u8; 528] {
+        let mut pt = [0; 222];
+        frame::gen_build_request_record((&mut pt, 0), self).unwrap();
+
+        let mut ct = [0; 528];
+        ct[0..16].copy_from_slice(&self.our_ident.0[0..16]);
+        ct[16..].copy_from_slice(&encryptor.encrypt(&pt, false).unwrap());
+        ct
+    }
 }
 
 /// Reply to a BuildRequestRecord stating whether or not a particular hop agrees
 /// to participate.
+#[derive(Debug, PartialEq)]
 pub struct BuildResponseRecord {
-    reply: u8,
+    pub reply: u8,
 }
 
 //
@@ -235,8 +321,8 @@ pub struct Garlic {
 /// or endpoint. The data is of fixed length, containing I2NP messages that are
 /// fragmented, batched, padded, and encrypted.
 pub struct TunnelData {
-    tid: TunnelId,
-    data: [u8; 1024],
+    pub tid: TunnelId,
+    pub data: [u8; 1024],
 }
 
 impl TunnelData {
@@ -390,6 +476,24 @@ mod tests {
     use super::*;
 
     use std::time::SystemTime;
+
+    #[test]
+    fn build_request_record_encryption() {
+        let brr = BuildRequestRecord::new(
+            TunnelId(1),
+            Hash([2; 32]),
+            TunnelId(3),
+            Hash([4; 32]),
+            ParticipantType::Intermediate,
+        );
+
+        let (priv_key, pub_key) = elgamal::KeyPairGenerator::generate();
+        let ct = brr.encrypt(&elgamal::Encryptor::from(&pub_key));
+        assert_eq!(
+            BuildRequestRecord::decrypt(&ct, &elgamal::Decryptor::from(&priv_key)),
+            Ok(brr)
+        );
+    }
 
     macro_rules! check_size {
         ($size_func:ident, $header_size:expr) => {{
