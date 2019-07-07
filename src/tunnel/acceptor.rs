@@ -192,8 +192,7 @@ impl<TB: TunnelBuildRequest> Future for HopAcceptor<TB> {
                                 // An OBEP has no subsequent peer, and we couldn't create a tunnel
                                 // with it preceding itself without failing this check while setting
                                 // up the preceding hop.
-                            } else if brr.next_ident == self.ctx.ri.read().unwrap().router_id.hash()
-                            {
+                            } else if brr.next_ident == self.ctx.keys.rid.hash() {
                                 warn!("Dropping build request, we are the next hop: {:?}", brr);
                                 return Ok(Async::Ready(()));
                             }
