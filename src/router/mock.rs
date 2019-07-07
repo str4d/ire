@@ -11,7 +11,7 @@ use tokio_io::IoFuture;
 use super::types::{CommSystem, Distributor, DistributorResult};
 use crate::data::{Hash, RouterAddress, RouterInfo, RouterSecretKeys};
 use crate::i2np::Message;
-use crate::netdb::client::Client as NetDbClient;
+use crate::netdb::{client::Client as NetDbClient, mock::MockNetDb};
 use crate::router::Context;
 
 #[derive(Clone)]
@@ -65,17 +65,27 @@ impl CommSystem for MockCommSystem {
 }
 
 pub fn mock_context() -> Arc<Context> {
+    let (tx, _) = mpsc::unbounded();
+    mock_context_with_netdb(NetDbClient::new(tx))
+}
+
+pub fn mock_context_and_netdb() -> (Arc<Context>, MockNetDb) {
+    let (client_tx, client_rx) = mpsc::unbounded();
+    let ctx = mock_context_with_netdb(NetDbClient::new(client_tx));
+    let netdb = MockNetDb::new(ctx.clone(), client_rx);
+    (ctx, netdb)
+}
+
+fn mock_context_with_netdb(netdb: NetDbClient) -> Arc<Context> {
     let keys = RouterSecretKeys::new();
     let mut ri = RouterInfo::new(keys.rid.clone());
     ri.sign(&keys.signing_private_key);
-
-    let (tx, _) = mpsc::unbounded();
 
     Arc::new(Context {
         config: RwLock::new(Config::default()),
         keys,
         ri: Arc::new(RwLock::new(ri)),
-        netdb: NetDbClient::new(tx),
+        netdb,
         comms: Arc::new(RwLock::new(MockCommSystem::new())),
     })
 }
