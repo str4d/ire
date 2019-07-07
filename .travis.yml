@@ -34,6 +34,7 @@ script:
   - cargo fmt -- --check
   - cargo build --verbose --release
   - cargo test --verbose --release
+  - cargo test --verbose --release -- --ignored
 
 before_cache: |
   rm -rf "$TRAVIS_HOME/.cargo/registry/src"

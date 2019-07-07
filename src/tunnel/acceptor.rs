@@ -475,6 +475,7 @@ mod tests {
     };
 
     #[test]
+    #[ignore]
     fn accepted_intermediate_build_request() {
         let (ctx, mut netdb) = mock_context_and_netdb();
 
@@ -557,6 +558,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn build_request_loop_detection_adjacent() {
         let ctx = mock_context();
 
@@ -606,6 +608,7 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn build_request_loop_detection_cycle() {
         let ctx = mock_context();
 
