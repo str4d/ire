@@ -44,6 +44,6 @@ before_cache: |
 
 after_success: |
   if [[ "$TRAVIS_RUST_VERSION" == stable ]]; then
-    cargo tarpaulin --timeout 180 --out Xml
+    cargo tarpaulin --release --timeout 180 --out Xml
     bash <(curl -s https://codecov.io/bash)
   fi
