@@ -15,7 +15,7 @@ use crate::data::frame::{
 
 #[cfg_attr(rustfmt, rustfmt_skip)]
 named!(
-    destination<Destination>,
+    pub destination<Destination>,
     do_parse!(
         public_key:   public_key >>
         signing_data: take!(constants::KEYCERT_SIGKEY_BYTES) >>
