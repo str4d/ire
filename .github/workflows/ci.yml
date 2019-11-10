@@ -41,6 +41,15 @@ jobs:
         with:
           toolchain: 1.39.0
           override: true
+
+      # We depend on a branch of ring, and need yasm.exe in %PATH% on Windows.
+      - name: (Windows) Fetch Yasm
+        if: matrix.os == 'windows-latest'
+        run: python.exe -c "import os; from urllib.request import urlretrieve; urlretrieve('http://www.tortall.net/projects/yasm/releases/yasm-1.3.0-win64.exe', os.path.join(os.environ['GITHUB_WORKSPACE'], 'yasm.exe'))"
+      - name: (Windows) Add Yasm to PATH
+        if: matrix.os == 'windows-latest'
+        run: echo "::add-path::$env:GITHUB_WORKSPACE"
+
       - name: cargo fetch
         uses: actions-rs/cargo@v1
         with:
