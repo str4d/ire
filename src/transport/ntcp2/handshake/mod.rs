@@ -5,15 +5,13 @@ use i2p_snow::{Builder, Session};
 use nom::Err;
 use rand::{rngs::OsRng, Rng};
 use siphasher::sip::SipHasher;
-use std::io;
+use std::io::Cursor;
 use std::net::SocketAddr;
 use std::ops::AddAssign;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tokio_codec::{Decoder, Framed};
-use tokio_io::{
-    self,
-    io::{ReadExact, WriteAll},
-    AsyncRead, AsyncWrite, IoFuture,
+use tokio::{
+    codec::{Decoder, Framed},
+    io::{self, AsyncRead, AsyncWrite, ReadExact, WriteAll},
 };
 
 use super::{
@@ -23,6 +21,8 @@ use super::{
 use crate::constants::I2P_BASE64;
 use crate::data::{RouterAddress, RouterIdentity, RouterInfo};
 use crate::transport::ntcp::NTCP_STYLE;
+
+type IoFuture<T> = Box<dyn Future<Item = T, Error = io::Error> + Send>;
 
 const SESSION_REQUEST_PT_LEN: usize = 16;
 const SESSION_REQUEST_CT_LEN: usize = 32 + SESSION_REQUEST_PT_LEN + 16;
@@ -79,7 +79,7 @@ where
             .enable_ask()
             .build_responder()
             .unwrap();
-        let state = IBHandshakeState::SessionRequest(tokio_io::io::read_exact(
+        let state = IBHandshakeState::SessionRequest(io::read_exact(
             conn,
             vec![0u8; SESSION_REQUEST_CT_LEN],
         ));
@@ -125,10 +125,7 @@ where
                     };
                     self.sclen = sclen;
 
-                    IBHandshakeState::SessionRequestPadding(tokio_io::io::read_exact(
-                        conn,
-                        vec![0u8; padlen],
-                    ))
+                    IBHandshakeState::SessionRequestPadding(io::read_exact(conn, vec![0u8; padlen]))
                 }
                 IBHandshakeState::SessionRequestPadding(ref mut f) => {
                     let (conn, padding) = try_poll!(f, self, noise);
@@ -168,13 +165,13 @@ where
                     rng.fill(&mut buf[SESSION_CREATED_CT_LEN..]);
                     noise.set_h_data(3, &buf[SESSION_CREATED_CT_LEN..]).unwrap();
 
-                    IBHandshakeState::SessionCreated((tokio_io::io::write_all(conn, buf), now))
+                    IBHandshakeState::SessionCreated((io::write_all(conn, buf), now))
                 }
                 IBHandshakeState::SessionCreated((ref mut f, rtt_timer)) => {
                     let (conn, _) = try_poll!(f, self, noise);
 
                     IBHandshakeState::SessionConfirmed((
-                        tokio_io::io::read_exact(conn, vec![0u8; self.sclen + 48]),
+                        io::read_exact(conn, vec![0u8; self.sclen + 48]),
                         rtt_timer,
                     ))
                 }
@@ -227,8 +224,8 @@ where
                         let label = String::from("siphash");
                         noise.initialize_ask(vec![label.clone()]).unwrap();
                         let (ask0, ask1) = noise.finalize_ask(&label).unwrap();
-                        let mut erdr = io::Cursor::new(&ask1); // Bob to Alice
-                        let mut drdr = io::Cursor::new(&ask0); // Alice to Bob
+                        let mut erdr = Cursor::new(&ask1); // Bob to Alice
+                        let mut drdr = Cursor::new(&ask0); // Alice to Bob
 
                         (
                             erdr.read_u64::<LittleEndian>().unwrap(),
@@ -434,14 +431,14 @@ where
                     rng.fill(&mut buf[SESSION_REQUEST_CT_LEN..]);
                     noise.set_h_data(2, &buf[SESSION_REQUEST_CT_LEN..]).unwrap();
 
-                    OBHandshakeState::SessionRequest((tokio_io::io::write_all(conn, buf), now))
+                    OBHandshakeState::SessionRequest((io::write_all(conn, buf), now))
                 }
 
                 OBHandshakeState::SessionRequest((ref mut f, rtt_timer)) => {
                     let (conn, _) = try_poll!(f, self, noise);
 
                     OBHandshakeState::SessionCreated((
-                        tokio_io::io::read_exact(conn, vec![0u8; SESSION_CREATED_CT_LEN]),
+                        io::read_exact(conn, vec![0u8; SESSION_CREATED_CT_LEN]),
                         rtt_timer,
                     ))
                 }
@@ -465,10 +462,7 @@ where
                     let rtt = rtt_timer.elapsed().expect("Time went backwards?");
                     debug!("Peer RTT: {:?}", rtt);
 
-                    OBHandshakeState::SessionCreatedPadding(tokio_io::io::read_exact(
-                        conn,
-                        vec![0u8; padlen],
-                    ))
+                    OBHandshakeState::SessionCreatedPadding(io::read_exact(conn, vec![0u8; padlen]))
                 }
                 OBHandshakeState::SessionCreatedPadding(ref mut f) => {
                     let (conn, padding) = try_poll!(f, self, noise);
@@ -483,7 +477,7 @@ where
                     let len = noise.write_message(&self.sc_buf, &mut buf).unwrap();
                     buf.truncate(len);
 
-                    OBHandshakeState::SessionConfirmed(tokio_io::io::write_all(conn, buf))
+                    OBHandshakeState::SessionConfirmed(io::write_all(conn, buf))
                 }
                 OBHandshakeState::SessionConfirmed(ref mut f) => {
                     let (conn, _) = try_poll!(f, self, noise);
@@ -493,8 +487,8 @@ where
                         let label = String::from("siphash");
                         noise.initialize_ask(vec![label.clone()]).unwrap();
                         let (ask0, ask1) = noise.finalize_ask(&label).unwrap();
-                        let mut erdr = io::Cursor::new(&ask0); // Alice to Bob
-                        let mut drdr = io::Cursor::new(&ask1); // Bob to Alice
+                        let mut erdr = Cursor::new(&ask0); // Alice to Bob
+                        let mut drdr = Cursor::new(&ask1); // Bob to Alice
 
                         (
                             erdr.read_u64::<LittleEndian>().unwrap(),

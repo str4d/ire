@@ -2,12 +2,13 @@ use bytes::BytesMut;
 use cookie_factory::GenError;
 use futures::{sink, stream::StreamFuture, try_ready, Async, Future, Poll, Sink, Stream};
 use nom::{Err, Offset};
-use std::io;
 use std::iter::repeat;
 use std::ops::AddAssign;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tokio_codec::{Decoder, Encoder, Framed, FramedParts};
-use tokio_io::{AsyncRead, AsyncWrite};
+use tokio::{
+    codec::{Decoder, Encoder, Framed, FramedParts},
+    io::{self, AsyncRead, AsyncWrite},
+};
 
 use super::{Codec, NTCP_MTU};
 use crate::crypto::{Aes256, Signature, SigningPrivateKey, AES_BLOCK_SIZE};

@@ -10,9 +10,11 @@ use rand::{thread_rng, Rng};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
-use tokio_executor::{spawn, DefaultExecutor};
-use tokio_timer::{sleep, Delay};
+use std::time::{Duration, Instant, SystemTime};
+use tokio::{
+    executor::{spawn, DefaultExecutor},
+    timer::Delay,
+};
 
 use crate::data::{Hash, LeaseSet, RouterInfo, NET_ID};
 use crate::i2np::{
@@ -90,9 +92,9 @@ impl Engine {
             pending_rx,
             ib_rx,
             client_rx,
-            expire_ri_timer: sleep(Duration::from_secs(EXPIRE_RI_INTERVAL)),
-            expire_ls_timer: sleep(Duration::from_secs(EXPIRE_LS_INTERVAL)),
-            explore_timer: sleep(Duration::from_secs(0)),
+            expire_ri_timer: Delay::new(Instant::now() + Duration::from_secs(EXPIRE_RI_INTERVAL)),
+            expire_ls_timer: Delay::new(Instant::now() + Duration::from_secs(EXPIRE_LS_INTERVAL)),
+            explore_timer: Delay::new(Instant::now() + Duration::from_secs(0)),
         }
     }
 }
@@ -139,14 +141,16 @@ impl Future for Engine {
                             self.netdb.expire_router_infos(Some(self.ctx.clone()));
                         }
                         // Reset timer
-                        self.expire_ri_timer = sleep(Duration::from_secs(EXPIRE_RI_INTERVAL));
+                        self.expire_ri_timer =
+                            Delay::new(Instant::now() + Duration::from_secs(EXPIRE_RI_INTERVAL));
                     }
 
                     if let Ok(Async::Ready(())) = self.expire_ls_timer.poll() {
                         // Expire LeaseSets
                         self.netdb.expire_lease_sets();
                         // Reset timer
-                        self.expire_ls_timer = sleep(Duration::from_secs(EXPIRE_LS_INTERVAL));
+                        self.expire_ls_timer =
+                            Delay::new(Instant::now() + Duration::from_secs(EXPIRE_LS_INTERVAL));
                     }
 
                     if let Ok(Async::Ready(())) = self.explore_timer.poll() {
@@ -182,7 +186,8 @@ impl Future for Engine {
                         } else {
                             EXPLORE_MAX_INTERVAL
                         };
-                        self.explore_timer = sleep(Duration::from_secs(interval));
+                        self.explore_timer =
+                            Delay::new(Instant::now() + Duration::from_secs(interval));
                     }
 
                     EngineState::Messages

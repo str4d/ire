@@ -5,7 +5,7 @@ use futures::{
     Async, Future, Poll,
 };
 use std::sync::Arc;
-use tokio_executor::spawn;
+use tokio::spawn;
 
 use super::{errors::*, LocalNetworkDatabase};
 use crate::data::{Hash, LeaseSet, RouterInfo};

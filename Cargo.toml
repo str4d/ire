@@ -43,13 +43,8 @@ signatory = { version = "0.11", features = ["ecdsa", "ed25519"] }
 signatory-dalek = "0.11"
 signatory-ring = "0.11"
 siphasher = "0.3"
-tokio = { version = "0.1", optional = true }
-tokio-codec = "0.1"
-tokio-executor = "0.1"
-tokio-io = "0.1"
-tokio-tcp = "0.1"
+tokio = "0.1"
 tokio-threadpool = "0.1"
-tokio-timer = "0.2"
 tokio-tls = "0.2"
 untrusted = "0.6"
 zip = { version = "0.5", default-features = false, features = ["deflate"] }
@@ -59,7 +54,7 @@ pretty_assertions = "0.5"
 tempfile = "3"
 
 [features]
-cli = ["clap", "env_logger", "tokio"]
+cli = ["clap", "env_logger"]
 nightly = []
 
 [[bin]]
