@@ -1,11 +1,9 @@
-use byteorder::{LittleEndian, ReadBytesExt};
 use cookie_factory::GenError;
 use futures::{Async, Future, Poll};
 use i2p_snow::{Builder, Session};
 use nom::Err;
 use rand::{rngs::OsRng, Rng};
 use siphasher::sip::SipHasher;
-use std::io::Cursor;
 use std::net::SocketAddr;
 use std::ops::AddAssign;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -224,16 +222,30 @@ where
                         let label = String::from("siphash");
                         noise.initialize_ask(vec![label.clone()]).unwrap();
                         let (ask0, ask1) = noise.finalize_ask(&label).unwrap();
-                        let mut erdr = Cursor::new(&ask1); // Bob to Alice
-                        let mut drdr = Cursor::new(&ask0); // Alice to Bob
+
+                        // Bob to Alice
+                        let mut ek0 = [0; 8];
+                        let mut ek1 = [0; 8];
+                        let mut eiv = [0; 8];
+                        ek0.copy_from_slice(&ask1[0..8]);
+                        ek1.copy_from_slice(&ask1[8..16]);
+                        eiv.copy_from_slice(&ask1[16..24]);
+
+                        // Alice to Bob
+                        let mut dk0 = [0; 8];
+                        let mut dk1 = [0; 8];
+                        let mut div = [0; 8];
+                        dk0.copy_from_slice(&ask0[0..8]);
+                        dk1.copy_from_slice(&ask0[8..16]);
+                        div.copy_from_slice(&ask0[16..24]);
 
                         (
-                            erdr.read_u64::<LittleEndian>().unwrap(),
-                            erdr.read_u64::<LittleEndian>().unwrap(),
-                            erdr.read_u64::<LittleEndian>().unwrap(),
-                            drdr.read_u64::<LittleEndian>().unwrap(),
-                            drdr.read_u64::<LittleEndian>().unwrap(),
-                            drdr.read_u64::<LittleEndian>().unwrap(),
+                            u64::from_le_bytes(ek0),
+                            u64::from_le_bytes(ek1),
+                            u64::from_le_bytes(eiv),
+                            u64::from_le_bytes(dk0),
+                            u64::from_le_bytes(dk1),
+                            u64::from_le_bytes(div),
                         )
                     };
 
@@ -487,16 +499,30 @@ where
                         let label = String::from("siphash");
                         noise.initialize_ask(vec![label.clone()]).unwrap();
                         let (ask0, ask1) = noise.finalize_ask(&label).unwrap();
-                        let mut erdr = Cursor::new(&ask0); // Alice to Bob
-                        let mut drdr = Cursor::new(&ask1); // Bob to Alice
+
+                        // Alice to Bob
+                        let mut ek0 = [0; 8];
+                        let mut ek1 = [0; 8];
+                        let mut eiv = [0; 8];
+                        ek0.copy_from_slice(&ask0[0..8]);
+                        ek1.copy_from_slice(&ask0[8..16]);
+                        eiv.copy_from_slice(&ask0[16..24]);
+
+                        // Bob to Alice
+                        let mut dk0 = [0; 8];
+                        let mut dk1 = [0; 8];
+                        let mut div = [0; 8];
+                        dk0.copy_from_slice(&ask1[0..8]);
+                        dk1.copy_from_slice(&ask1[8..16]);
+                        div.copy_from_slice(&ask1[16..24]);
 
                         (
-                            erdr.read_u64::<LittleEndian>().unwrap(),
-                            erdr.read_u64::<LittleEndian>().unwrap(),
-                            erdr.read_u64::<LittleEndian>().unwrap(),
-                            drdr.read_u64::<LittleEndian>().unwrap(),
-                            drdr.read_u64::<LittleEndian>().unwrap(),
-                            drdr.read_u64::<LittleEndian>().unwrap(),
+                            u64::from_le_bytes(ek0),
+                            u64::from_le_bytes(ek1),
+                            u64::from_le_bytes(eiv),
+                            u64::from_le_bytes(dk0),
+                            u64::from_le_bytes(dk1),
+                            u64::from_le_bytes(div),
                         )
                     };
 

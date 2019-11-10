@@ -1,4 +1,3 @@
-use byteorder::{BigEndian, ReadBytesExt};
 use cookie_factory::*;
 use nom::*;
 use sha2::{Digest, Sha256};
@@ -16,8 +15,9 @@ fn checksum(buf: &[u8], iv: &[u8]) -> u32 {
     let mut hasher = Sha256::default();
     hasher.input(buf);
     hasher.input(iv);
-    let hash = hasher.result();
-    (&hash[0..4]).read_u32::<BigEndian>().unwrap()
+    let mut buf = [0; 4];
+    buf.copy_from_slice(&hasher.result()[0..4]);
+    u32::from_be_bytes(buf)
 }
 
 fn validate_checksum<'a>(input: &'a [u8], cs: u32, buf: &[u8], iv: &[u8]) -> IResult<&'a [u8], ()> {
