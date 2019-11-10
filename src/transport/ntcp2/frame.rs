@@ -142,7 +142,7 @@ named!(
 
 fn gen_padding(input: (&mut [u8], usize), size: u16) -> Result<(&mut [u8], usize), GenError> {
     let mut padding = vec![0u8; size as usize];
-    let mut rng = OsRng::new().expect("should be able to construct RNG");
+    let mut rng = OsRng;
     rng.fill(&mut padding[..]);
     do_gen!(input, gen_be_u16!(size) >> gen_slice!(padding))
 }

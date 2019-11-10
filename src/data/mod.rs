@@ -260,7 +260,7 @@ fn cert_and_padding_from_keys(
     let padding = match signing_key.sig_type().pad_len(EncType::ElGamal2048) {
         0 => None,
         sz => {
-            let mut rng = OsRng::new().expect("should be able to construct RNG");
+            let mut rng = OsRng;
             let mut padding = Vec::new();
             padding.resize(sz, 0);
             rng.fill(&mut padding[..]);

@@ -2,17 +2,15 @@ use futures::{future, Async, Future, Poll};
 use native_tls::{Certificate, TlsConnector};
 use rand::{seq::SliceRandom, thread_rng};
 use std::collections::HashMap;
-use std::io;
 use std::net::ToSocketAddrs;
 use std::time::Duration;
-use tokio_io::{self, IoFuture};
-use tokio_tcp::TcpStream;
-use tokio_timer::Timeout;
-use tokio_tls;
+use tokio::{io, net::tcp::TcpStream, timer::Timeout};
 
 use super::client::{Client, StoreRouterInfo};
 use crate::crypto::{OfflineSigningPublicKey, SigType};
 use crate::file::{Error as FileError, Su3Content, Su3File};
+
+type IoFuture<T> = Box<dyn Future<Item = T, Error = io::Error> + Send>;
 
 // newest first, please add new ones at the top
 //
@@ -117,7 +115,7 @@ fn reseed_from_host(
                 .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
         })
         .and_then(move |socket| {
-            tokio_io::io::write_all(
+            io::write_all(
                 socket,
                 format!(
                     "\
@@ -130,7 +128,7 @@ fn reseed_from_host(
                 ),
             )
         })
-        .and_then(|(socket, _)| tokio_io::io::read_to_end(socket, Vec::new()))
+        .and_then(|(socket, _)| io::read_to_end(socket, Vec::new()))
         .and_then(|(_, data)| {
             Su3File::from_http_data(&data, &RESEED_SIGNERS).map_err(|e| match e {
                 FileError::Http(status) => match status {

@@ -6,7 +6,7 @@ use futures::{
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio_timer::Timeout;
+use tokio::timer::Timeout;
 
 use super::{
     create_routing_key,

@@ -1,5 +1,5 @@
-use num_bigint::{BigUint, RandBigInt};
-use rand::rngs::OsRng;
+use num_bigint::BigUint;
+use rand::{rngs::OsRng, Rng};
 use std::iter::repeat;
 
 use crate::constants::{ELGAMAL_G, ELGAMAL_P};
@@ -13,8 +13,10 @@ pub struct DHSessionKeyBuilder {
 
 impl DHSessionKeyBuilder {
     pub fn new() -> Self {
-        let mut rng = OsRng::new().expect("should be able to construct RNG");
-        let dh_priv = rng.gen_biguint(2048);
+        let mut rng = OsRng;
+        let mut buf = vec![0; 256];
+        rng.fill(&mut buf[..]);
+        let dh_priv = BigUint::from_bytes_be(&buf);
         let dh_pub = ELGAMAL_G.modpow(&dh_priv, &ELGAMAL_P);
         DHSessionKeyBuilder { dh_priv, dh_pub }
     }

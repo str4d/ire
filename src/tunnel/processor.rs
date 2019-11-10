@@ -3,17 +3,17 @@
 use futures::{sync::mpsc, try_ready, Async, Future, Poll, Stream};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
-use std::time::{Duration, SystemTime};
-use tokio_executor::spawn;
-use tokio_io::IoFuture;
+use std::time::{Duration, Instant, SystemTime};
+use tokio::{io, spawn, timer::Delay};
 use tokio_threadpool::blocking;
-use tokio_timer::{sleep, Delay};
 
 use super::{encryption::LayerCipher, HopConfig, HopData, TUNNEL_LIFETIME};
 use crate::data::{Hash, RouterInfo, TunnelId};
 use crate::i2np::{Message, MessagePayload, TunnelData};
 use crate::router::types::CommSystem;
 use crate::util::DecayingBloomFilter;
+
+type IoFuture<T> = Box<dyn Future<Item = T, Error = io::Error> + Send>;
 
 /// Interval on which we expire tunnels we are participating in.
 const EXPIRE_TUNNELS_INTERVAL: u64 = 10;
@@ -134,8 +134,10 @@ impl Participant {
             new_participating_rx,
             participating: HashMap::new(),
             filter: DecayingBloomFilter::new(20_000), // TODO: Configure this based on bandwidth
-            expire_tunnels_timer: sleep(Duration::from_secs(EXPIRE_TUNNELS_INTERVAL)),
-            decay_filter_timer: sleep(Duration::from_secs(TUNNEL_LIFETIME)),
+            expire_tunnels_timer: Delay::new(
+                Instant::now() + Duration::from_secs(EXPIRE_TUNNELS_INTERVAL),
+            ),
+            decay_filter_timer: Delay::new(Instant::now() + Duration::from_secs(TUNNEL_LIFETIME)),
             ib_rx,
             comms,
         }
@@ -165,14 +167,16 @@ impl Future for Participant {
                     .retain(|_tid, config| config.expires > now);
 
                 // Reset timer
-                self.expire_tunnels_timer = sleep(Duration::from_secs(EXPIRE_TUNNELS_INTERVAL));
+                self.expire_tunnels_timer =
+                    Delay::new(Instant::now() + Duration::from_secs(EXPIRE_TUNNELS_INTERVAL));
             }
             if let Ok(Async::Ready(())) = self.decay_filter_timer.poll() {
                 // Decay the filter
                 self.filter.decay();
 
                 // Reset timer
-                self.decay_filter_timer = sleep(Duration::from_secs(TUNNEL_LIFETIME));
+                self.decay_filter_timer =
+                    Delay::new(Instant::now() + Duration::from_secs(TUNNEL_LIFETIME));
             }
 
             // Process the next message

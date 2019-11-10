@@ -6,8 +6,7 @@ use futures::{sink, sync::mpsc, try_ready, Async, Future, Poll, Sink, Stream};
 use std::slice::IterMut;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use tokio_executor::spawn;
-use tokio_io::IoFuture;
+use tokio::{io, spawn};
 use tokio_threadpool::blocking;
 
 use super::{encryption::LayerCipher, HopConfig, HopData, TUNNEL_LIFETIME};
@@ -20,6 +19,8 @@ use crate::i2np::{
 use crate::netdb::client::LookupRouterInfo;
 use crate::router::Context;
 use crate::util::DecayingBloomFilter;
+
+type IoFuture<T> = Box<dyn Future<Item = T, Error = io::Error> + Send>;
 
 /// Build requests can be no more than 65 minutes older than the current time.
 const MAX_REQUEST_AGE: u64 = 65 * 60;

@@ -10,16 +10,17 @@ use futures::{
     try_ready, Async, AsyncSink, Future, Poll, Sink, StartSend, Stream,
 };
 use nom::{Err, Offset};
-use std::io;
 use std::iter::repeat;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio_codec::{Decoder, Encoder, Framed};
-use tokio_executor::spawn;
-use tokio_io::{AsyncRead, AsyncWrite};
-use tokio_tcp::{TcpListener, TcpStream};
-use tokio_timer::Timeout;
+use tokio::{
+    codec::{Decoder, Encoder, Framed},
+    io::{self, AsyncRead, AsyncWrite},
+    net::tcp::{TcpListener, TcpStream},
+    spawn,
+    timer::Timeout,
+};
 
 use super::{
     session::{self, SessionContext, SessionManager, SessionRefs, SessionRx},
@@ -498,9 +499,11 @@ impl<D: Distributor> Sink for OutboundSink<D> {
                 let peer = peer.clone();
                 let session_refs = session_refs.clone();
                 match connect(own_rid, own_key, peer, session_refs) {
-                    Ok(f) => spawn(f.map_err(|e| {
-                        error!("Error while connecting: {}", e);
-                    })),
+                    Ok(f) => {
+                        spawn(f.map_err(|e| {
+                            error!("Error while connecting: {}", e);
+                        }));
+                    }
                     Err(e) => error!("{}", e),
                 }
             }) {
@@ -526,9 +529,11 @@ mod tests {
     use cookie_factory::GenError;
     use futures::{lazy, Future, Sink};
     use nom::{Err, Offset};
-    use std::io::{self, Read, Write};
     use std::iter::repeat;
-    use tokio_codec::{Decoder, Encoder};
+    use tokio::{
+        codec::{Decoder, Encoder},
+        io::{self, Read, Write},
+    };
 
     use super::{frame, Frame, Manager, Session, NTCP_MTU};
     use crate::i2np::Message;

@@ -2,11 +2,13 @@
 
 use futures::{sync::mpsc, Future};
 use std::sync::Arc;
-use tokio_io::IoFuture;
+use tokio::io;
 
 use super::Context;
 use crate::data::{Hash, RouterAddress, RouterInfo};
 use crate::i2np::Message;
+
+type IoFuture<T> = Box<dyn Future<Item = T, Error = io::Error> + Send>;
 
 pub type DistributorResult =
     Box<dyn Future<Item = (), Error = mpsc::SendError<(Hash, Message)>> + Send>;

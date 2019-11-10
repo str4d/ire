@@ -4,13 +4,14 @@ use futures::{
     Future, Sink,
 };
 use std::sync::{Arc, RwLock};
-use tokio_executor::spawn;
-use tokio_io::IoFuture;
+use tokio::{io, spawn};
 
 use crate::data::{Hash, RouterInfo, RouterSecretKeys};
 use crate::i2np::{Message, MessagePayload};
 use crate::netdb;
 use crate::tunnel;
+
+type IoFuture<T> = Box<dyn Future<Item = T, Error = io::Error> + Send>;
 
 mod builder;
 pub mod config;

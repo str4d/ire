@@ -1,11 +1,9 @@
 //! Transports used for point-to-point communication between I2P routers.
 
 use futures::{future::lazy, Future, Poll, Sink, StartSend};
-use std::io;
 use std::iter::once;
 use std::sync::Arc;
-use tokio_executor::spawn;
-use tokio_io::IoFuture;
+use tokio::{executor::spawn, io};
 
 use crate::crypto::dh::DHSessionKeyBuilder;
 use crate::data::{Hash, RouterAddress, RouterInfo};
@@ -19,6 +17,8 @@ use crate::router::{
 pub mod ntcp;
 pub mod ntcp2;
 mod session;
+
+type IoFuture<T> = Box<dyn Future<Item = T, Error = io::Error> + Send>;
 
 /// A bid from a transport indicating how much it thinks it will "cost" to
 /// send a particular message.
@@ -139,11 +139,10 @@ impl<D: Distributor> CommSystem for Manager<D> {
 #[cfg(test)]
 mod tests {
     use futures::Async;
-    use std::io::{self, Read, Write};
     use std::net::SocketAddr;
     use std::sync::{Arc, Mutex};
     use tempfile::tempdir;
-    use tokio_io::{AsyncRead, AsyncWrite};
+    use tokio::io::{self, AsyncRead, AsyncWrite, Read, Write};
 
     use super::*;
     use crate::router::mock::MockDistributor;

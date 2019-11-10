@@ -6,13 +6,15 @@
 use config::Config;
 use futures::{future, sync::mpsc, Future};
 use std::sync::{Arc, Mutex, RwLock};
-use tokio_io::IoFuture;
+use tokio::io;
 
 use super::types::{CommSystem, Distributor, DistributorResult};
 use crate::data::{Hash, RouterAddress, RouterInfo, RouterSecretKeys};
 use crate::i2np::Message;
 use crate::netdb::{client::Client as NetDbClient, mock::MockNetDb};
 use crate::router::Context;
+
+type IoFuture<T> = Box<dyn Future<Item = T, Error = io::Error> + Send>;
 
 #[derive(Clone)]
 pub struct MockDistributor {
