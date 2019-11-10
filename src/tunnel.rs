@@ -96,6 +96,8 @@ impl TunnelMessageDeliveryInstructions {
 
 /// A set of I2NP message fragments that serializes to at most 1003 bytes.
 /// Forms the plaintext inside an I2NP [`TunnelData`] message.
+///
+/// [`TunnelData`]: crate::i2np::TunnelData
 #[derive(Debug, PartialEq)]
 struct TunnelMessage<'a>(Vec<(TunnelMessageDeliveryInstructions, &'a [u8])>);
 

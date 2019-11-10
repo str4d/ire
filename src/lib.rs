@@ -1,7 +1,9 @@
+//! An I2P router implementation in Rust.
+
 #![allow(unknown_lints)]
 #![cfg_attr(all(test, feature = "nightly"), feature(test))]
-
-//! An I2P router implementation in Rust.
+// Catch documentation errors caused by code changes.
+#![deny(intra_doc_link_resolution_failure)]
 
 #[macro_use]
 extern crate arrayref;
