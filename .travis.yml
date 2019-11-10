@@ -14,36 +14,12 @@ matrix:
     - rust: nightly
   fast_finish: true
 
-env:
-  global:
-  - RUSTFLAGS="-C link-dead-code"
-
-addons:
-  apt:
-    packages:
-      - libssl-dev
-      - cmake # also required for cargo-update
-
 before_script:
   - export PATH=$HOME/.cargo/bin:$PATH
   - rustup component add rustfmt
-  - cargo install cargo-update || echo "cargo-update already installed"
-  - cargo install-update -a # update outdated cached binaries
 
 script:
   - cargo fmt -- --check
   - cargo build --verbose --release
   - cargo test --verbose --release
   - cargo test --verbose --release -- --ignored
-
-before_cache: |
-  rm -rf "$TRAVIS_HOME/.cargo/registry/src"
-  if [[ "$TRAVIS_RUST_VERSION" == stable ]]; then
-    cargo install cargo-tarpaulin
-  fi
-
-after_success: |
-  if [[ "$TRAVIS_RUST_VERSION" == stable ]]; then
-    cargo tarpaulin --release --timeout 180 --out Xml
-    bash <(curl -s https://codecov.io/bash)
-  fi
