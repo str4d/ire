@@ -137,7 +137,7 @@ where
                     ts_b.add_assign(Duration::from_millis(500));
                     let ts_b = ts_b.as_secs() as u32;
 
-                    let mut rng = OsRng::new().expect("should be able to construct RNG");
+                    let mut rng = OsRng;
                     // TODO: Sample padding sizes from an appropriate distribution
                     let sc_padlen = rng.gen_range(0, 16);
 
@@ -330,7 +330,7 @@ where
         }
 
         let sc_padlen = {
-            let mut rng = OsRng::new().expect("should be able to construct RNG");
+            let mut rng = OsRng;
             // TODO: Sample padding sizes from an appropriate distribution
             rng.gen_range(0, 16)
         };
@@ -397,7 +397,7 @@ where
                     ts_a.add_assign(Duration::from_millis(500));
                     let ts_a = ts_a.as_secs() as u32;
 
-                    let mut rng = OsRng::new().expect("should be able to construct RNG");
+                    let mut rng = OsRng;
                     // TODO: Sample padding sizes from an appropriate distribution
                     let padlen = rng.gen_range(0, 16);
 

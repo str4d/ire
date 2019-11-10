@@ -583,7 +583,7 @@ impl<D: Distributor> Manager<D> {
         let dh = builder.generate_keypair().unwrap();
 
         let mut aesobfse_iv = [0; 16];
-        let mut rng = OsRng::new().expect("should be able to construct RNG");
+        let mut rng = OsRng;
         rng.fill(&mut aesobfse_iv[..]);
 
         Manager {

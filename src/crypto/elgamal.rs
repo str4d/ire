@@ -6,7 +6,7 @@
 //! Original implementation in Java I2P was based on algorithms 8.17 and 8.18
 //! specified in section 8.4.1 of the Handbook of Applied Cryptography.
 
-use num_bigint::{BigUint, RandBigInt};
+use num_bigint::BigUint;
 use num_traits::Zero;
 use rand::{rngs::OsRng, Rng};
 use sha2::{Digest, Sha256};
@@ -16,11 +16,13 @@ use super::{math::rectify, Error, PrivateKey, PublicKey};
 use crate::constants::{ELGAMAL_G, ELGAMAL_P, ELGAMAL_PM1, ELGAMAL_PM2};
 
 fn gen_gamma_k() -> (BigUint, BigUint) {
-    let mut rng = OsRng::new().expect("should be able to construct RNG");
+    let mut rng = OsRng;
 
     // Select a random integer k, 1 <= k <= p - 2
+    let mut buf = vec![0; 256];
     let k = loop {
-        let k = rng.gen_biguint(2048);
+        rng.fill(&mut buf[..]);
+        let k = BigUint::from_bytes_be(&buf);
         if !k.is_zero() && k <= *ELGAMAL_PM2 {
             break k;
         }
@@ -95,7 +97,7 @@ impl Encryptor {
             return Err(Error::InvalidMessage);
         }
 
-        let mut rng = OsRng::new().expect("should be able to construct RNG");
+        let mut rng = OsRng;
         let hash = Sha256::digest(msg);
 
         // ElGamal plaintext:

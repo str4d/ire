@@ -5,9 +5,9 @@
 //! Original implementation in Java I2P was based on algorithms 11.54 and 11.56
 //! specified in section 11.5.1 of the Handbook of Applied Cryptography.
 
-use num_bigint::{BigUint, RandBigInt};
+use num_bigint::BigUint;
 use num_traits::Zero;
-use rand::rngs::OsRng;
+use rand::{rngs::OsRng, Rng};
 use sha1::Sha1;
 
 use super::math::rectify;
@@ -54,11 +54,13 @@ impl DsaSignature {
 impl DsaPrivateKey {
     /// DSA key generation, following algorithm 11.54 4).
     fn new() -> Self {
-        let mut rng = OsRng::new().expect("should be able to construct RNG");
+        let mut rng = OsRng;
 
         // Select a random integer a, 0 < a < q
+        let mut buf = [0; 20];
         loop {
-            let a = rng.gen_biguint(160);
+            rng.fill(&mut buf[..]);
+            let a = BigUint::from_bytes_be(&buf);
             if !a.is_zero() && a < *DSA_Q {
                 return DsaPrivateKey(a);
             }
@@ -67,11 +69,13 @@ impl DsaPrivateKey {
 
     /// DSA signature generation, following algorithm 11.56 1).
     fn sign(&self, msg: &[u8]) -> DsaSignature {
-        let mut rng = OsRng::new().expect("should be able to construct RNG");
+        let mut rng = OsRng;
 
         // Select a random integer k, 0 < k < q
+        let mut buf = [0; 20];
         let k = loop {
-            let k = rng.gen_biguint(160);
+            rng.fill(&mut buf[..]);
+            let k = BigUint::from_bytes_be(&buf);
             if !k.is_zero() && k < *DSA_Q {
                 break k;
             }

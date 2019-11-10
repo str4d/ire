@@ -82,7 +82,7 @@ impl BuildRequestRecord {
         next_ident: Hash,
         hop_type: ParticipantType,
     ) -> Self {
-        let mut rng = OsRng::new().expect("should be able to construct RNG");
+        let mut rng = OsRng;
         let reply_iv = {
             let mut tmp = [0; 16];
             rng.fill(&mut tmp);

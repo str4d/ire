@@ -94,7 +94,7 @@ pub fn gen_build_request_record<'a>(
         ParticipantType::OutboundEndpoint => 0b0100_0000,
     };
     let mut padding = [0; 29];
-    let mut rng = OsRng::new().expect("should be able to construct RNG");
+    let mut rng = OsRng;
     rng.fill(&mut padding[..]);
     do_gen!(
         input,
@@ -149,7 +149,7 @@ pub fn gen_build_response_record<'a>(
     brr: &BuildResponseRecord,
 ) -> Result<(&'a mut [u8], usize), GenError> {
     let mut padding = vec![0; 495];
-    let mut rng = OsRng::new().expect("should be able to construct RNG");
+    let mut rng = OsRng;
     rng.fill(&mut padding[..]);
     let hash = calculate_build_response_record_hash(&padding, brr.reply);
     do_gen!(
