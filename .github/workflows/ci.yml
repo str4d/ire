@@ -15,10 +15,10 @@ jobs:
           override: true
 
       # cargo fmt does not build the code.
-      - name: cargo build
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
+      # - name: cargo build
+      #   uses: actions-rs/cargo@v1
+      #   with:
+      #     command: build
 
       # Ensure all code has been formatted with rustfmt
       - run: rustup component add rustfmt
