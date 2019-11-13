@@ -74,13 +74,12 @@ lazy_static! {
     };
 }
 
-const SSL_CERT_CREATIVECOWPAT_NET: &[u8; 948] =
+const SSL_CERT_CREATIVECOWPAT_NET: &[u8] =
     include_bytes!("../../assets/certificates/ssl/i2pseed.creativecowpat.net.crt");
-const SSL_CERT_ONION_IM: &[u8; 2216] =
+const SSL_CERT_ONION_IM: &[u8] =
     include_bytes!("../../assets/certificates/ssl/reseed.onion.im.crt");
-const SSL_CERT_MOOO_COM: &[u8; 1359] =
-    include_bytes!("../../assets/certificates/ssl/i2p.mooo.com.crt");
-const SSL_CERT_ECHELON: &[u8; 1452] =
+const SSL_CERT_MOOO_COM: &[u8] = include_bytes!("../../assets/certificates/ssl/i2p.mooo.com.crt");
+const SSL_CERT_ECHELON: &[u8] =
     include_bytes!("../../assets/certificates/ssl/echelon.reseed2017.crt");
 
 const MIN_RI_WANTED: usize = 100;
