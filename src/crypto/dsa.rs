@@ -8,7 +8,7 @@
 use num_bigint::BigUint;
 use num_traits::Zero;
 use rand::{rngs::OsRng, Rng};
-use sha1::Sha1;
+use sha1::{Digest, Sha1};
 
 use super::math::rectify;
 use crate::constants::{DSA_G, DSA_P, DSA_Q, DSA_QM2};
@@ -88,7 +88,7 @@ impl DsaPrivateKey {
         let km1 = k.modpow(&DSA_QM2, &DSA_Q);
 
         // h(m) = SHA1(msg)
-        let hm = BigUint::from_bytes_be(&Sha1::from(msg).digest().bytes());
+        let hm = BigUint::from_bytes_be(&Sha1::digest(msg));
 
         // s = k^{-1} * (h(m) + a * r) mod q
         let s = km1 * (hm + &self.0 * &r) % &(*DSA_Q);
@@ -138,7 +138,7 @@ impl DsaPublicKey {
         let w = s.modpow(&DSA_QM2, q);
 
         // h(m) = SHA1(msg)
-        let hm = BigUint::from_bytes_be(&Sha1::from(msg).digest().bytes());
+        let hm = BigUint::from_bytes_be(&Sha1::digest(msg));
 
         // u_1 = w * h(m) mod q
         let u1 = &w * hm % q;
