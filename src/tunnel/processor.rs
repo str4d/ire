@@ -42,7 +42,7 @@ enum HopProcessorState {
 
 /// A [`Future`] that processes a single [`TunnelData`] messages.
 ///
-/// Encryption operations are handled using the [`blocking`] threadpool.
+/// Encryption operations are handled using the [`blocking()`] threadpool.
 struct HopProcessor {
     state: Option<HopProcessorState>,
     comms: Arc<RwLock<dyn CommSystem>>,
@@ -110,8 +110,8 @@ impl Future for HopProcessor {
 /// A [`Future`] that handles incoming [`TunnelData`] messages for a single participating
 /// tunnel.
 ///
-/// Each message is spawned into its own task, which uses the [`blocking`] threadpool for
-/// encryption operations.
+/// Each message is spawned into its own task, which uses the [`blocking()`] threadpool
+/// for encryption operations.
 ///
 /// Currently only supports intermediate hops, not IBGWs or OBEPs.
 pub struct Participant {

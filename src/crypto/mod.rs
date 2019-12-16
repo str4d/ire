@@ -2,23 +2,26 @@
 
 use aes::{self, block_cipher_trait::generic_array::GenericArray as AesGenericArray};
 use block_modes::{block_padding::ZeroPadding, BlockMode, BlockModeIv, Cbc};
-use i2p_ring::signature as ring_signature;
 use nom::Err;
 use rand::Rng;
+use ring::signature::{
+    UnparsedPublicKey, RSA_PKCS1_2048_8192_SHA256_RAW, RSA_PKCS1_3072_8192_SHA384_RAW,
+    RSA_PKCS1_4096_8192_SHA512_RAW,
+};
 use signatory::{
     ecdsa::{
-        curve::{NistP256, NistP384, WeierstrassCurve},
+        self,
+        curve::{Curve, NistP256, NistP384},
+        generic_array::{typenum::Unsigned, GenericArray as SignatoryGenericArray},
         FixedSignature,
     },
     ed25519,
-    generic_array::{typenum::Unsigned, GenericArray as SignatoryGenericArray},
-    public_key, sign, verify, verify_sha256, verify_sha384, EcdsaPublicKey, Ed25519PublicKey,
-    Ed25519Seed, Ed25519Signature, Signature as SignatorySignature,
+    public_key::PublicKeyed,
+    signature::{Signature as SignatorySignature, Signer, Verifier},
 };
 use signatory_dalek::{Ed25519Signer, Ed25519Verifier};
-use signatory_ring::ecdsa::{P256Verifier, P384Verifier};
+use signatory_ring::ecdsa::{p256, p384};
 use std::fmt;
-use untrusted;
 
 use crate::constants;
 use crate::util::fmt_colon_delimited_hex;
@@ -98,8 +101,8 @@ impl SigType {
     pub fn pubkey_len(self) -> u32 {
         match self {
             SigType::DsaSha1 => 128,
-            SigType::EcdsaSha256P256 => <NistP256 as WeierstrassCurve>::UntaggedPointSize::to_u32(),
-            SigType::EcdsaSha384P384 => <NistP384 as WeierstrassCurve>::UntaggedPointSize::to_u32(),
+            SigType::EcdsaSha256P256 => 2 * <NistP256 as Curve>::ScalarSize::to_u32(),
+            SigType::EcdsaSha384P384 => 2 * <NistP384 as Curve>::ScalarSize::to_u32(),
             SigType::EcdsaSha512P521 => 132,
             SigType::Rsa2048Sha256 => 256,
             SigType::Rsa3072Sha384 => 384,
@@ -111,8 +114,8 @@ impl SigType {
     pub fn privkey_len(self) -> u32 {
         match self {
             SigType::DsaSha1 => 20,
-            SigType::EcdsaSha256P256 => <NistP256 as WeierstrassCurve>::ScalarSize::to_u32(),
-            SigType::EcdsaSha384P384 => <NistP384 as WeierstrassCurve>::ScalarSize::to_u32(),
+            SigType::EcdsaSha256P256 => <NistP256 as Curve>::ScalarSize::to_u32(),
+            SigType::EcdsaSha384P384 => <NistP384 as Curve>::ScalarSize::to_u32(),
             SigType::EcdsaSha512P521 => 66,
             SigType::Rsa2048Sha256 => 512,
             SigType::Rsa3072Sha384 => 768,
@@ -124,12 +127,8 @@ impl SigType {
     pub fn sig_len(self) -> u32 {
         match self {
             SigType::DsaSha1 => 40,
-            SigType::EcdsaSha256P256 => {
-                <NistP256 as WeierstrassCurve>::FixedSignatureSize::to_u32()
-            }
-            SigType::EcdsaSha384P384 => {
-                <NistP384 as WeierstrassCurve>::FixedSignatureSize::to_u32()
-            }
+            SigType::EcdsaSha256P256 => 2 * <NistP256 as Curve>::ScalarSize::to_u32(),
+            SigType::EcdsaSha384P384 => 2 * <NistP384 as Curve>::ScalarSize::to_u32(),
             SigType::EcdsaSha512P521 => 132,
             SigType::Rsa2048Sha256 => 256,
             SigType::Rsa3072Sha384 => 384,
@@ -258,10 +257,10 @@ impl fmt::Debug for PrivateKey {
 #[derive(Clone, Debug, PartialEq)]
 pub enum SigningPublicKey {
     DsaSha1(dsa::DsaPublicKey),
-    EcdsaSha256P256(EcdsaPublicKey<NistP256>),
-    EcdsaSha384P384(EcdsaPublicKey<NistP384>),
+    EcdsaSha256P256(ecdsa::PublicKey<NistP256>),
+    EcdsaSha384P384(ecdsa::PublicKey<NistP384>),
     EcdsaSha512P521,
-    Ed25519(Ed25519PublicKey),
+    Ed25519(ed25519::PublicKey),
 }
 
 impl SigningPublicKey {
@@ -283,18 +282,18 @@ impl SigningPublicKey {
                 data,
             )?)),
             SigType::EcdsaSha256P256 => Ok(SigningPublicKey::EcdsaSha256P256(
-                EcdsaPublicKey::from_untagged_point(SignatoryGenericArray::from_slice(data)),
+                ecdsa::PublicKey::from_untagged_point(SignatoryGenericArray::from_slice(data)),
             )),
             SigType::EcdsaSha384P384 => Ok(SigningPublicKey::EcdsaSha384P384(
-                EcdsaPublicKey::from_untagged_point(SignatoryGenericArray::from_slice(data)),
+                ecdsa::PublicKey::from_untagged_point(SignatoryGenericArray::from_slice(data)),
             )),
             SigType::EcdsaSha512P521 => unimplemented!(),
             SigType::Rsa2048Sha256 | SigType::Rsa3072Sha384 | SigType::Rsa4096Sha512 => {
                 panic!("Online verifying not supported")
             }
-            SigType::Ed25519 => Ok(SigningPublicKey::Ed25519(
-                Ed25519PublicKey::from_bytes(data).map_err(|_| Error::InvalidKey)?,
-            )),
+            SigType::Ed25519 => ed25519::PublicKey::from_bytes(data)
+                .map(SigningPublicKey::Ed25519)
+                .ok_or(Error::InvalidKey),
         }
     }
 
@@ -304,9 +303,10 @@ impl SigningPublicKey {
             SigningPrivateKey::EcdsaSha256P256 => unimplemented!(),
             SigningPrivateKey::EcdsaSha384P384 => unimplemented!(),
             SigningPrivateKey::EcdsaSha512P521 => unimplemented!(),
-            SigningPrivateKey::Ed25519(ref seed) => Ok(SigningPublicKey::Ed25519(
-                public_key(&Ed25519Signer::from(seed)).map_err(|_| Error::InvalidKey)?,
-            )),
+            SigningPrivateKey::Ed25519(ref seed) => Ed25519Signer::from(seed)
+                .public_key()
+                .map(SigningPublicKey::Ed25519)
+                .map_err(|_| Error::InvalidKey),
         }
     }
 
@@ -330,16 +330,20 @@ impl SigningPublicKey {
                 }
             }
             (&SigningPublicKey::EcdsaSha256P256(ref pk), &Signature::EcdsaSha256P256(ref s)) => {
-                verify_sha256(&P256Verifier::from(pk), message, s)
+                p256::Verifier::from(pk)
+                    .verify(message, s)
                     .map_err(|_| Error::InvalidSignature)
             }
             (&SigningPublicKey::EcdsaSha384P384(ref pk), &Signature::EcdsaSha384P384(ref s)) => {
-                verify_sha384(&P384Verifier::from(pk), message, s)
+                p384::Verifier::from(pk)
+                    .verify(message, s)
                     .map_err(|_| Error::InvalidSignature)
             }
             (&SigningPublicKey::EcdsaSha512P521, &Signature::EcdsaSha512P521) => unimplemented!(),
             (&SigningPublicKey::Ed25519(ref pk), &Signature::Ed25519(ref s)) => {
-                verify(&Ed25519Verifier::from(pk), message, s).map_err(|_| Error::InvalidSignature)
+                Ed25519Verifier::from(pk)
+                    .verify(message, s)
+                    .map_err(|_| Error::InvalidSignature)
             }
             _ => Err(Error::TypeMismatch),
         }
@@ -352,7 +356,7 @@ pub enum SigningPrivateKey {
     EcdsaSha256P256,
     EcdsaSha384P384,
     EcdsaSha512P521,
-    Ed25519(Ed25519Seed),
+    Ed25519(ed25519::Seed),
 }
 
 impl SigningPrivateKey {
@@ -369,7 +373,7 @@ impl SigningPrivateKey {
             SigType::Rsa2048Sha256 | SigType::Rsa3072Sha384 | SigType::Rsa4096Sha512 => {
                 panic!("Online signing not supported")
             }
-            SigType::Ed25519 => SigningPrivateKey::Ed25519(Ed25519Seed::generate()),
+            SigType::Ed25519 => SigningPrivateKey::Ed25519(ed25519::Seed::generate()),
         }
     }
 
@@ -382,9 +386,9 @@ impl SigningPrivateKey {
             SigType::Rsa2048Sha256 | SigType::Rsa3072Sha384 | SigType::Rsa4096Sha512 => {
                 panic!("Online signing not supported")
             }
-            SigType::Ed25519 => Ok(SigningPrivateKey::Ed25519(
-                Ed25519Seed::from_bytes(data).map_err(|_| Error::InvalidKey)?,
-            )),
+            SigType::Ed25519 => ed25519::Seed::from_bytes(data)
+                .map(SigningPrivateKey::Ed25519)
+                .ok_or(Error::InvalidKey),
         }
     }
 
@@ -404,9 +408,9 @@ impl SigningPrivateKey {
             SigningPrivateKey::EcdsaSha256P256 => unimplemented!(),
             SigningPrivateKey::EcdsaSha384P384 => unimplemented!(),
             SigningPrivateKey::EcdsaSha512P521 => unimplemented!(),
-            SigningPrivateKey::Ed25519(ref seed) => Ok(Signature::Ed25519(
-                sign(&Ed25519Signer::from(seed), msg).map_err(|_| Error::SigningFailed)?,
-            )),
+            SigningPrivateKey::Ed25519(ref seed) => {
+                Ok(Signature::Ed25519(Ed25519Signer::from(seed).sign(msg)))
+            }
         }
     }
 }
@@ -419,9 +423,9 @@ impl Clone for SigningPrivateKey {
             SigningPrivateKey::EcdsaSha256P256 => unimplemented!(),
             SigningPrivateKey::EcdsaSha384P384 => unimplemented!(),
             SigningPrivateKey::EcdsaSha512P521 => unimplemented!(),
-            SigningPrivateKey::Ed25519(ref seed) => {
-                SigningPrivateKey::Ed25519(Ed25519Seed::from_bytes(seed.as_secret_slice()).unwrap())
-            }
+            SigningPrivateKey::Ed25519(ref seed) => SigningPrivateKey::Ed25519(
+                ed25519::Seed::from_bytes(seed.as_secret_slice()).unwrap(),
+            ),
         }
     }
 }
@@ -464,8 +468,7 @@ impl OfflineSigningPublicKey {
         match sig_type {
             SigType::Rsa2048Sha256 | SigType::Rsa3072Sha384 | SigType::Rsa4096Sha512 => {
                 // Ring requires the binary RSAPublicKey format
-                let mut pub_key_der = Vec::with_capacity(data.len());
-                pub_key_der.extend_from_slice(data);
+                let pub_key_der = data.to_vec();
                 Ok(match sig_type {
                     SigType::Rsa2048Sha256 => OfflineSigningPublicKey::Rsa2048Sha256(pub_key_der),
                     SigType::Rsa3072Sha384 => OfflineSigningPublicKey::Rsa3072Sha384(pub_key_der),
@@ -479,32 +482,20 @@ impl OfflineSigningPublicKey {
 
     pub fn verify(&self, message: &[u8], signature: &Signature) -> Result<(), Error> {
         match (self, signature) {
-            (&OfflineSigningPublicKey::Rsa2048Sha256(ref pk), &Signature::Rsa2048Sha256(ref s)) => {
-                ring_signature::verify(
-                    &ring_signature::RSA_PKCS1_2048_8192_SHA256_RAW,
-                    untrusted::Input::from(pk),
-                    untrusted::Input::from(message),
-                    untrusted::Input::from(s),
-                )
-                .map_err(|_| Error::InvalidSignature)
+            (OfflineSigningPublicKey::Rsa2048Sha256(pk), Signature::Rsa2048Sha256(s)) => {
+                UnparsedPublicKey::new(&RSA_PKCS1_2048_8192_SHA256_RAW, pk)
+                    .verify(message, &s)
+                    .map_err(|_| Error::InvalidSignature)
             }
-            (&OfflineSigningPublicKey::Rsa3072Sha384(ref pk), &Signature::Rsa3072Sha384(ref s)) => {
-                ring_signature::verify(
-                    &ring_signature::RSA_PKCS1_3072_8192_SHA384_RAW,
-                    untrusted::Input::from(pk),
-                    untrusted::Input::from(message),
-                    untrusted::Input::from(s),
-                )
-                .map_err(|_| Error::InvalidSignature)
+            (OfflineSigningPublicKey::Rsa3072Sha384(pk), Signature::Rsa3072Sha384(s)) => {
+                UnparsedPublicKey::new(&RSA_PKCS1_3072_8192_SHA384_RAW, pk)
+                    .verify(message, &s)
+                    .map_err(|_| Error::InvalidSignature)
             }
-            (&OfflineSigningPublicKey::Rsa4096Sha512(ref pk), &Signature::Rsa4096Sha512(ref s)) => {
-                ring_signature::verify(
-                    &ring_signature::RSA_PKCS1_4096_8192_SHA512_RAW,
-                    untrusted::Input::from(pk),
-                    untrusted::Input::from(message),
-                    untrusted::Input::from(s),
-                )
-                .map_err(|_| Error::InvalidSignature)
+            (OfflineSigningPublicKey::Rsa4096Sha512(pk), Signature::Rsa4096Sha512(s)) => {
+                UnparsedPublicKey::new(&RSA_PKCS1_4096_8192_SHA512_RAW, pk)
+                    .verify(message, &s)
+                    .map_err(|_| Error::InvalidSignature)
             }
             _ => Err(Error::TypeMismatch),
         }
@@ -521,7 +512,7 @@ pub enum Signature {
     Rsa2048Sha256(Vec<u8>),
     Rsa3072Sha384(Vec<u8>),
     Rsa4096Sha512(Vec<u8>),
-    Ed25519(Ed25519Signature),
+    Ed25519(ed25519::Signature),
     Unsupported(Vec<u8>),
 }
 
@@ -536,7 +527,7 @@ impl Signature {
                 FixedSignature::from_bytes(data).map_err(|_| Error::InvalidSignature)?,
             )),
             SigType::Ed25519 => Ok(Signature::Ed25519(
-                Ed25519Signature::from_bytes(data).map_err(|_| Error::InvalidSignature)?,
+                ed25519::Signature::from_bytes(data).map_err(|_| Error::InvalidSignature)?,
             )),
             SigType::EcdsaSha512P521
             | SigType::Rsa2048Sha256
@@ -563,7 +554,7 @@ impl Signature {
             Signature::Rsa2048Sha256(ref s) => s.clone(),
             Signature::Rsa3072Sha384(ref s) => s.clone(),
             Signature::Rsa4096Sha512(ref s) => s.clone(),
-            Signature::Ed25519(ref s) => Vec::from(&s.as_bytes()[..]),
+            Signature::Ed25519(ref s) => s.to_bytes().to_vec(),
             Signature::Unsupported(ref s) => s.clone(),
         }
     }

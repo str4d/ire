@@ -129,7 +129,7 @@ enum HopAcceptorState<TB: TunnelBuildRequest> {
 
 /// A [`Future`] that processes a single tunnel build request.
 ///
-/// Encryption operations are handled using the [`blocking`] threadpool.
+/// Encryption operations are handled using the [`blocking()`] threadpool.
 struct HopAcceptor<TB: TunnelBuildRequest> {
     state: Option<HopAcceptorState<TB>>,
     decryptor: elgamal::Decryptor,
@@ -370,7 +370,7 @@ impl<TB: TunnelBuildRequest> Future for HopAcceptor<TB> {
 
 /// A [`Future`] that handles incoming tunnel build requests.
 ///
-/// Each build request is spawned into its own task, which uses the [`blocking`]
+/// Each build request is spawned into its own task, which uses the [`blocking()`]
 /// threadpool for encryption operations.
 ///
 /// Currently the listener accepts every request for an intermediate position, and rejects

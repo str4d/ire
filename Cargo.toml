@@ -19,13 +19,12 @@ bloom-filter-rs = "0.1"
 bytes = "0.4"
 chrono = "0.4"
 clap = { version = "2.32", optional = true }
-config = { version = "0.9", default-features = false, features = ["toml"] }
+config = { version = "0.10", default-features = false, features = ["toml"] }
 cookie-factory = "0.2"
 data-encoding = "2.1"
 env_logger = { version = "0.7", optional = true }
 flate2 = "1.0"
 futures = "0.1"
-i2p_ring = { git = "https://github.com/str4d/ring.git", rev = "7fe5a141201e4931ea2bbcd7eb3302fbf22867e9" }
 i2p_snow = "0.5.1"
 itertools = "0.8"
 lazy_static = "1.0"
@@ -35,17 +34,16 @@ nom = "4.0"
 num-bigint = { version = "0.2", features = ["rand"] }
 num-traits = "0.2"
 rand = "0.7"
-ring = "0.14"
-sha1 = "0.6"
+ring = "0.16.9"
+sha-1 = "0.8"
 sha2 = "0.8"
-signatory = { version = "0.11", features = ["ecdsa", "ed25519"] }
-signatory-dalek = "0.11"
-signatory-ring = "0.11"
+signatory = { version = "0.17.1", features = ["ecdsa", "ed25519"] }
+signatory-dalek = "0.17"
+signatory-ring = "0.17"
 siphasher = "0.3"
 tokio = "0.1"
 tokio-threadpool = "0.1"
 tokio-tls = "0.2"
-untrusted = "0.6"
 zip = { version = "0.5", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
@@ -59,3 +57,6 @@ nightly = []
 [[bin]]
 name = "ire"
 required-features = ["cli"]
+
+[patch.crates-io]
+ring = { git = "https://github.com/str4d/ring.git", branch = "i2p-0.16.9" }
