@@ -1,9 +1,6 @@
 //! Tunnel encryption operations.
 
-use aes::{
-    self,
-    block_cipher_trait::{generic_array::GenericArray as AesGenericArray, BlockCipher},
-};
+use aes::{self, cipher::{generic_array::GenericArray as AesGenericArray}, NewBlockCipher, BlockEncrypt, BlockDecrypt};
 
 use crate::crypto::{Aes256, SessionKey};
 use crate::i2np::TunnelData;

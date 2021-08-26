@@ -1,7 +1,7 @@
 //! Cryptographic types and operations.
 
-use aes::{self, block_cipher_trait::generic_array::GenericArray as AesGenericArray};
-use block_modes::{block_padding::ZeroPadding, BlockMode, BlockModeIv, Cbc};
+use aes::{self, cipher::generic_array::GenericArray as AesGenericArray};
+use block_modes::{block_padding::NoPadding, Cbc, BlockMode};
 use nom::Err;
 use rand::Rng;
 use ring::signature::{
@@ -581,18 +581,17 @@ impl SessionKey {
 //
 // Algorithm implementations
 //
-
 pub(crate) struct Aes256 {
-    cbc_enc: Cbc<aes::Aes256, ZeroPadding>,
-    cbc_dec: Cbc<aes::Aes256, ZeroPadding>,
+    cbc_enc: Cbc<aes::Aes256, NoPadding>,
+    cbc_dec: Cbc<aes::Aes256, NoPadding>,
 }
 
 impl Aes256 {
     pub fn new(key: &SessionKey, iv_enc: &[u8], iv_dec: &[u8]) -> Self {
         let key = AesGenericArray::from_slice(&key.0);
         Aes256 {
-            cbc_enc: Cbc::new_fixkey(key, AesGenericArray::from_slice(iv_enc)),
-            cbc_dec: Cbc::new_fixkey(key, AesGenericArray::from_slice(iv_dec)),
+            cbc_enc: Cbc::new_fix(key, AesGenericArray::from_slice(iv_enc)),
+            cbc_dec: Cbc::new_fix(key, AesGenericArray::from_slice(iv_dec)),
         }
     }
 
@@ -604,10 +603,9 @@ impl Aes256 {
 
         // Integer division, leaves extra bytes unencrypted at the end
         let end = (buf.len() / AES_BLOCK_SIZE) * AES_BLOCK_SIZE;
-        match self.cbc_enc.encrypt_nopad(&mut buf[..end]) {
-            Ok(_) => Some(end),
-            Err(_) => None,
-        }
+        let encrypted_data = self.cbc_enc.clone().encrypt_vec(&buf[..end]);
+        buf[..end].copy_from_slice(&*encrypted_data);
+        Some(end)
     }
 
     pub fn decrypt_blocks(&mut self, buf: &mut [u8]) -> Option<usize> {
@@ -618,9 +616,12 @@ impl Aes256 {
 
         // Integer division, leaves extra bytes undecrypted at the end
         let end = (buf.len() / AES_BLOCK_SIZE) * AES_BLOCK_SIZE;
-        match self.cbc_dec.decrypt_nopad(&mut buf[..end]) {
-            Ok(_) => Some(end),
-            Err(_) => None,
+        match self.cbc_dec.clone().decrypt_vec(&mut buf[..end]) {
+            Ok(decrypted_data) => {
+                buf[..end].clone_from_slice(&*decrypted_data);
+                Some(end)
+            },
+            Err(_) => None
         }
     }
 }
@@ -663,7 +664,7 @@ mod tests {
             iv: [u8; 16],
             plaintext: Vec<u8>,
             ciphertext: Vec<u8>,
-        };
+        }
         // From https://csrc.nist.gov/CSRC/media/Projects/Cryptographic-Algorithm-Validation-Program/documents/aes/aesmmt.zip
         // Source: http://csrc.nist.gov/groups/STM/cavp/block-ciphers.html
         let test_vectors = vec![

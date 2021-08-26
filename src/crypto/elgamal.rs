@@ -283,7 +283,7 @@ mod tests {
         struct TestVector<'a> {
             msg: &'a str,
             ct: &'a str,
-        };
+        }
         let test_vectors = vec![
             TestVector {
                 msg: "",
