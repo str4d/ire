@@ -26,7 +26,7 @@ use std::fmt;
 use crate::constants;
 use crate::util::fmt_colon_delimited_hex;
 
-#[allow(needless_pass_by_value)]
+#[allow(clippy::needless_pass_by_value)]
 pub(crate) mod frame;
 
 pub(crate) mod dh;

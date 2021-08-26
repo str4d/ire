@@ -15,7 +15,7 @@ pub struct MockNetDb {
 }
 
 impl MockNetDb {
-    pub fn new(ctx: Arc<Context>, client_rx: mpsc::UnboundedReceiver<Query>) -> Self {
+    pub fn new(_: Arc<Context>, client_rx: mpsc::UnboundedReceiver<Query>) -> Self {
         MockNetDb {
             client_rx,
             ri_ds: HashMap::new(),
@@ -35,7 +35,7 @@ impl Future for MockNetDb {
         loop {
             if let Some(query) = try_ready!(self.client_rx.poll()) {
                 match query {
-                    Query::LookupRouterInfo(key, timeout_ms, from_peer, ret) => ret
+                    Query::LookupRouterInfo(key, _, _, ret) => ret
                         .send(self.ri_ds.get(&key).cloned().ok_or(LookupError::NotFound))
                         .unwrap(),
                     _ => (),

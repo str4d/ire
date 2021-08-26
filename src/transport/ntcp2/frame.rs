@@ -279,7 +279,7 @@ pub fn gen_session_created(
 
 // SessionConfirmed
 
-named!(pub session_confirmed<(Frame)>, call!(frame));
+named!(pub session_confirmed<Frame>, call!(frame));
 
 pub fn gen_session_confirmed<'a>(
     input: (&'a mut [u8], usize),

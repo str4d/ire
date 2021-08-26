@@ -16,8 +16,8 @@ use crate::data::{Hash, RouterIdentity};
 use crate::transport::DHSessionKeyBuilder;
 use crate::util::serialize;
 
-#[allow(double_parens)]
-#[allow(needless_pass_by_value)]
+#[allow(clippy::double_parens)]
+#[allow(clippy::needless_pass_by_value)]
 mod frame;
 
 macro_rules! try_poll {
@@ -525,7 +525,7 @@ struct SharedHandshakeState {
 // Inbound handshake protocol
 //
 
-#[allow(enum_variant_names)]
+#[allow(clippy::enum_variant_names)]
 enum IBHandshakeState<T>
 where
     T: AsyncWrite,
@@ -692,7 +692,7 @@ where
 // Outbound handshake protocol
 //
 
-#[allow(enum_variant_names)]
+#[allow(clippy::enum_variant_names)]
 enum OBHandshakeState<T>
 where
     T: AsyncWrite,

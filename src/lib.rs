@@ -3,7 +3,7 @@
 #![allow(unknown_lints)]
 #![cfg_attr(all(test, feature = "nightly"), feature(test))]
 // Catch documentation errors caused by code changes.
-#![deny(intra_doc_link_resolution_failure)]
+#![deny(rustdoc::broken_intra_doc_links)]
 
 #[macro_use]
 extern crate arrayref;

@@ -19,8 +19,8 @@ use crate::data::{
 };
 use crate::util::serialize;
 
-#[allow(double_parens)]
-#[allow(needless_pass_by_value)]
+#[allow(clippy::double_parens)]
+#[allow(clippy::needless_pass_by_value)]
 pub(crate) mod frame;
 
 const MESSAGE_EXPIRATION_MS: u64 = 60 * 1000;

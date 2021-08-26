@@ -22,7 +22,7 @@ use crate::util::{fmt_colon_delimited_hex, serialize};
 
 pub mod dest;
 
-#[allow(needless_pass_by_value)]
+#[allow(clippy::needless_pass_by_value)]
 pub(crate) mod frame;
 
 pub use self::dest::{Destination, Lease, LeaseSet};

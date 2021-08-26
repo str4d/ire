@@ -130,7 +130,7 @@ impl<F, D: Distributor> Clone for SessionRefs<F, D> {
 }
 
 impl<F, D: Distributor> Stream for SessionRefs<F, D> {
-    type Item = (SessionRefs<F, D>);
+    type Item = SessionRefs<F, D>;
     type Error = io::Error;
 
     fn poll(&mut self) -> Poll<Option<Self::Item>, Self::Error> {

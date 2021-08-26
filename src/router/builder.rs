@@ -11,6 +11,7 @@ use crate::netdb::{client::Client as NetDbClient, Engine as NetDbEngine};
 use crate::router::config;
 use crate::transport;
 use crate::tunnel;
+use std::panic::panic_any;
 
 /// Builder errors
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -111,7 +112,7 @@ impl Builder {
                     );
                     RouterSecretKeys::new()
                 }
-                Err(e) => panic!(e),
+                Err(e) => panic_any(e),
             },
         };
 
@@ -166,7 +167,7 @@ impl Builder {
                 "Config option {} not set, not writing RouterInfo to disk",
                 key
             ),
-            Err(e) => panic!(e),
+            Err(e) => panic_any(e),
         }
 
         let ctx = Arc::new(Context {

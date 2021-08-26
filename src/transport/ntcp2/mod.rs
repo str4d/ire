@@ -67,7 +67,7 @@ use crate::router::{
     Context,
 };
 
-#[allow(needless_pass_by_value)]
+#[allow(clippy::needless_pass_by_value)]
 mod frame;
 
 mod handshake;
