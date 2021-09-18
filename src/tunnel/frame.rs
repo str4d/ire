@@ -13,10 +13,10 @@ use crate::data::frame::{gen_hash, gen_tunnel_id, hash, tunnel_id};
 
 fn checksum(buf: &[u8], iv: &[u8]) -> u32 {
     let mut hasher = Sha256::default();
-    hasher.input(buf);
-    hasher.input(iv);
+    hasher.update(buf);
+    hasher.update(iv);
     let mut buf = [0; 4];
-    buf.copy_from_slice(&hasher.result()[0..4]);
+    buf.copy_from_slice(&hasher.finalize()[0..4]);
     u32::from_be_bytes(buf)
 }
 

@@ -12,9 +12,9 @@ keywords = ["i2p", "net", "network", "privacy", "security"]
 edition = "2018"
 
 [dependencies]
-aes = "0.3"
+aes = "0.7"
 arrayref = "0.3"
-block-modes = "0.2"
+block-modes = "0.8"
 bloom-filter-rs = "0.1"
 bytes = "0.4"
 chrono = "0.4"
@@ -31,12 +31,12 @@ lazy_static = "1.0"
 log = "0.4"
 native-tls = "0.2"
 nom = "4.0"
-num-bigint = { version = "0.2", features = ["rand"] }
+num-bigint = { version = "0.4", features = ["rand"] }
 num-traits = "0.2"
-rand = "0.7"
+rand = "0.8"
 ring = "0.16.9"
-sha-1 = "0.8"
-sha2 = "0.8"
+sha-1 = "0.9"
+sha2 = "0.9"
 signatory = { version = "0.17.1", features = ["ecdsa", "ed25519"] }
 signatory-dalek = "0.17"
 signatory-ring = "0.17"

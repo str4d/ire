@@ -89,9 +89,7 @@ impl Hash {
     }
 
     pub fn digest(buf: &[u8]) -> Self {
-        let mut hasher = Sha256::default();
-        hasher.input(buf);
-        let hash = hasher.result();
+        let hash = Sha256::digest(buf);
         Hash::from_bytes(array_ref![hash.as_slice(), 0, 32])
     }
 

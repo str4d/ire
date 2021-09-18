@@ -1,9 +1,6 @@
 //! Tunnel encryption operations.
 
-use aes::{
-    self,
-    block_cipher_trait::{generic_array::GenericArray as AesGenericArray, BlockCipher},
-};
+use aes::{cipher::BlockCipherKey, Block, BlockDecrypt, BlockEncrypt, NewBlockCipher};
 
 use crate::crypto::{Aes256, SessionKey};
 use crate::i2np::TunnelData;
@@ -23,9 +20,9 @@ pub struct LayerCipher {
 impl LayerCipher {
     /// Create a `LayerCipher` for the tunnel hop with the given IV and layer keys.
     pub fn new(iv_key: &SessionKey, layer_key: SessionKey) -> Self {
-        let iv_key = AesGenericArray::from_slice(&iv_key.0);
+        let iv_key = BlockCipherKey::<aes::Aes256>::from_slice(&iv_key.0);
         LayerCipher {
-            iv_cipher: aes::Aes256::new(&iv_key),
+            iv_cipher: aes::Aes256::new(iv_key),
             layer_key,
         }
     }
@@ -37,7 +34,7 @@ impl LayerCipher {
     pub fn encrypt_layer(&self, td: &mut TunnelData) {
         // Encrypt the received IV with AES256/ECB using the IV key to determine the current IV
         self.iv_cipher
-            .encrypt_block(AesGenericArray::from_mut_slice(&mut td.data[0..16]));
+            .encrypt_block(Block::from_mut_slice(&mut td.data[0..16]));
 
         // Use that IV with the layer key to encrypt the data
         let mut cipher = Aes256::new(&self.layer_key, &td.data[0..16], &[0; 16]);
@@ -45,7 +42,7 @@ impl LayerCipher {
 
         // Encrypt the current IV with AES256/ECB using the IV key again
         self.iv_cipher
-            .encrypt_block(AesGenericArray::from_mut_slice(&mut td.data[0..16]));
+            .encrypt_block(Block::from_mut_slice(&mut td.data[0..16]));
     }
 
     /// Decrypt a [`TunnelData`] message using the IV and layer keys for this hop.
@@ -55,7 +52,7 @@ impl LayerCipher {
     pub fn decrypt_layer(&self, td: &mut TunnelData) {
         // Decrypt the received IV with AES256/ECB using the IV key to determine the current IV
         self.iv_cipher
-            .decrypt_block(AesGenericArray::from_mut_slice(&mut td.data[0..16]));
+            .decrypt_block(Block::from_mut_slice(&mut td.data[0..16]));
 
         // Use that IV with the layer key to decrypt the data
         let mut cipher = Aes256::new(&self.layer_key, &[0; 16], &td.data[0..16]);
@@ -63,7 +60,7 @@ impl LayerCipher {
 
         // Decrypt the current IV with AES256/ECB using the IV key again
         self.iv_cipher
-            .decrypt_block(AesGenericArray::from_mut_slice(&mut td.data[0..16]));
+            .decrypt_block(Block::from_mut_slice(&mut td.data[0..16]));
     }
 }
 
