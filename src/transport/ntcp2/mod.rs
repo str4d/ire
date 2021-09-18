@@ -463,7 +463,7 @@ where
     fn poll(&mut self) -> Poll<Option<Self::Item>, io::Error> {
         loop {
             // Return any cached messages
-            while let Some(msg) = self.cached_msgs.pop_front() {
+            if let Some(msg) = self.cached_msgs.pop_front() {
                 return Ok(Async::Ready(Some((self.ctx.hash.clone(), msg))));
             }
 
@@ -537,7 +537,7 @@ where
                     }
                     // Guaranteed to return a block
                     let orig_block = self.cached_blocks.pop_back().unwrap();
-                    return Ok(AsyncSink::NotReady(orig_block));
+                    Ok(AsyncSink::NotReady(orig_block))
                 }
             }
         } else {
@@ -611,7 +611,7 @@ impl<D: Distributor> Manager<D> {
 
         Ok(Manager {
             addr,
-            static_private_key: static_private_key.clone(),
+            static_private_key,
             static_public_key,
             aesobfse_iv,
             session_manager: session::new_manager(distributor),

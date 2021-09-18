@@ -79,7 +79,7 @@ pub fn gen_mapping<'a>(
         input,
         size:  gen_skip!(2) >>
         // Some structures require the Mapping be sorted, so just sort them all
-        start: gen_many!(m.0.iter().sorted().into_iter(), gen_mapping_pair) >>
+        start: gen_many!(m.0.iter().sorted(), gen_mapping_pair) >>
         end:   gen_at_offset!(size, gen_be_u16!(end - start))
     )
 }

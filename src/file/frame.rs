@@ -1,7 +1,6 @@
 use nom::*;
 use std::io::{Cursor, Read};
 use std::str::from_utf8;
-use zip;
 
 use super::{Error, Su3Content, Su3File, SU3_MAGIC};
 use crate::crypto::{
