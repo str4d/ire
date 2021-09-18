@@ -1,7 +1,6 @@
 //! Logic for processing incoming tunnel build requests.
 
-use aes::{self, block_cipher_trait::generic_array::GenericArray as AesGenericArray};
-use block_modes::{block_padding::ZeroPadding, BlockMode, BlockModeIv, Cbc};
+use block_modes::{block_padding::NoPadding, BlockMode, Cbc};
 use futures::{sink, sync::mpsc, try_ready, Async, Future, Poll, Sink, Stream};
 use std::slice::IterMut;
 use std::sync::{Arc, Mutex};
@@ -327,11 +326,11 @@ impl<TB: TunnelBuildRequest> Future for HopAcceptor<TB> {
 
                             // Now encrypt all the entries
                             for tb_entry in info.tb.iter_mut() {
-                                let mut cipher: Cbc<aes::Aes256, ZeroPadding> = Cbc::new_fixkey(
-                                    AesGenericArray::from_slice(&info.reply_key.0),
-                                    AesGenericArray::from_slice(&info.reply_iv),
-                                );
-                                cipher.encrypt_nopad(tb_entry).expect("Should not fail!");
+                                let cipher: Cbc<aes::Aes256, NoPadding> =
+                                    Cbc::new_from_slices(&info.reply_key.0, &info.reply_iv)
+                                        .expect("key and iv are correct length");
+                                let len = tb_entry.len();
+                                cipher.encrypt(tb_entry, len).expect("Should not fail!");
                             }
                         }),
                         self,

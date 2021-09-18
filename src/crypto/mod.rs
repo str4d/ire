@@ -1,7 +1,7 @@
 //! Cryptographic types and operations.
 
-use aes::{self, block_cipher_trait::generic_array::GenericArray as AesGenericArray};
-use block_modes::{block_padding::ZeroPadding, BlockMode, BlockModeIv, Cbc};
+use aes::cipher::generic_array::{ArrayLength, GenericArray as AesGenericArray};
+use block_modes::{block_padding::NoPadding, BlockMode, Cbc};
 use nom::Err;
 use rand::Rng;
 use ring::signature::{
@@ -21,7 +21,7 @@ use signatory::{
 };
 use signatory_dalek::{Ed25519Signer, Ed25519Verifier};
 use signatory_ring::ecdsa::{p256, p384};
-use std::fmt;
+use std::{fmt, slice};
 
 use crate::constants;
 use crate::util::fmt_colon_delimited_hex;
@@ -582,17 +582,29 @@ impl SessionKey {
 // Algorithm implementations
 //
 
+fn to_blocks<N>(data: &mut [u8]) -> &mut [AesGenericArray<u8, N>]
+where
+    N: ArrayLength<u8>,
+{
+    let n = N::to_usize();
+    debug_assert!(data.len() % n == 0);
+
+    #[allow(unsafe_code)]
+    unsafe {
+        slice::from_raw_parts_mut(data.as_ptr() as *mut AesGenericArray<u8, N>, data.len() / n)
+    }
+}
+
 pub(crate) struct Aes256 {
-    cbc_enc: Cbc<aes::Aes256, ZeroPadding>,
-    cbc_dec: Cbc<aes::Aes256, ZeroPadding>,
+    cbc_enc: Cbc<aes::Aes256, NoPadding>,
+    cbc_dec: Cbc<aes::Aes256, NoPadding>,
 }
 
 impl Aes256 {
     pub fn new(key: &SessionKey, iv_enc: &[u8], iv_dec: &[u8]) -> Self {
-        let key = AesGenericArray::from_slice(&key.0);
         Aes256 {
-            cbc_enc: Cbc::new_fixkey(key, AesGenericArray::from_slice(iv_enc)),
-            cbc_dec: Cbc::new_fixkey(key, AesGenericArray::from_slice(iv_dec)),
+            cbc_enc: Cbc::new_from_slices(&key.0, iv_enc).expect("key and iv are correct length"),
+            cbc_dec: Cbc::new_from_slices(&key.0, iv_dec).expect("key and iv are correct length"),
         }
     }
 
@@ -604,10 +616,8 @@ impl Aes256 {
 
         // Integer division, leaves extra bytes unencrypted at the end
         let end = (buf.len() / AES_BLOCK_SIZE) * AES_BLOCK_SIZE;
-        match self.cbc_enc.encrypt_nopad(&mut buf[..end]) {
-            Ok(_) => Some(end),
-            Err(_) => None,
-        }
+        self.cbc_enc.encrypt_blocks(to_blocks(&mut buf[..end]));
+        Some(end)
     }
 
     pub fn decrypt_blocks(&mut self, buf: &mut [u8]) -> Option<usize> {
@@ -618,10 +628,8 @@ impl Aes256 {
 
         // Integer division, leaves extra bytes undecrypted at the end
         let end = (buf.len() / AES_BLOCK_SIZE) * AES_BLOCK_SIZE;
-        match self.cbc_dec.decrypt_nopad(&mut buf[..end]) {
-            Ok(_) => Some(end),
-            Err(_) => None,
-        }
+        self.cbc_dec.decrypt_blocks(to_blocks(&mut buf[..end]));
+        Some(end)
     }
 }
 
