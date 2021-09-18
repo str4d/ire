@@ -3,6 +3,7 @@ use nom::*;
 use nom::{
     bits::{bits, streaming::take as take_bits},
     combinator::map,
+    error::Error as NomError,
     number::streaming::{be_u16, be_u32, be_u64, be_u8},
     sequence::preceded,
 };
@@ -48,7 +49,10 @@ fn gen_options<'a>(
 
 fn routerinfo_flags(i: &[u8]) -> IResult<&[u8], RouterInfoFlags> {
     map(
-        bits(preceded(take_bits::<_, u8, _, (_, _)>(7u8), take_bits(1u8))),
+        bits(preceded(
+            take_bits::<_, u8, _, NomError<_>>(7u8),
+            take_bits(1u8),
+        )),
         |flood: u8| RouterInfoFlags { flood: flood > 0 },
     )(i)
 }

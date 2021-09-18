@@ -7,7 +7,7 @@ use nom::{
     bits::streaming::take as take_bits,
     bytes::streaming::take,
     combinator::{cond, map, verify},
-    error::ErrorKind,
+    error::{Error as NomError, ErrorKind},
     number::streaming::{be_u16, be_u32, be_u8},
     sequence::{preceded, terminated, tuple},
 };
@@ -61,7 +61,7 @@ pub fn build_request_record(i: &[u8]) -> IResult<&[u8], BuildRequestRecord> {
                         map(
                             bits(terminated(
                                 tuple((take_bits(1u8), take_bits(1u8))),
-                                take_bits::<_, u8, _, (_, _)>(6u8),
+                                take_bits::<_, u8, _, NomError<_>>(6u8),
                             )),
                             |(ibgw, obep): (u8, u8)| (ibgw > 0, obep > 0),
                         ),
@@ -153,7 +153,7 @@ fn validate_build_response_record<'a>(
     if hash.eq(&Hash::from_bytes(array_ref![res, 0, 32])) {
         Ok((input, ()))
     } else {
-        Err(Err::Error((input, ErrorKind::Verify)))
+        Err(Err::Error(NomError::new(input, ErrorKind::Verify)))
     }
 }
 
@@ -195,10 +195,12 @@ fn compressed_ri(input: &[u8]) -> IResult<&[u8], RouterInfo> {
         Ok(_) => match router_info(&buf) {
             Ok((_, ri)) => Ok((i, ri)),
             Err(Err::Incomplete(n)) => Err(Err::Incomplete(n)),
-            Err(Err::Error((_, err))) => Err(Err::Error((input, err))),
-            Err(Err::Failure((_, err))) => Err(Err::Failure((input, err))),
+            Err(Err::Error(NomError { code, .. })) => Err(Err::Error(NomError::new(input, code))),
+            Err(Err::Failure(NomError { code, .. })) => {
+                Err(Err::Failure(NomError::new(input, code)))
+            }
         },
-        Err(_) => Err(Err::Error((input, ErrorKind::Eof))),
+        Err(_) => Err(Err::Error(NomError::new(input, ErrorKind::Eof))),
     }
 }
 
@@ -299,7 +301,7 @@ fn gen_database_store<'a>(
 
 fn database_lookup_flags(i: &[u8]) -> IResult<&[u8], DatabaseLookupFlags> {
     map(
-        bits::<_, _, (_, _), _, _>(preceded(
+        bits::<_, _, NomError<_>, _, _>(preceded(
             take_bits::<_, u8, _, _>(4u8),
             tuple((take_bits(2u8), take_bits(1u8), take_bits(1u8))),
         )),
@@ -447,7 +449,7 @@ fn garlic_clove_delivery_instructions(i: &[u8]) -> IResult<&[u8], GarlicCloveDel
     let (i, (encrypted, delivery_type, delay_set)) = map(
         bits(terminated(
             tuple((take_bits(1u8), take_bits(2u8), take_bits(1u8))),
-            take_bits::<_, u8, _, (_, _)>(4u8),
+            take_bits::<_, u8, _, NomError<_>>(4u8),
         )),
         |(encrypted, delivery_type, delay_set): (u8, u8, u8)| {
             (encrypted > 0, delivery_type, delay_set > 0)
@@ -749,7 +751,7 @@ fn validate_checksum<'a>(input: &'a [u8], cs: u8, buf: &[u8]) -> IResult<&'a [u8
     if cs.eq(&checksum(&buf)) {
         Ok((input, ()))
     } else {
-        Err(Err::Error((input, ErrorKind::Verify)))
+        Err(Err::Error(NomError::new(input, ErrorKind::Verify)))
     }
 }
 
@@ -902,6 +904,8 @@ pub fn gen_ntcp2_message<'a>(
 mod tests {
     use super::*;
 
+    use nom::error::Error as NomError;
+
     use std::time::UNIX_EPOCH;
 
     macro_rules! bake_and_eat {
@@ -1044,14 +1048,14 @@ mod tests {
         // Flag bits 7 and 6 set
         eval!(
             0xc0,
-            Err(nom::Err::Error((
-                &vec![
+            Err(nom::Err::Error(NomError {
+                input: &vec![
                     0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                 ][..],
-                nom::error::ErrorKind::Verify
-            )))
+                code: nom::error::ErrorKind::Verify
+            }))
         );
     }
 
@@ -1134,7 +1138,10 @@ mod tests {
         assert_eq!(validate_checksum(&a[..], 0x23, &a[..7]), Ok((&a[..], ())));
         assert_eq!(
             validate_checksum(&a[..], 0x23, &a[..8]),
-            Err(Err::Error((&a[..], ErrorKind::Verify)))
+            Err(Err::Error(NomError {
+                input: &a[..],
+                code: ErrorKind::Verify
+            }))
         );
     }
 

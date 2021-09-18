@@ -1,6 +1,8 @@
-use nom::error::ErrorKind;
-use nom::number::complete::{be_u16, be_u64, be_u8};
 use nom::*;
+use nom::{
+    error::{Error as NomError, ErrorKind},
+    number::complete::{be_u16, be_u64, be_u8},
+};
 use std::io::{Cursor, Read};
 use std::str::from_utf8;
 
@@ -22,8 +24,8 @@ named_args!(su3_version(version_len: u8)<&str>,
 fn su3_zip_reseed(input: &[u8], content_len: u64) -> IResult<&[u8], Su3Content> {
     let (i, content) = take!(input, content_len)?;
     let reader = Cursor::new(content);
-    let mut zip =
-        zip::ZipArchive::new(reader).map_err(|_| Err::Error((input, ErrorKind::Verify)))?;
+    let mut zip = zip::ZipArchive::new(reader)
+        .map_err(|_| Err::Error(NomError::new(input, ErrorKind::Verify)))?;
 
     let ri = (0..zip.len())
         .filter_map(|j| {
@@ -31,7 +33,7 @@ fn su3_zip_reseed(input: &[u8], content_len: u64) -> IResult<&[u8], Su3Content> 
             let mut buf = Vec::with_capacity(file.size() as usize);
             if let Err(e) = file
                 .read_to_end(&mut buf)
-                .map_err(|_| Err::Error((input, ErrorKind::Eof)))
+                .map_err(|_| Err::Error(NomError::new(input, ErrorKind::Eof)))
             {
                 return Some(Err(e));
             }

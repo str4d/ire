@@ -3,7 +3,7 @@ use nom::*;
 use nom::{
     bits::{bits, streaming::take as take_bits},
     combinator::{cond, map},
-    error::ErrorKind,
+    error::{Error as NomError, ErrorKind},
     number::streaming::{be_u16, be_u32},
     sequence::{pair, tuple},
 };
@@ -31,7 +31,7 @@ fn validate_checksum<'a>(input: &'a [u8], cs: u32, buf: &[u8], iv: &[u8]) -> IRe
     if cs == checksum(buf, iv) {
         Ok((input, ()))
     } else {
-        Err(Err::Error((input, ErrorKind::Verify)))
+        Err(Err::Error(NomError::new(input, ErrorKind::Verify)))
     }
 }
 
@@ -62,7 +62,7 @@ const DELIVERY_TYPE_ROUTER: u8 = 2;
 
 fn first_frag_di(i: &[u8]) -> IResult<&[u8], FirstFragmentDeliveryInstructions> {
     let (i, (delivery_type, fragmented)) = map(
-        bits::<_, (u8, u8, u8, u8, u8), (_, _), _, _>(tuple((
+        bits::<_, (u8, u8, u8, u8, u8), NomError<_>, _, _>(tuple((
             take_bits(1u8),
             take_bits(2u8),
             take_bits(1u8),
@@ -78,7 +78,7 @@ fn first_frag_di(i: &[u8]) -> IResult<&[u8], FirstFragmentDeliveryInstructions> 
             TunnelMessageDeliveryType::Tunnel(tid, to)
         })(i),
         DELIVERY_TYPE_ROUTER => map(hash, TunnelMessageDeliveryType::Router)(i),
-        _ => Err(nom::Err::Error((i, ErrorKind::Char))),
+        _ => Err(nom::Err::Error(NomError::new(i, ErrorKind::Char))),
     }?;
 
     let (i, msg_id) = cond(fragmented, be_u32)(i)?;
@@ -133,7 +133,7 @@ fn follow_on_frag_di(i: &[u8]) -> IResult<&[u8], FollowOnFragmentDeliveryInstruc
     map(
         pair(
             map(
-                bits::<_, (u8, u8, u8), (_, _), _, _>(tuple((
+                bits::<_, (u8, u8, u8), NomError<_>, _, _>(tuple((
                     take_bits(1u8),
                     take_bits(6u8),
                     take_bits(1u8),
@@ -260,7 +260,10 @@ mod tests {
         );
         assert_eq!(
             validate_checksum(&a[..], 0xfc8213b7, &a[..8], &iv[..]),
-            Err(Err::Error((&a[..], ErrorKind::Verify)))
+            Err(Err::Error(NomError {
+                input: &a[..],
+                code: ErrorKind::Verify
+            }))
         );
     }
 
