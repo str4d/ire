@@ -1,7 +1,6 @@
 use nom::*;
 use std::io::{Cursor, Read};
 use std::str::from_utf8;
-use zip;
 
 use super::{Error, Su3Content, Su3File, SU3_MAGIC};
 use crate::crypto::{
@@ -18,7 +17,7 @@ named_args!(su3_version(version_len: u8)<&str>,
     map_res!(length_value!(value!(version_len), take_while!(|ch| ch != 0)), from_utf8)
 );
 
-fn su3_zip_reseed<'a>(input: &'a [u8], content_len: u64) -> IResult<&'a [u8], Su3Content> {
+fn su3_zip_reseed(input: &[u8], content_len: u64) -> IResult<&[u8], Su3Content> {
     let (i, content) = take!(input, content_len)?;
     let reader = Cursor::new(content);
     let mut zip = zip::ZipArchive::new(reader)

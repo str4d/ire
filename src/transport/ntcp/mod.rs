@@ -34,7 +34,7 @@ use crate::router::{
     Context,
 };
 
-#[allow(needless_pass_by_value)]
+#[allow(clippy::needless_pass_by_value)]
 mod frame;
 
 mod handshake;
@@ -459,9 +459,7 @@ impl<D: Distributor> Transport for Manager<D> {
             return None;
         }
 
-        if peer.address(&NTCP_STYLE, |_| true).is_none() {
-            return None;
-        }
+        peer.address(&NTCP_STYLE, |_| true)?;
 
         Some(Bid {
             bid: if self.is_established(&peer.router_id.hash()) {

@@ -8,7 +8,6 @@
 //!
 //! [I2NP specification](https://geti2p.net/spec/i2np)
 
-use nom;
 use rand::{rngs::OsRng, thread_rng, Rng};
 use std::fmt;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -19,8 +18,8 @@ use crate::data::{
 };
 use crate::util::serialize;
 
-#[allow(double_parens)]
-#[allow(needless_pass_by_value)]
+#[allow(clippy::double_parens)]
+#[allow(clippy::needless_pass_by_value)]
 pub(crate) mod frame;
 
 const MESSAGE_EXPIRATION_MS: u64 = 60 * 1000;
@@ -236,9 +235,9 @@ impl fmt::Display for DatabaseLookup {
                 .iter()
                 .map(|peer| format!("    {}", peer))
                 .fold(String::new(), |acc, peer| if acc.is_empty() {
-                    acc + &"\n" + &peer + &"\n"
+                    acc + "\n" + &peer + "\n"
                 } else {
-                    acc + &peer + &"\n"
+                    acc + &peer + "\n"
                 })
         )
         .fmt(f)
@@ -262,9 +261,9 @@ impl fmt::Display for DatabaseSearchReply {
             self.peers.iter().map(|peer| format!("    {}", peer)).fold(
                 String::new(),
                 |acc, peer| if acc.is_empty() {
-                    acc + &"\n" + &peer + &"\n"
+                    acc + "\n" + &peer + "\n"
                 } else {
-                    acc + &peer + &"\n"
+                    acc + &peer + "\n"
                 }
             ),
             self.from

@@ -111,7 +111,7 @@ impl Builder {
                     );
                     RouterSecretKeys::new()
                 }
-                Err(e) => panic!(e),
+                Err(e) => panic!("{}", e),
             },
         };
 
@@ -166,7 +166,7 @@ impl Builder {
                 "Config option {} not set, not writing RouterInfo to disk",
                 key
             ),
-            Err(e) => panic!(e),
+            Err(e) => panic!("{}", e),
         }
 
         let ctx = Arc::new(Context {

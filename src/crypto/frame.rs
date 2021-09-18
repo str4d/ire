@@ -83,7 +83,7 @@ pub fn gen_private_key<'a>(
 
 // SigningPublicKey
 
-pub fn signing_key<'a>(input: &'a [u8], sig_type: SigType) -> IResult<&'a [u8], SigningPublicKey> {
+pub fn signing_key(input: &[u8], sig_type: SigType) -> IResult<&[u8], SigningPublicKey> {
     match do_parse!(
         input,
         sig_key: take!(sig_type.pubkey_len()) >> (SigningPublicKey::from_bytes(sig_type, sig_key))
@@ -102,10 +102,7 @@ pub fn gen_signing_key<'a>(
 
 // SigningPrivateKey
 
-pub fn signing_private_key<'a>(
-    input: &'a [u8],
-    sig_type: SigType,
-) -> IResult<&'a [u8], SigningPrivateKey> {
+pub fn signing_private_key(input: &[u8], sig_type: SigType) -> IResult<&[u8], SigningPrivateKey> {
     match do_parse!(
         input,
         sig_key: take!(sig_type.pubkey_len()) >> (SigningPrivateKey::from_bytes(sig_type, sig_key))
@@ -124,7 +121,7 @@ pub fn gen_signing_private_key<'a>(
 
 // Signature
 
-pub fn signature<'a>(input: &'a [u8], sig_type: SigType) -> IResult<&'a [u8], Signature> {
+pub fn signature(input: &[u8], sig_type: SigType) -> IResult<&[u8], Signature> {
     match do_parse!(
         input,
         sig: take!(sig_type.sig_len()) >> (Signature::from_bytes(sig_type, sig))

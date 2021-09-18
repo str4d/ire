@@ -25,7 +25,7 @@ use crate::data::{
 // Utils
 //
 
-fn iv<'a>(input: &'a [u8]) -> IResult<&'a [u8], [u8; 16]> {
+fn iv(input: &[u8]) -> IResult<&[u8], [u8; 16]> {
     let (i, iv) = take!(input, 16)?;
     let mut x = [0u8; 16];
     x.copy_from_slice(iv);
@@ -164,7 +164,7 @@ pub fn gen_build_response_record<'a>(
 
 // DatabaseStore
 
-fn compressed_ri<'a>(input: &'a [u8]) -> IResult<&'a [u8], RouterInfo> {
+fn compressed_ri(input: &[u8]) -> IResult<&[u8], RouterInfo> {
     let (i, payload) = do_parse!(input, size: be_u16 >> payload: take!(size) >> (payload))?;
     let mut buf = Vec::new();
     let mut d = GzDecoder::new(payload);
@@ -600,7 +600,7 @@ fn gen_data<'a>(input: (&'a mut [u8], usize), d: &[u8]) -> Result<(&'a mut [u8],
 
 // TunnelBuild
 
-fn tunnel_build<'a>(input: &'a [u8]) -> IResult<&'a [u8], MessagePayload> {
+fn tunnel_build(input: &[u8]) -> IResult<&[u8], MessagePayload> {
     let (i, r) = count!(input, take!(528), 8)?;
     let mut xs = [[0u8; 528]; 8];
     for (i, &s) in r.iter().enumerate() {
@@ -628,7 +628,7 @@ fn gen_tunnel_build<'a>(
 
 // TunnelBuildReply
 
-fn tunnel_build_reply<'a>(input: &'a [u8]) -> IResult<&'a [u8], MessagePayload> {
+fn tunnel_build_reply(input: &[u8]) -> IResult<&[u8], MessagePayload> {
     let (i, r) = count!(input, take!(528), 8)?;
     let mut xs = [[0u8; 528]; 8];
     for (i, &s) in r.iter().enumerate() {
@@ -656,7 +656,7 @@ fn gen_tunnel_build_reply<'a>(
 
 // VariableTunnelBuild
 
-fn variable_tunnel_build<'a>(input: &'a [u8]) -> IResult<&'a [u8], MessagePayload> {
+fn variable_tunnel_build(input: &[u8]) -> IResult<&[u8], MessagePayload> {
     let (i, r) = length_count!(input, be_u8, take!(528))?;
     Ok((
         i,
@@ -686,7 +686,7 @@ fn gen_variable_tunnel_build<'a>(
 
 // VariableTunnelBuildReply
 
-fn variable_tunnel_build_reply<'a>(input: &'a [u8]) -> IResult<&'a [u8], MessagePayload> {
+fn variable_tunnel_build_reply(input: &[u8]) -> IResult<&[u8], MessagePayload> {
     let (i, r) = length_count!(input, be_u8, take!(528))?;
     Ok((
         i,
@@ -760,7 +760,7 @@ named!(
     )
 );
 
-fn payload<'a>(input: &'a [u8], msg_type: u8) -> IResult<&'a [u8], MessagePayload> {
+fn payload(input: &[u8], msg_type: u8) -> IResult<&[u8], MessagePayload> {
     switch!(input, value!(msg_type),
         1  => call!(database_store) |
         2  => call!(database_lookup) |
