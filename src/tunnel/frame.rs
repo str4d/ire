@@ -39,10 +39,10 @@ fn gen_checksum<'a>(
 
 // Padding
 
-fn gen_nonzero_padding<'a>(
-    input: (&'a mut [u8], usize),
+fn gen_nonzero_padding(
+    input: (&mut [u8], usize),
     length: usize,
-) -> Result<(&'a mut [u8], usize), GenError> {
+) -> Result<(&mut [u8], usize), GenError> {
     // TODO: real non-zero padding
     do_gen!(input, gen_many!(iter::repeat(1).take(length), set_be_u8))
 }
