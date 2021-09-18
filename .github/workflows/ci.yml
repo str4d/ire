@@ -11,7 +11,7 @@ jobs:
       - uses: actions/checkout@v1
       - uses: actions-rs/toolchain@v1
         with:
-          toolchain: 1.39.0
+          toolchain: 1.51.0
           override: true
 
       # cargo fmt does not build the code.
@@ -39,7 +39,7 @@ jobs:
       - uses: actions/checkout@v1
       - uses: actions-rs/toolchain@v1
         with:
-          toolchain: 1.39.0
+          toolchain: 1.51.0
           override: true
 
       # We depend on a branch of ring, and need yasm.exe in %PATH% on Windows.
@@ -78,7 +78,7 @@ jobs:
       - uses: actions/checkout@v1
       - uses: actions-rs/toolchain@v1
         with:
-          toolchain: 1.39.0
+          toolchain: 1.51.0
           override: true
       - name: Install cargo-tarpaulin
         uses: actions-rs/cargo@v1
