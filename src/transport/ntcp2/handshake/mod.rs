@@ -137,7 +137,7 @@ where
 
                     let mut rng = OsRng;
                     // TODO: Sample padding sizes from an appropriate distribution
-                    let sc_padlen = rng.gen_range(0, 16);
+                    let sc_padlen = rng.gen_range(0..16);
 
                     // SessionCreated
                     let mut sc_buf = [0u8; SESSION_CREATED_PT_LEN];
@@ -344,7 +344,7 @@ where
         let sc_padlen = {
             let mut rng = OsRng;
             // TODO: Sample padding sizes from an appropriate distribution
-            rng.gen_range(0, 16)
+            rng.gen_range(0..16)
         };
 
         let mut sc_buf = vec![0u8; NTCP2_MTU - 16];
@@ -411,7 +411,7 @@ where
 
                     let mut rng = OsRng;
                     // TODO: Sample padding sizes from an appropriate distribution
-                    let padlen = rng.gen_range(0, 16);
+                    let padlen = rng.gen_range(0..16);
 
                     // SessionRequest
                     let mut sr_buf = [0u8; SESSION_REQUEST_PT_LEN];
