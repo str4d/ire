@@ -666,11 +666,14 @@ mod tests {
         use std::io;
         use std::time::Duration;
         use test::Bencher;
-        use tokio_codec::Framed;
-        use tokio_tcp::{TcpListener, TcpStream};
+        use tokio::{
+            codec::Framed,
+            net::{TcpListener, TcpStream},
+        };
 
         use crate::data::{RouterInfo, RouterSecretKeys};
         use crate::i2np::{Message, MessagePayload};
+        use crate::router::mock::MockDistributor;
         use crate::transport::ntcp2::{
             handshake::{IBHandshake, OBHandshake},
             Block, Codec, Manager,
@@ -751,7 +754,8 @@ mod tests {
                 bob_aesobfse_iv,
             ) = {
                 let sk = RouterSecretKeys::new();
-                let (mgr, engine) = Manager::new("127.0.0.1:0".parse().unwrap());
+                let distributor = MockDistributor::new();
+                let mgr = Manager::new("127.0.0.1:0".parse().unwrap(), distributor);
                 let mut ri = RouterInfo::new(sk.rid.clone());
                 ri.set_addresses(vec![mgr.address()]);
                 ri.sign(&sk.signing_private_key);
