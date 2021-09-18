@@ -1,4 +1,6 @@
-use num_bigint::BigUint;
+use std::iter;
+
+use crypto_bigint::Encoding;
 
 /// Converts the given number into an array of exactly len bytes, padding with
 /// zeroes if necessary.
@@ -6,10 +8,10 @@ use num_bigint::BigUint;
 /// The Java implementation handles the fact that Java BigInteger prepends a
 /// sign bit, which can create an extra leading zero-byte. BigUint does not do
 /// this, so we simplify the logic.
-pub fn rectify(bi: &BigUint, len: usize) -> Vec<u8> {
-    let mut b = bi.to_bytes_be();
-    match b.len() {
-        sz if sz == len => b,
+pub fn rectify<T: Encoding>(bi: &T, len: usize) -> Vec<u8> {
+    let mut b = bi.to_be_bytes();
+    match b.as_ref().len() {
+        sz if sz == len => b.as_ref().to_vec(),
         sz if sz > len => panic!("key too big ({}) max is {}", sz, len),
         0 => {
             warn!("Warning: dh_pub is zero!");
@@ -17,19 +19,16 @@ pub fn rectify(bi: &BigUint, len: usize) -> Vec<u8> {
         }
         _ => {
             // Smaller than needed
-            let mut ret = vec![0u8; len];
-            ret.truncate(len - b.len());
-            ret.append(&mut b);
-            ret
+            iter::repeat(0)
+                .take(len - b.as_ref().len())
+                .chain(b.as_ref().into_iter().cloned())
+                .collect()
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use num_bigint::BigUint;
-    use num_traits::{One, Zero};
-
     use super::rectify;
 
     #[test]

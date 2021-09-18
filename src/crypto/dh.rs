@@ -1,4 +1,4 @@
-use num_bigint::BigUint;
+use crypto_bigint::U2048;
 use rand::{rngs::OsRng, Rng};
 use std::iter::repeat;
 
@@ -7,8 +7,8 @@ use crate::crypto::math::rectify;
 use crate::crypto::SessionKey;
 
 pub struct DHSessionKeyBuilder {
-    dh_priv: BigUint,
-    dh_pub: BigUint,
+    dh_priv: U2048,
+    dh_pub: U2048,
 }
 
 impl DHSessionKeyBuilder {
@@ -16,7 +16,7 @@ impl DHSessionKeyBuilder {
         let mut rng = OsRng;
         let mut buf = vec![0; 256];
         rng.fill(&mut buf[..]);
-        let dh_priv = BigUint::from_bytes_be(&buf);
+        let dh_priv = U2048::from_be_slice(&buf);
         let dh_pub = ELGAMAL_G.modpow(&dh_priv, &ELGAMAL_P);
         DHSessionKeyBuilder { dh_priv, dh_pub }
     }
@@ -27,7 +27,7 @@ impl DHSessionKeyBuilder {
 
     pub fn build_session_key(&self, peer_pub: &[u8; 256]) -> SessionKey {
         // Calculate the exchanged DH key
-        let peer_pub = BigUint::from_bytes_be(peer_pub);
+        let peer_pub = U2048::from_be_slice(peer_pub);
         let dh_key = peer_pub.modpow(&self.dh_priv, &ELGAMAL_P);
         // Represent the exchanged key as a positive minimal-length two's-complement
         // big-endian byte array. If most significant bit is 1, prepend a zero-byte
@@ -50,8 +50,7 @@ impl DHSessionKeyBuilder {
 
 #[cfg(test)]
 mod tests {
-    use num_bigint::BigUint;
-    use num_traits::Num;
+    use crypto_bigint::U2048;
 
     use super::DHSessionKeyBuilder;
     use crate::crypto::SessionKey;
@@ -193,8 +192,8 @@ mod tests {
         ];
 
         for tv in test_vectors {
-            let dh_priv = BigUint::from_str_radix(tv.dh_priv, 16).unwrap();
-            let dh_pub = BigUint::from_bytes_be(&tv.dh_pub[..]);
+            let dh_priv = U2048::from_be_hex(tv.dh_priv);
+            let dh_pub = U2048::from_be_slice(&tv.dh_pub[..]);
             let builder = DHSessionKeyBuilder { dh_priv, dh_pub };
             assert_eq!(builder.get_pub(), Vec::from(&tv.dh_pub[..]));
             let session_key = builder.build_session_key(&tv.peer_pub);

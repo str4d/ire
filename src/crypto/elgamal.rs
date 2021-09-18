@@ -6,24 +6,22 @@
 //! Original implementation in Java I2P was based on algorithms 8.17 and 8.18
 //! specified in section 8.4.1 of the Handbook of Applied Cryptography.
 
-use num_bigint::BigUint;
-use num_traits::Zero;
+use crypto_bigint::{U2048, MulMod};
 use rand::{rngs::OsRng, Rng};
 use sha2::{Digest, Sha256};
-use std::ops::{Mul, Rem, Sub};
 
 use super::{math::rectify, Error, PrivateKey, PublicKey};
-use crate::constants::{ELGAMAL_G, ELGAMAL_P, ELGAMAL_PM1, ELGAMAL_PM2};
+use crate::constants::{ELGAMAL_G, ELGAMAL_P, ELGAMAL_PINV, ELGAMAL_PM1, ELGAMAL_PM2};
 
-fn gen_gamma_k() -> (BigUint, BigUint) {
+fn gen_gamma_k() -> (U2048, U2048) {
     let mut rng = OsRng;
 
     // Select a random integer k, 1 <= k <= p - 2
     let mut buf = vec![0; 256];
     let k = loop {
         rng.fill(&mut buf[..]);
-        let k = BigUint::from_bytes_be(&buf);
-        if !k.is_zero() && k <= *ELGAMAL_PM2 {
+        let k = U2048::from_be_slice(&buf);
+        if !bool::from(k.is_zero()) && k <= *ELGAMAL_PM2 {
             break k;
         }
     };
@@ -62,19 +60,19 @@ impl KeyPairGenerator {
     }
 }
 
-pub struct Encryptor(BigUint);
+pub struct Encryptor(U2048);
 
 impl<'a> From<&'a PublicKey> for Encryptor {
     fn from(pub_key: &PublicKey) -> Self {
-        Encryptor(BigUint::from_bytes_be(&pub_key.0[..]))
+        Encryptor(U2048::from_be_slice(&pub_key.0[..]))
     }
 }
 
 impl Encryptor {
     /// Basic ElGamal encryption, following algorithm 8.18 1).
-    fn encrypt_basic(&self, msg: &[u8]) -> Result<(BigUint, BigUint), Error> {
+    fn encrypt_basic(&self, msg: &[u8]) -> Result<(U2048, U2048), Error> {
         // Represent the message as an integer m in the range {0, 1, ..., p - 1}
-        let m = BigUint::from_bytes_be(msg);
+        let m = U2048::from_be_slice(msg);
         if m > *ELGAMAL_PM1 {
             return Err(Error::InvalidMessage);
         }
@@ -85,7 +83,7 @@ impl Encryptor {
 
         // δ = m * (α^a)^k mod p
         let s = self.0.modpow(&k, &ELGAMAL_P);
-        let delta = m.mul(s).rem(&(*ELGAMAL_P));
+        let delta = m.mul_mod(s, &ELGAMAL_P, &ELGAMAL_PINV);
 
         Ok((gamma, delta))
     }
@@ -140,17 +138,17 @@ impl Encryptor {
 }
 
 #[derive(Clone)]
-pub struct Decryptor(BigUint);
+pub struct Decryptor(U2048);
 
 impl<'a> From<&'a PrivateKey> for Decryptor {
     fn from(priv_key: &PrivateKey) -> Self {
-        Decryptor(BigUint::from_bytes_be(&priv_key.0[..]))
+        Decryptor(U2048::from_be_slice(&priv_key.0[..]))
     }
 }
 
 impl Decryptor {
     /// Basic ElGamal decryption, following algorithm 8.18 2).
-    fn decrypt_basic(&self, (gamma, delta): (BigUint, BigUint)) -> Vec<u8> {
+    fn decrypt_basic(&self, (gamma, delta): (U2048, U2048)) -> Vec<u8> {
         // γ^{-a} = γ^{p-1-a}
         let gamma_neg_a = gamma.modpow(&(&(*ELGAMAL_PM1)).sub(&self.0), &ELGAMAL_P);
 
@@ -171,8 +169,8 @@ impl Decryptor {
             // ElGamal ciphertext:
             // 0   1                       257 258                      514
             // | 0 | padding zeroes | gamma | 0 | padding zeroes | delta |
-            let gamma = BigUint::from_bytes_be(&ct[..257]);
-            let delta = BigUint::from_bytes_be(&ct[257..]);
+            let gamma = U2048::from_be_slice(&ct[..257]);
+            let delta = U2048::from_be_slice(&ct[257..]);
             (gamma, delta)
         } else {
             // Ciphertext must be 512 bytes
@@ -183,8 +181,8 @@ impl Decryptor {
             // ElGamal ciphertext:
             // 0                       256                      512
             // | padding zeroes | gamma | padding zeroes | delta |
-            let gamma = BigUint::from_bytes_be(&ct[..256]);
-            let delta = BigUint::from_bytes_be(&ct[256..]);
+            let gamma = U2048::from_be_slice(&ct[..256]);
+            let delta = U2048::from_be_slice(&ct[256..]);
             (gamma, delta)
         };
 

@@ -21,6 +21,7 @@ chrono = "0.4"
 clap = { version = "2.32", optional = true }
 config = { version = "0.11", default-features = false, features = ["toml"] }
 cookie-factory = "0.2"
+crypto-bigint = "0.2"
 data-encoding = "2.1"
 env_logger = { version = "0.9", optional = true }
 flate2 = "1.0"
@@ -31,8 +32,6 @@ lazy_static = "1.0"
 log = "0.4"
 native-tls = "0.2"
 nom = "7"
-num-bigint = { version = "0.4", features = ["rand"] }
-num-traits = "0.2"
 rand = "0.8"
 ring = "0.16.9"
 sha-1 = "0.9"

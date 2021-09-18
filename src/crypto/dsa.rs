@@ -5,13 +5,12 @@
 //! Original implementation in Java I2P was based on algorithms 11.54 and 11.56
 //! specified in section 11.5.1 of the Handbook of Applied Cryptography.
 
-use num_bigint::BigUint;
-use num_traits::Zero;
+use crypto_bigint::U1024;
 use rand::{rngs::OsRng, Rng};
 use sha1::{Digest, Sha1};
 
 use super::math::rectify;
-use crate::constants::{DSA_G, DSA_P, DSA_Q, DSA_QM2};
+use crate::constants::{DSA_G, DSA_P, DSA_Q, DSA_QM2, U160};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct DsaSignature {
@@ -21,11 +20,11 @@ pub struct DsaSignature {
 
 /// An I2P DSA 1024 signing key. Private because we only want the implementation
 /// for testing purposes; Ire does not support DSA 1024 key material.
-struct DsaPrivateKey(BigUint);
+struct DsaPrivateKey(U160);
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct DsaPublicKey {
-    bi: BigUint,
+    bi: U1024,
     bytes: Vec<u8>,
 }
 
@@ -60,8 +59,8 @@ impl DsaPrivateKey {
         let mut buf = [0; 20];
         loop {
             rng.fill(&mut buf[..]);
-            let a = BigUint::from_bytes_be(&buf);
-            if !a.is_zero() && a < *DSA_Q {
+            let a = U160::from_be_slice(&buf);
+            if !bool::from(a.is_zero()) && a < *DSA_Q {
                 return DsaPrivateKey(a);
             }
         }
@@ -75,8 +74,8 @@ impl DsaPrivateKey {
         let mut buf = [0; 20];
         let k = loop {
             rng.fill(&mut buf[..]);
-            let k = BigUint::from_bytes_be(&buf);
-            if !k.is_zero() && k < *DSA_Q {
+            let k = U160::from_be_slice(&buf);
+            if !bool::from(k.is_zero()) && k < *DSA_Q {
                 break k;
             }
         };
@@ -88,7 +87,7 @@ impl DsaPrivateKey {
         let km1 = k.modpow(&DSA_QM2, &DSA_Q);
 
         // h(m) = SHA1(msg)
-        let hm = BigUint::from_bytes_be(&Sha1::digest(msg));
+        let hm = U160::from_be_slice(&Sha1::digest(msg));
 
         // s = k^{-1} * (h(m) + a * r) mod q
         let s = km1 * (hm + &self.0 * &r) % &(*DSA_Q);
@@ -112,7 +111,7 @@ impl DsaPublicKey {
     }
 
     pub fn from_bytes(data: &[u8]) -> Result<Self, super::Error> {
-        let bi = BigUint::from_bytes_be(data);
+        let bi = U1024::from_be_slice(data);
         let bytes = rectify(&bi, 128);
         Ok(DsaPublicKey { bi, bytes })
     }
@@ -127,11 +126,11 @@ impl DsaPublicKey {
         let p = &(*DSA_P);
         let q = &(*DSA_Q);
 
-        let r = BigUint::from_bytes_be(&sig.rbar);
-        let s = BigUint::from_bytes_be(&sig.sbar);
+        let r = U160::from_be_slice(&sig.rbar);
+        let s = U160::from_be_slice(&sig.sbar);
 
         // Verify that 0 < r < q and 0 < s < q
-        if r.is_zero() || r >= *DSA_Q || s.is_zero() || s >= *DSA_Q {
+        if bool::from(r.is_zero()) || r >= *DSA_Q || bool::from(s.is_zero()) || s >= *DSA_Q {
             return false;
         }
 
@@ -139,7 +138,7 @@ impl DsaPublicKey {
         let w = s.modpow(&DSA_QM2, q);
 
         // h(m) = SHA1(msg)
-        let hm = BigUint::from_bytes_be(&Sha1::digest(msg));
+        let hm = U160::from_be_slice(&Sha1::digest(msg));
 
         // u_1 = w * h(m) mod q
         let u1 = &w * hm % q;

@@ -1,7 +1,8 @@
+use crypto_bigint::{Limb, U1024, U2048, UInt};
 use data_encoding::{Encoding, Specification};
-use num_bigint::BigUint;
-use num_traits::{Num, One};
 use std::ops::Sub;
+
+pub(crate) type U160 = UInt<{ 160 / crypto_bigint::limb::BIT_SIZE }>;
 
 lazy_static! {
     pub static ref I2P_BASE64: Encoding = {
@@ -68,15 +69,16 @@ pub const RFC3526_2048BIT_MODP_GROUP: &str =
      15728E5A_8AACAA68_FFFFFFFF_FFFFFFFF";
 
 lazy_static! {
-    pub static ref DSA_P: BigUint = BigUint::from_str_radix(I2P_DSA_P, 16).unwrap();
-    pub static ref DSA_Q: BigUint = BigUint::from_str_radix(I2P_DSA_Q, 16).unwrap();
-    pub static ref DSA_QM2: BigUint = (&(*DSA_Q)).sub(BigUint::one()).sub(BigUint::one());
-    pub static ref DSA_G: BigUint = BigUint::from_str_radix(I2P_DSA_G, 16).unwrap();
-    pub static ref ELGAMAL_G: BigUint = BigUint::parse_bytes(b"2", 10).unwrap();
-    pub static ref ELGAMAL_P: BigUint =
-        BigUint::from_str_radix(RFC3526_2048BIT_MODP_GROUP, 16).unwrap();
-    pub static ref ELGAMAL_PM1: BigUint = (&(*ELGAMAL_P)).sub(BigUint::one());
-    pub static ref ELGAMAL_PM2: BigUint = (&(*ELGAMAL_PM1)).sub(BigUint::one());
+    pub static ref DSA_P: U1024 = UInt::from_be_hex(I2P_DSA_P);
+    pub static ref DSA_Q: U160 = UInt::from_be_hex(I2P_DSA_Q);
+    pub static ref DSA_QM2: U160 = DSA_Q.wrapping_sub(&UInt::from_u8(2));
+    pub static ref DSA_G: U1024 = UInt::from_be_hex(I2P_DSA_G);
+    pub static ref ELGAMAL_G: U2048 = UInt::from_u8(2);
+    pub static ref ELGAMAL_P: U2048 = UInt::from_be_hex(RFC3526_2048BIT_MODP_GROUP);
+    pub static ref ELGAMAL_PM1: U2048 = ELGAMAL_P.wrapping_sub(&UInt::from_u8(1));
+    pub static ref ELGAMAL_PM2: U2048 = ELGAMAL_PM1.wrapping_sub(&UInt::from_u8(1));
+    // TODO
+    pub static ref ELGAMAL_PINV: Limb = Limb::from_u64(0);
 }
 
 // Certificate types

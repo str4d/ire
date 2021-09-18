@@ -413,6 +413,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "crypto-bigint"
+version = "0.2.11"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f83bd3bb4314701c568e340cd8cf78c975aa0ca79e03d3f6d1677d5b0c9c0c03"
+dependencies = [
+ "rand_core 0.6.3",
+ "subtle",
+]
+
+[[package]]
 name = "ctor"
 version = "0.1.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -739,6 +749,7 @@ dependencies = [
  "clap",
  "config",
  "cookie-factory",
+ "crypto-bigint",
  "data-encoding",
  "env_logger",
  "flate2",
@@ -749,8 +760,6 @@ dependencies = [
  "log",
  "native-tls",
  "nom 7.0.0",
- "num-bigint",
- "num-traits",
  "pretty_assertions",
  "rand 0.8.4",
  "ring",
@@ -991,18 +1000,6 @@ dependencies = [
  "memchr",
  "minimal-lexical",
  "version_check 0.9.3",
-]
-
-[[package]]
-name = "num-bigint"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "74e768dff5fb39a41b3bcd30bb25cf989706c90d028d1ad71971987aa309d535"
-dependencies = [
- "autocfg 1.0.1",
- "num-integer",
- "num-traits",
- "rand 0.8.4",
 ]
 
 [[package]]
