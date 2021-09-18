@@ -49,7 +49,7 @@ macro_rules! io_err {
 // Establishment handshake
 //
 
-#[allow(enum_variant_names)]
+#[allow(clippy::enum_variant_names)]
 enum IBHandshakeState<T> {
     SessionRequest(ReadExact<T, Vec<u8>>),
     SessionRequestPadding(ReadExact<T, Vec<u8>>),
