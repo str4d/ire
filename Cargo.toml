@@ -47,7 +47,7 @@ tokio-tls = "0.2"
 zip = { version = "0.5", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
-pretty_assertions = "0.5"
+pretty_assertions = "0.7"
 tempfile = "3"
 
 [features]
