@@ -1,5 +1,7 @@
 use cookie_factory::*;
 use itertools::Itertools;
+use nom::error::ErrorKind;
+use nom::number::streaming::{be_u16, be_u32, be_u64, be_u8};
 use nom::*;
 
 use super::*;
@@ -126,7 +128,7 @@ pub(crate) fn split_signing_key<'a>(
     };
     match res {
         Ok(spk) => Ok((input, spk)),
-        Err(_) => Err(Err::Error(error_position!(input, ErrorKind::Custom(1)))),
+        Err(_) => Err(Err::Error((input, ErrorKind::Verify))),
     }
 }
 
@@ -201,7 +203,7 @@ named!(pub certificate<Certificate>,
             (Certificate::Null)
         ) |
         constants::HASH_CERT => do_parse!(
-            payload: length_bytes!(be_u16) >>
+            payload: length_data!(be_u16) >>
             (Certificate::HashCash(Vec::from(payload)))
         ) |
         constants::HIDDEN_CERT => do_parse!(
@@ -209,11 +211,11 @@ named!(pub certificate<Certificate>,
             (Certificate::Hidden)
         ) |
         constants::SIGNED_CERT => do_parse!(
-            payload: length_bytes!(be_u16) >>
+            payload: length_data!(be_u16) >>
             (Certificate::Signed(Vec::from(payload)))
         ) |
         constants::MULTI_CERT => do_parse!(
-            payload: length_bytes!(be_u16) >>
+            payload: length_data!(be_u16) >>
             (Certificate::Multiple(Vec::from(payload)))
         ) |
         constants::KEY_CERT => do_parse!(

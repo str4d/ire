@@ -1,4 +1,6 @@
 use cookie_factory::*;
+use nom::error::ErrorKind;
+use nom::number::streaming::be_u16;
 use nom::*;
 
 use crate::constants;
@@ -89,7 +91,7 @@ pub fn signing_key(input: &[u8], sig_type: SigType) -> IResult<&[u8], SigningPub
         sig_key: take!(sig_type.pubkey_len()) >> (SigningPublicKey::from_bytes(sig_type, sig_key))
     )? {
         (i, Ok(value)) => Ok((i, value)),
-        (_, Err(_)) => Err(Err::Error(error_position!(input, ErrorKind::Custom(1)))),
+        (_, Err(_)) => Err(Err::Error((input, ErrorKind::Verify))),
     }
 }
 
@@ -108,7 +110,7 @@ pub fn signing_private_key(input: &[u8], sig_type: SigType) -> IResult<&[u8], Si
         sig_key: take!(sig_type.pubkey_len()) >> (SigningPrivateKey::from_bytes(sig_type, sig_key))
     )? {
         (i, Ok(value)) => Ok((i, value)),
-        (_, Err(_)) => Err(Err::Error(error_position!(input, ErrorKind::Custom(1)))),
+        (_, Err(_)) => Err(Err::Error((input, ErrorKind::Verify))),
     }
 }
 
@@ -127,7 +129,7 @@ pub fn signature(input: &[u8], sig_type: SigType) -> IResult<&[u8], Signature> {
         sig: take!(sig_type.sig_len()) >> (Signature::from_bytes(sig_type, sig))
     )? {
         (i, Ok(value)) => Ok((i, value)),
-        (_, Err(_)) => Err(Err::Error(error_position!(input, ErrorKind::Custom(1)))),
+        (_, Err(_)) => Err(Err::Error((input, ErrorKind::Verify))),
     }
 }
 

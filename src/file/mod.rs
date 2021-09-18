@@ -54,7 +54,8 @@ impl Su3File {
             return Err(e);
         }
 
-        let (data, _) = take_until!(input, &SU3_MAGIC[..])?;
+        let res: Result<_, nom::Err<()>> = take_until!(input, &SU3_MAGIC[..]);
+        let (data, _) = res?;
         Su3File::from_bytes(data, signers)
     }
 

@@ -1,5 +1,12 @@
 use cookie_factory::*;
 use nom::*;
+use nom::{
+    bits::{bits, streaming::take as take_bits},
+    combinator::{cond, map},
+    error::ErrorKind,
+    number::streaming::{be_u16, be_u32},
+    sequence::{pair, tuple},
+};
 use sha2::{Digest, Sha256};
 use std::iter;
 
@@ -24,7 +31,7 @@ fn validate_checksum<'a>(input: &'a [u8], cs: u32, buf: &[u8], iv: &[u8]) -> IRe
     if cs == checksum(buf, iv) {
         Ok((input, ()))
     } else {
-        Err(Err::Error(error_position!(input, ErrorKind::Custom(1))))
+        Err(Err::Error((input, ErrorKind::Verify)))
     }
 }
 
@@ -53,38 +60,37 @@ const DELIVERY_TYPE_LOCAL: u8 = 0;
 const DELIVERY_TYPE_TUNNEL: u8 = 1;
 const DELIVERY_TYPE_ROUTER: u8 = 2;
 
-named!(
-    first_frag_di<FirstFragmentDeliveryInstructions>,
-    do_parse!(
-        flags:
-            bits!(do_parse!(
-                take_bits!(u8, 1)
-                    >> delivery_type: take_bits!(u8, 2)
-                    >> take_bits!(u8, 1)
-                    >> fragmented: take_bits!(u8, 1)
-                    >> take_bits!(u8, 3)
-                    >> ((delivery_type, fragmented > 0))
-            ))
-            >> delivery_type:
-                switch!(value!(flags.0),
-                    DELIVERY_TYPE_LOCAL => value!(TunnelMessageDeliveryType::Local) |
-                    DELIVERY_TYPE_TUNNEL => do_parse!(
-                        tid: tunnel_id >>
-                        to: hash >>
-                        (TunnelMessageDeliveryType::Tunnel(tid, to))
-                    ) |
-                    DELIVERY_TYPE_ROUTER => do_parse!(
-                        to: hash >>
-                        (TunnelMessageDeliveryType::Router(to))
-                    )
-                )
-            >> msg_id: cond!(flags.1, be_u32)
-            >> (FirstFragmentDeliveryInstructions {
-                delivery_type,
-                msg_id
-            })
-    )
-);
+fn first_frag_di(i: &[u8]) -> IResult<&[u8], FirstFragmentDeliveryInstructions> {
+    let (i, (delivery_type, fragmented)) = map(
+        bits::<_, (u8, u8, u8, u8, u8), (_, _), _, _>(tuple((
+            take_bits(1u8),
+            take_bits(2u8),
+            take_bits(1u8),
+            take_bits(1u8),
+            take_bits(3u8),
+        ))),
+        |(_, delivery_type, _, fragmented, _)| (delivery_type, fragmented > 0),
+    )(i)?;
+
+    let (i, delivery_type) = match delivery_type {
+        DELIVERY_TYPE_LOCAL => Ok((i, TunnelMessageDeliveryType::Local)),
+        DELIVERY_TYPE_TUNNEL => map(pair(tunnel_id, hash), |(tid, to)| {
+            TunnelMessageDeliveryType::Tunnel(tid, to)
+        })(i),
+        DELIVERY_TYPE_ROUTER => map(hash, TunnelMessageDeliveryType::Router)(i),
+        _ => Err(nom::Err::Error((i, ErrorKind::Char))),
+    }?;
+
+    let (i, msg_id) = cond(fragmented, be_u32)(i)?;
+
+    Ok((
+        i,
+        FirstFragmentDeliveryInstructions {
+            delivery_type,
+            msg_id,
+        },
+    ))
+}
 
 fn gen_first_frag_di<'a>(
     input: (&'a mut [u8], usize),
@@ -123,24 +129,26 @@ fn gen_first_frag_di<'a>(
 
 // FollowOnFragmentDeliveryInstructions
 
-named!(
-    follow_on_frag_di<FollowOnFragmentDeliveryInstructions>,
-    do_parse!(
-        flags:
-            bits!(do_parse!(
-                take_bits!(u8, 1)
-                    >> fragment_number: take_bits!(u8, 6)
-                    >> last_fragment: take_bits!(u8, 1)
-                    >> ((fragment_number, last_fragment > 0))
-            ))
-            >> msg_id: be_u32
-            >> (FollowOnFragmentDeliveryInstructions {
-                fragment_number: flags.0,
-                last_fragment: flags.1,
-                msg_id
-            })
-    )
-);
+fn follow_on_frag_di(i: &[u8]) -> IResult<&[u8], FollowOnFragmentDeliveryInstructions> {
+    map(
+        pair(
+            map(
+                bits::<_, (u8, u8, u8), (_, _), _, _>(tuple((
+                    take_bits(1u8),
+                    take_bits(6u8),
+                    take_bits(1u8),
+                ))),
+                |(_, fragment_number, last_fragment)| (fragment_number, last_fragment > 0),
+            ),
+            be_u32,
+        ),
+        |(flags, msg_id)| FollowOnFragmentDeliveryInstructions {
+            fragment_number: flags.0,
+            last_fragment: flags.1,
+            msg_id,
+        },
+    )(i)
+}
 
 fn gen_follow_on_frag_di<'a>(
     input: (&'a mut [u8], usize),
@@ -159,7 +167,7 @@ fn gen_follow_on_frag_di<'a>(
 named!(
     tmdi<TunnelMessageDeliveryInstructions>,
     switch!(
-        peek!(bits!(take_bits!(u8, 1))),
+        peek!(bits!(take_bits!(1u8))),
         0 => do_parse!(
             di: first_frag_di >>
             (TunnelMessageDeliveryInstructions::First(di))
@@ -188,10 +196,11 @@ named!(
     do_parse!(
         iv: take!(16)
             >> checksum: be_u32
-            >> padding: take_until_and_consume!(&b"\x00"[..])
+            >> padding: take_until!(&b"\x00"[..])
+            >> take!(1)
             >> msg_bytes: peek!(take!(1008 - 4 - padding.len() - 1))
             >> call!(validate_checksum, checksum, msg_bytes, iv)
-            >> msg: many0!(complete!(pair!(tmdi, length_bytes!(be_u16))))
+            >> msg: many0!(complete!(pair!(tmdi, length_data!(be_u16))))
             >> (TunnelMessage(msg))
     )
 );
@@ -251,7 +260,7 @@ mod tests {
         );
         assert_eq!(
             validate_checksum(&a[..], 0xfc8213b7, &a[..8], &iv[..]),
-            Err(Err::Error(error_position!(&a[..], ErrorKind::Custom(1))))
+            Err(Err::Error((&a[..], ErrorKind::Verify)))
         );
     }
 

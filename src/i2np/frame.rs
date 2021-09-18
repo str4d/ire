@@ -3,6 +3,14 @@ use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use nom::*;
+use nom::{
+    bits::streaming::take as take_bits,
+    bytes::streaming::take,
+    combinator::{cond, map, verify},
+    error::ErrorKind,
+    number::streaming::{be_u16, be_u32, be_u8},
+    sequence::{preceded, terminated, tuple},
+};
 use rand::rngs::OsRng;
 use sha2::{
     digest::generic_array::{typenum::U32, GenericArray},
@@ -36,53 +44,68 @@ fn iv(input: &[u8]) -> IResult<&[u8], [u8; 16]> {
 // Common structures
 //
 
-named!(
-    pub build_request_record<BuildRequestRecord>,
-    do_parse!(
-        receive_tid: tunnel_id
-            >> our_ident: hash
-            >> next_tid: tunnel_id
-            >> next_ident: hash
-            >> layer_key: session_key
-            >> iv_key: session_key
-            >> reply_key: session_key
-            >> reply_iv: iv
-            >> hop_type:
-                map!(
-                    verify!(
-                        bits!(do_parse!(
-                            ibgw: take_bits!(u8, 1)
-                                >> obep: take_bits!(u8, 1)
-                                >> take_bits!(u8, 6)
-                                >> ((ibgw > 0, obep > 0))
-                        )),
-                        |(ibgw, obep)| !(ibgw && obep)
+pub fn build_request_record(i: &[u8]) -> IResult<&[u8], BuildRequestRecord> {
+    map(
+        terminated(
+            tuple((
+                tunnel_id,
+                hash,
+                tunnel_id,
+                hash,
+                session_key,
+                session_key,
+                session_key,
+                iv,
+                map(
+                    verify(
+                        map(
+                            bits(terminated(
+                                tuple((take_bits(1u8), take_bits(1u8))),
+                                take_bits::<_, u8, _, (_, _)>(6u8),
+                            )),
+                            |(ibgw, obep): (u8, u8)| (ibgw > 0, obep > 0),
+                        ),
+                        |(ibgw, obep)| !(*ibgw && *obep),
                     ),
                     |(ibgw, obep)| match (ibgw, obep) {
                         (false, false) => ParticipantType::Intermediate,
                         (true, false) => ParticipantType::InboundGateway,
                         (false, true) => ParticipantType::OutboundEndpoint,
                         (true, true) => unreachable!(),
-                    }
-                )
-            >> request_time: be_u32
-            >> send_msg_id: be_u32
-            >> take!(29)
-            >> (BuildRequestRecord {
-                receive_tid,
-                our_ident,
-                next_tid,
-                next_ident,
-                layer_key,
-                iv_key,
-                reply_key,
-                reply_iv,
-                hop_type,
-                request_time,
-                send_msg_id,
-            })
-    )
-);
+                    },
+                ),
+                be_u32,
+                be_u32,
+            )),
+            take(29usize),
+        ),
+        |(
+            receive_tid,
+            our_ident,
+            next_tid,
+            next_ident,
+            layer_key,
+            iv_key,
+            reply_key,
+            reply_iv,
+            hop_type,
+            request_time,
+            send_msg_id,
+        )| BuildRequestRecord {
+            receive_tid,
+            our_ident,
+            next_tid,
+            next_ident,
+            layer_key,
+            iv_key,
+            reply_key,
+            reply_iv,
+            hop_type,
+            request_time,
+            send_msg_id,
+        },
+    )(i)
+}
 
 pub fn gen_build_request_record<'a>(
     input: (&'a mut [u8], usize),
@@ -130,7 +153,7 @@ fn validate_build_response_record<'a>(
     if hash.eq(&Hash::from_bytes(array_ref![res, 0, 32])) {
         Ok((input, ()))
     } else {
-        Err(Err::Error(error_position!(input, ErrorKind::Custom(1))))
+        Err(Err::Error((input, ErrorKind::Verify)))
     }
 }
 
@@ -172,10 +195,10 @@ fn compressed_ri(input: &[u8]) -> IResult<&[u8], RouterInfo> {
         Ok(_) => match router_info(&buf) {
             Ok((_, ri)) => Ok((i, ri)),
             Err(Err::Incomplete(n)) => Err(Err::Incomplete(n)),
-            Err(Err::Error(c)) => Err(Err::Error(Context::Code(input, c.into_error_kind()))),
-            Err(Err::Failure(c)) => Err(Err::Failure(Context::Code(input, c.into_error_kind()))),
+            Err(Err::Error((_, err))) => Err(Err::Error((input, err))),
+            Err(Err::Failure((_, err))) => Err(Err::Failure((input, err))),
         },
-        Err(_) => Err(Err::Error(error_position!(input, ErrorKind::Custom(1)))),
+        Err(_) => Err(Err::Error((input, ErrorKind::Eof))),
     }
 }
 
@@ -274,15 +297,13 @@ fn gen_database_store<'a>(
 
 // DatabaseLookup
 
-#[cfg_attr(rustfmt, rustfmt_skip)]
-named!(
-    database_lookup_flags<DatabaseLookupFlags>,
-    bits!(do_parse!(
-                     take_bits!(u8, 4) >>
-        lookup_type: take_bits!(u8, 2) >>
-        encryption:  take_bits!(u8, 1) >>
-        delivery:    take_bits!(u8, 1) >>
-        (DatabaseLookupFlags {
+fn database_lookup_flags(i: &[u8]) -> IResult<&[u8], DatabaseLookupFlags> {
+    map(
+        bits::<_, _, (_, _), _, _>(preceded(
+            take_bits::<_, u8, _, _>(4u8),
+            tuple((take_bits(2u8), take_bits(1u8), take_bits(1u8))),
+        )),
+        |(lookup_type, encryption, delivery): (u8, u8, u8)| DatabaseLookupFlags {
             delivery: delivery > 0,
             encryption: encryption > 0,
             lookup_type: match lookup_type {
@@ -292,9 +313,9 @@ named!(
                 3 => DatabaseLookupType::Exploratory,
                 _ => unreachable!(),
             },
-        })
-    ))
-);
+        },
+    )(i)
+}
 
 fn gen_database_lookup_flags<'a>(
     input: (&'a mut [u8], usize),
@@ -422,32 +443,34 @@ fn gen_delivery_status<'a>(
 
 // Garlic
 
-#[cfg_attr(rustfmt, rustfmt_skip)]
-named!(
-    garlic_clove_delivery_instructions<GarlicCloveDeliveryInstructions>,
-    do_parse!(
-        flags: bits!(do_parse!(
-            encrypted:     take_bits!(u8, 1) >>
-            delivery_type: take_bits!(u8, 2) >>
-            delay_set:     take_bits!(u8, 1) >>
-                           take_bits!(u8, 4) >>
+fn garlic_clove_delivery_instructions(i: &[u8]) -> IResult<&[u8], GarlicCloveDeliveryInstructions> {
+    let (i, (encrypted, delivery_type, delay_set)) = map(
+        bits(terminated(
+            tuple((take_bits(1u8), take_bits(2u8), take_bits(1u8))),
+            take_bits::<_, u8, _, (_, _)>(4u8),
+        )),
+        |(encrypted, delivery_type, delay_set): (u8, u8, u8)| {
             (encrypted > 0, delivery_type, delay_set > 0)
-        )) >>
-        session_key: cond!(flags.0, call!(session_key)) >>
-        to_hash:     cond!(flags.1 != 0, call!(hash)) >>
-        tid:         cond!(flags.1 == 3, call!(tunnel_id)) >>
-        delay:       cond!(flags.2, call!(be_u32)) >>
-        (GarlicCloveDeliveryInstructions {
-            encrypted: flags.0,
-            delivery_type: flags.1,
-            delay_set: flags.2,
+        },
+    )(i)?;
+    map(
+        tuple((
+            cond(encrypted, session_key),
+            cond(delivery_type != 0, hash),
+            cond(delivery_type == 3, tunnel_id),
+            cond(delay_set, be_u32),
+        )),
+        move |(session_key, to_hash, tid, delay)| GarlicCloveDeliveryInstructions {
+            encrypted,
+            delivery_type,
+            delay_set,
             session_key,
             to_hash,
             tid,
             delay,
-        })
-    )
-);
+        },
+    )(i)
+}
 
 fn gen_garlic_clove_delivery_instructions<'a>(
     input: (&'a mut [u8], usize),
@@ -572,7 +595,7 @@ named!(
     tunnel_gateway<MessagePayload>,
     do_parse!(
         tid: tunnel_id
-            >> data: length_bytes!(be_u16)
+            >> data: length_data!(be_u16)
             >> (MessagePayload::TunnelGateway(TunnelGateway {
                 tid,
                 data: Vec::from(data),
@@ -591,7 +614,7 @@ fn gen_tunnel_gateway<'a>(
 
 named!(
     data<MessagePayload>,
-    do_parse!(data: length_bytes!(be_u32) >> (MessagePayload::Data(Vec::from(data))))
+    do_parse!(data: length_data!(be_u32) >> (MessagePayload::Data(Vec::from(data))))
 );
 
 fn gen_data<'a>(input: (&'a mut [u8], usize), d: &[u8]) -> Result<(&'a mut [u8], usize), GenError> {
@@ -726,7 +749,7 @@ fn validate_checksum<'a>(input: &'a [u8], cs: u8, buf: &[u8]) -> IResult<&'a [u8
     if cs.eq(&checksum(&buf)) {
         Ok((input, ()))
     } else {
-        Err(Err::Error(error_position!(input, ErrorKind::Custom(1))))
+        Err(Err::Error((input, ErrorKind::Verify)))
     }
 }
 
@@ -1021,13 +1044,13 @@ mod tests {
         // Flag bits 7 and 6 set
         eval!(
             0xc0,
-            Err(nom::Err::Error(nom::Context::Code(
+            Err(nom::Err::Error((
                 &vec![
                     0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                 ][..],
-                nom::ErrorKind::Verify
+                nom::error::ErrorKind::Verify
             )))
         );
     }
@@ -1111,7 +1134,7 @@ mod tests {
         assert_eq!(validate_checksum(&a[..], 0x23, &a[..7]), Ok((&a[..], ())));
         assert_eq!(
             validate_checksum(&a[..], 0x23, &a[..8]),
-            Err(Err::Error(error_position!(&a[..], ErrorKind::Custom(1))))
+            Err(Err::Error((&a[..], ErrorKind::Verify)))
         );
     }
 

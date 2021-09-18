@@ -1,4 +1,5 @@
 use cookie_factory::*;
+use nom::number::streaming::{be_u16, be_u32};
 use nom::*;
 
 use super::Frame;

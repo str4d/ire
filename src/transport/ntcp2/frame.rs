@@ -1,5 +1,11 @@
 use cookie_factory::*;
 use nom::*;
+use nom::{
+    bits::{bits, streaming::take as take_bits},
+    combinator::map,
+    number::streaming::{be_u16, be_u32, be_u64, be_u8},
+    sequence::preceded,
+};
 use rand::{rngs::OsRng, Rng};
 
 use crate::data::frame::{gen_router_info, router_info};
@@ -28,7 +34,7 @@ fn gen_datetime(input: (&mut [u8], usize), ts: u32) -> Result<(&mut [u8], usize)
 
 named!(
     options<Block>,
-    do_parse!(options: length_bytes!(be_u16) >> (Block::Options(options.to_vec())))
+    do_parse!(options: length_data!(be_u16) >> (Block::Options(options.to_vec())))
 );
 
 fn gen_options<'a>(
@@ -40,17 +46,12 @@ fn gen_options<'a>(
 
 // RouterInfo
 
-#[cfg_attr(rustfmt, rustfmt_skip)]
-named!(
-    routerinfo_flags<RouterInfoFlags>,
-    bits!(do_parse!(
-               take_bits!(u8, 7) >>
-        flood: take_bits!(u8, 1) >>
-        (RouterInfoFlags {
-            flood: flood > 0,
-        })
-    ))
-);
+fn routerinfo_flags(i: &[u8]) -> IResult<&[u8], RouterInfoFlags> {
+    map(
+        bits(preceded(take_bits::<_, u8, _, (_, _)>(7u8), take_bits(1u8))),
+        |flood: u8| RouterInfoFlags { flood: flood > 0 },
+    )(i)
+}
 
 fn gen_routerinfo_flags<'a>(
     input: (&'a mut [u8], usize),
