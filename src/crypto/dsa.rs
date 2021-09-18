@@ -122,6 +122,7 @@ impl DsaPublicKey {
     }
 
     /// DSA signature verification, following algorithm 11.56 2).
+    #[allow(clippy::many_single_char_names)]
     pub fn verify(&self, msg: &[u8], sig: &DsaSignature) -> bool {
         let p = &(*DSA_P);
         let q = &(*DSA_Q);

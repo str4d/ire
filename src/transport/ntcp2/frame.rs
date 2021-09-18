@@ -203,6 +203,7 @@ fn gen_block<'a>(
 
 named!(pub frame<Frame>, many1!(complete!(block)));
 
+#[allow(clippy::ptr_arg)]
 pub fn gen_frame<'a>(
     input: (&'a mut [u8], usize),
     frame: &Frame,
