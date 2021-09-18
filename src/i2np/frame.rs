@@ -115,9 +115,9 @@ pub fn gen_build_request_record<'a>(
 
 fn calculate_build_response_record_hash(padding: &[u8], reply: u8) -> GenericArray<u8, U32> {
     let mut hasher = Sha256::default();
-    hasher.input(padding);
-    hasher.input(&[reply]);
-    hasher.result()
+    hasher.update(padding);
+    hasher.update(&[reply]);
+    hasher.finalize()
 }
 
 fn validate_build_response_record<'a>(
@@ -719,10 +719,7 @@ fn gen_variable_tunnel_build_reply<'a>(
 //
 
 fn checksum(buf: &[u8]) -> u8 {
-    let mut hasher = Sha256::default();
-    hasher.input(&buf);
-    let hash = hasher.result();
-    hash[0]
+    Sha256::digest(&buf)[0]
 }
 
 fn validate_checksum<'a>(input: &'a [u8], cs: u8, buf: &[u8]) -> IResult<&'a [u8], ()> {

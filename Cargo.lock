@@ -453,7 +453,7 @@ checksum = "9455b6c4ee3265c116c9ff33df6ae8af776adb9e6674a98319ec7f55b42bca8d"
 dependencies = [
  "elliptic-curve",
  "generic-array 0.12.3",
- "sha2",
+ "sha2 0.8.0",
  "signature",
 ]
 
@@ -476,7 +476,7 @@ dependencies = [
  "curve25519-dalek",
  "failure",
  "rand_core 0.3.1",
- "sha2",
+ "sha2 0.8.0",
 ]
 
 [[package]]
@@ -721,7 +721,7 @@ dependencies = [
  "rand 0.7.2",
  "ring",
  "sha-1",
- "sha2",
+ "sha2 0.9.8",
  "signatory",
  "signatory-dalek",
  "signatory-ring",
@@ -1468,6 +1468,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "sha2"
+version = "0.9.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b69f9a4c9740d74c5baa3fd2e547f9525fa8088a8a958e0ca2409a514e33f5fa"
+dependencies = [
+ "block-buffer 0.9.0",
+ "cfg-if 1.0.0",
+ "cpufeatures",
+ "digest 0.9.0",
+ "opaque-debug 0.3.0",
+]
+
+[[package]]
 name = "signatory"
 version = "0.17.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1489,7 +1502,7 @@ checksum = "37e71296303f2f04a00ef9a3133627db900805a41de2c944cc64a31039afa366"
 dependencies = [
  "digest 0.8.1",
  "ed25519-dalek",
- "sha2",
+ "sha2 0.8.0",
  "signatory",
 ]
 
