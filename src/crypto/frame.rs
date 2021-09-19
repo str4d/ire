@@ -1,12 +1,12 @@
 use std::convert::TryInto;
 
 use cookie_factory::*;
-use nom::*;
 use nom::{
     bytes::streaming::take,
     combinator::{map, map_opt, map_res},
     error::{Error as NomError, ErrorKind},
     number::streaming::be_u16,
+    IResult,
 };
 
 use crate::constants;
@@ -99,13 +99,11 @@ pub fn gen_private_key<'a>(
 
 // SigningPublicKey
 
-pub fn signing_key(input: &[u8], sig_type: SigType) -> IResult<&[u8], SigningPublicKey> {
-    match do_parse!(
-        input,
-        sig_key: take!(sig_type.pubkey_len()) >> (SigningPublicKey::from_bytes(sig_type, sig_key))
-    )? {
-        (i, Ok(value)) => Ok((i, value)),
-        (_, Err(_)) => Err(Err::Error(NomError::new(input, ErrorKind::Verify))),
+pub fn signing_key(sig_type: SigType) -> impl Fn(&[u8]) -> IResult<&[u8], SigningPublicKey> {
+    move |input: &[u8]| {
+        map_res(take(sig_type.pubkey_len()), |sig_key| {
+            SigningPublicKey::from_bytes(sig_type, sig_key)
+        })(input)
     }
 }
 
@@ -118,13 +116,13 @@ pub fn gen_signing_key<'a>(
 
 // SigningPrivateKey
 
-pub fn signing_private_key(input: &[u8], sig_type: SigType) -> IResult<&[u8], SigningPrivateKey> {
-    match do_parse!(
-        input,
-        sig_key: take!(sig_type.pubkey_len()) >> (SigningPrivateKey::from_bytes(sig_type, sig_key))
-    )? {
-        (i, Ok(value)) => Ok((i, value)),
-        (_, Err(_)) => Err(Err::Error(NomError::new(input, ErrorKind::Verify))),
+pub fn signing_private_key(
+    sig_type: SigType,
+) -> impl Fn(&[u8]) -> IResult<&[u8], SigningPrivateKey> {
+    move |input: &[u8]| {
+        map_res(take(sig_type.pubkey_len()), |sig_key| {
+            SigningPrivateKey::from_bytes(sig_type, sig_key)
+        })(input)
     }
 }
 
@@ -137,13 +135,11 @@ pub fn gen_signing_private_key<'a>(
 
 // Signature
 
-pub fn signature(input: &[u8], sig_type: SigType) -> IResult<&[u8], Signature> {
-    match do_parse!(
-        input,
-        sig: take!(sig_type.sig_len()) >> (Signature::from_bytes(sig_type, sig))
-    )? {
-        (i, Ok(value)) => Ok((i, value)),
-        (_, Err(_)) => Err(Err::Error(NomError::new(input, ErrorKind::Verify))),
+pub fn signature(sig_type: SigType) -> impl Fn(&[u8]) -> IResult<&[u8], Signature> {
+    move |input: &[u8]| {
+        map_res(take(sig_type.sig_len()), |sig| {
+            Signature::from_bytes(sig_type, sig)
+        })(input)
     }
 }
 

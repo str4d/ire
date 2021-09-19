@@ -1,6 +1,12 @@
 use cookie_factory::*;
-use nom::number::streaming::be_u8;
 use nom::*;
+use nom::{
+    bytes::streaming::take,
+    combinator::{map, map_res},
+    multi::length_count,
+    number::streaming::be_u8,
+    sequence::{pair, tuple},
+};
 
 use super::{Destination, Lease, LeaseSet};
 use crate::constants;
@@ -14,31 +20,31 @@ use crate::data::frame::{
 
 // Destination
 
-#[cfg_attr(rustfmt, rustfmt_skip)]
-named!(
-    destination<Destination>,
-    do_parse!(
-        public_key:   public_key >>
-        signing_data: take!(constants::KEYCERT_SIGKEY_BYTES) >>
-        certificate:  certificate >>
-        padding:      call!(
-            keycert_padding,
-            array_ref![signing_data, 0, constants::KEYCERT_SIGKEY_BYTES],
-            &certificate
-        ) >>
-        signing_key:  call!(
-            split_signing_key,
-            array_ref![signing_data, 0, constants::KEYCERT_SIGKEY_BYTES],
-            &certificate
-        ) >>
-        (Destination {
+fn destination(i: &[u8]) -> IResult<&[u8], Destination> {
+    map_res(
+        tuple((
             public_key,
-            padding,
-            signing_key,
+            take(constants::KEYCERT_SIGKEY_BYTES),
             certificate,
-        })
-    )
-);
+        )),
+        |(public_key, signing_data, certificate)| {
+            let padding = keycert_padding(
+                array_ref![signing_data, 0, constants::KEYCERT_SIGKEY_BYTES],
+                &certificate,
+            );
+            split_signing_key(
+                array_ref![signing_data, 0, constants::KEYCERT_SIGKEY_BYTES],
+                &certificate,
+            )
+            .map(|signing_key| Destination {
+                public_key,
+                padding,
+                signing_key,
+                certificate,
+            })
+        },
+    )(i)
+}
 
 pub fn gen_destination<'a>(
     input: (&'a mut [u8], usize),
@@ -58,20 +64,16 @@ pub fn gen_destination<'a>(
 
 // Lease
 
-#[cfg_attr(rustfmt, rustfmt_skip)]
-named!(
-    lease<Lease>,
-    do_parse!(
-        tunnel_gw: hash >>
-        tid:       tunnel_id >>
-        end_date:  i2p_date >>
-        (Lease {
+fn lease(i: &[u8]) -> IResult<&[u8], Lease> {
+    map(
+        tuple((hash, tunnel_id, i2p_date)),
+        |(tunnel_gw, tid, end_date)| Lease {
             tunnel_gw,
             tid,
             end_date,
-        })
-    )
-);
+        },
+    )(i)
+}
 
 fn gen_lease<'a>(
     input: (&'a mut [u8], usize),
@@ -85,22 +87,25 @@ fn gen_lease<'a>(
 
 // LeaseSet
 
-named!(pub lease_set<LeaseSet>,
-    do_parse!(
-        dest:    destination >>
-        enc_key: public_key >>
-        sig_key: call!(signing_key, dest.signing_key.sig_type()) >>
-        leases:  length_count!(be_u8, lease) >>
-        sig:     call!(signature, dest.signing_key.sig_type()) >>
-        (LeaseSet {
+pub fn lease_set(i: &[u8]) -> IResult<&[u8], LeaseSet> {
+    let (i, dest) = destination(i)?;
+    let (i, (enc_key, sig_key, leases, sig)) = tuple((
+        public_key,
+        signing_key(dest.signing_key.sig_type()),
+        length_count(be_u8, lease),
+        signature(dest.signing_key.sig_type()),
+    ))(i)?;
+    Ok((
+        i,
+        LeaseSet {
             sig_key,
             dest,
             enc_key,
             leases,
             signature: Some(sig),
-        })
-    )
-);
+        },
+    ))
+}
 
 pub fn gen_lease_set_minus_sig<'a>(
     input: (&'a mut [u8], usize),

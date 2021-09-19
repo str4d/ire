@@ -78,7 +78,7 @@ named!(pub su3_file<Su3File>, do_parse!(
     version:        call!(su3_version, version_len) >>
     signer:         take_str!(signer_len) >>
     content:        call!(su3_content, content_len, file_type, content_type) >>
-    sig:            call!(signature, sig_type) >>
+    sig:            call!(|i, sig_type| signature(sig_type)(i), sig_type) >>
     (Su3File {
         version: String::from(version),
         signer: String::from(signer),
