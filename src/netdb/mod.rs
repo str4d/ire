@@ -228,12 +228,12 @@ impl Future for Engine {
                             MessagePayload::DatabaseStore(ds) => match ds.data {
                                 DatabaseStoreData::RI(ri) => {
                                     self.netdb
-                                        .store_router_info(ds.key, ri, false)
+                                        .store_router_info(ds.key, *ri, false)
                                         .expect("Failed to store RouterInfo");
                                 }
                                 DatabaseStoreData::LS(ls) => {
                                     self.netdb
-                                        .store_lease_set(ds.key, ls)
+                                        .store_lease_set(ds.key, *ls)
                                         .expect("Failed to store LeaseSet");
                                 }
                             },

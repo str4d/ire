@@ -81,7 +81,7 @@ mod tests {
 
         let mut td = TunnelData {
             tid: TunnelId(1234),
-            data: [0; 1024],
+            data: Box::new([0; 1024]),
         };
 
         let cipher = LayerCipher::new(&iv_key, layer_key);

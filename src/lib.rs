@@ -7,7 +7,6 @@
 // Lints we haven't dealt with yet.
 #![allow(unused)]
 #![allow(unused_variables)]
-#![allow(clippy::large_enum_variant)]
 #![allow(clippy::new_without_default)]
 #![allow(clippy::unnecessary_wraps)]
 #![allow(clippy::upper_case_acronyms)]

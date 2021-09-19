@@ -121,7 +121,7 @@ pub fn session_confirm_a(i: &[u8]) -> IResult<&[u8], HandshakeFrame> {
     )(i)?;
     Ok((
         i,
-        HandshakeFrame::SessionConfirmA(SessionConfirmA { ri_a, ts_a, sig }),
+        HandshakeFrame::SessionConfirmA(Box::new(SessionConfirmA { ri_a, ts_a, sig })),
     ))
 }
 

@@ -68,7 +68,7 @@ pub struct SessionConfirmB {
 pub enum HandshakeFrame {
     SessionRequest(SessionRequest),
     SessionCreated(SessionCreated),
-    SessionConfirmA(SessionConfirmA),
+    SessionConfirmA(Box<SessionConfirmA>),
     SessionConfirmB(SessionConfirmB),
 }
 
@@ -818,11 +818,11 @@ where
                             ));
                         }
                     };
-                    let sca = HandshakeFrame::SessionConfirmA(SessionConfirmA {
+                    let sca = HandshakeFrame::SessionConfirmA(Box::new(SessionConfirmA {
                         ri_a: self.shared.own_ri.clone(),
                         ts_a: self.shared.ts_a,
                         sig,
-                    });
+                    }));
                     OBHandshakeState::SessionConfirmA(conn.send(sca))
                 }
                 OBHandshakeState::SessionConfirmA(ref mut f) => {

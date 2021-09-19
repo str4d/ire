@@ -104,8 +104,8 @@ pub struct RouterInfoFlags {
 pub enum Block {
     DateTime(u32),
     Options(Vec<u8>),
-    RouterInfo(RouterInfo, RouterInfoFlags),
-    Message(Message),
+    RouterInfo(Box<(RouterInfo, RouterInfoFlags)>),
+    Message(Box<Message>),
     Termination(u64, u8, Vec<u8>),
     Padding(u16),
     Unknown(u8, Vec<u8>),
@@ -117,11 +117,11 @@ impl fmt::Debug for Block {
         match *self {
             Block::DateTime(ts) => write!(f, "DateTime ({})", ts),
             Block::Options(_) => write!(f, "Options"),
-            Block::RouterInfo(ref ri, ref flags) => write!(
+            Block::RouterInfo(ref ri) => write!(
                 f,
                 "RouterInfo ({}, flood: {})",
-                ri.router_id.hash(),
-                flags.flood
+                ri.0.router_id.hash(),
+                ri.1.flood
             ),
             Block::Message(ref msg) => write!(f, "I2NP message:\n{}", msg),
             Block::Termination(_, rsn, _) => write!(
@@ -406,9 +406,9 @@ where
     /// should be distributed.
     fn handle_block(&self, block: Block) -> Option<Message> {
         match block {
-            Block::RouterInfo(ri, _flags) => {
+            Block::RouterInfo(ri) => {
                 // Validate hash
-                if ri.router_id.hash() != self.ctx.hash {
+                if ri.0.router_id.hash() != self.ctx.hash {
                     warn!("Received invalid RouterInfo block from {}", self.ctx.hash);
                     return None;
                 }
@@ -420,12 +420,12 @@ where
                 );
                 // TODO: Fake-store if we are a FF and flood flag is set
                 let fake_ds = Message::from_payload(MessagePayload::DatabaseStore(
-                    DatabaseStore::from_ri(ri, None),
+                    DatabaseStore::from_ri(ri.0, None),
                 ));
 
                 Some(fake_ds)
             }
-            Block::Message(msg) => Some(msg),
+            Block::Message(msg) => Some(*msg),
             Block::Padding(_) => {
                 trace!("Dropping padding block from {}: {:?}", self.ctx.hash, block);
                 None
@@ -806,10 +806,10 @@ impl<D: Distributor> Sink for OutboundSink<D> {
         let static_private_key = self.static_private_key.clone();
         let session_refs = self.session_refs.clone();
 
-        match self
-            .session_refs
-            .state
-            .send(&peer.router_id.hash(), Block::Message(msg), || {
+        match self.session_refs.state.send(
+            &peer.router_id.hash(),
+            Block::Message(Box::new(msg)),
+            || {
                 // Connect to the peer
                 let session_refs = session_refs.clone();
                 match connect(
@@ -825,9 +825,10 @@ impl<D: Distributor> Sink for OutboundSink<D> {
                     }
                     Err(e) => error!("{}", e),
                 }
-            }) {
+            },
+        ) {
             Ok(AsyncSink::Ready) => Ok(AsyncSink::Ready),
-            Ok(AsyncSink::NotReady(Block::Message(msg))) => Ok(AsyncSink::NotReady((peer, msg))),
+            Ok(AsyncSink::NotReady(Block::Message(msg))) => Ok(AsyncSink::NotReady((peer, *msg))),
             Err(e) => Err(io::Error::new(
                 io::ErrorKind::BrokenPipe,
                 format!("Channel to session is broken: {}", e),
