@@ -20,4 +20,4 @@ jobs:
         with:
           name: Clippy (1.51.0)
           token: ${{ secrets.GITHUB_TOKEN }}
-          args: --all-features --all-targets -- -D warnings
+          args: --features cli --all-targets -- -D warnings
