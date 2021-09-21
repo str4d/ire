@@ -30,7 +30,7 @@ itertools = "0.10"
 lazy_static = "1.0"
 log = "0.4"
 native-tls = "0.2"
-nom = "4.0"
+nom = "7"
 num-bigint = { version = "0.4", features = ["rand"] }
 num-traits = "0.2"
 rand = "0.8"

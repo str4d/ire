@@ -1,5 +1,12 @@
 use cookie_factory::*;
-use nom::*;
+use nom::{
+    bytes::streaming::{tag, take},
+    combinator::{map, peek, success},
+    multi::length_value,
+    number::streaming::{be_u16, be_u32},
+    sequence::{pair, terminated},
+    IResult,
+};
 
 use super::Frame;
 use crate::i2np::frame::{gen_message, message};
@@ -13,8 +20,8 @@ pub fn padding_len(content_len: usize) -> usize {
     ((16 - (content_len % 16) as u8) % 16) as usize
 }
 
-pub fn padding(input: &[u8], content_len: usize) -> IResult<&[u8], &[u8]> {
-    take!(input, padding_len(content_len))
+pub fn padding(content_len: usize) -> impl Fn(&[u8]) -> IResult<&[u8], &[u8]> {
+    move |i: &[u8]| take(padding_len(content_len))(i)
 }
 
 pub fn gen_padding(
@@ -48,15 +55,15 @@ fn adler(input: &[u8]) -> [u8; 4] {
     ]
 }
 
-named!(
-    get_adler<[u8; 4]>,
-    peek!(do_parse!(
-        data: switch!(peek!(be_u16),
-            0 => take!(12) |
-            size => take!((size+2) as usize + padding_len((size+6) as usize))
-        ) >> (adler(data))
-    ))
-);
+fn get_adler(input: &[u8]) -> IResult<&[u8], [u8; 4]> {
+    let (i, sz) = peek(be_u16)(input)?;
+    let (i, data) = match sz {
+        0 => take(12usize)(i),
+        size => take((size + 2) as usize + padding_len((size + 6) as usize))(i),
+    }?;
+    // Return the original input, as if we wrapped this in peek().
+    Ok((input, adler(data)))
+}
 
 fn gen_adler(
     input: (&mut [u8], usize),
@@ -108,26 +115,22 @@ fn gen_timestamp_frame(
     )
 }
 
-named!(pub frame<Frame>,
-    do_parse!(
-        cs: get_adler >>
-        f: switch!(be_u16,
-            0 => do_parse!(
-                ts: be_u32 >>
-                    take!(6) >>
-                    tag!(cs) >>
-                (Frame::TimeSync(ts))
-            ) |
-            size => do_parse!(
-                msg: message >>
-                     call!(padding, (size+6) as usize) >>
-                     tag!(cs) >>
-                (Frame::Standard(msg))
-            )
-        ) >>
-        (f)
-    )
-);
+pub fn frame(i: &[u8]) -> IResult<&[u8], Frame> {
+    let (i, (cs, sz)) = pair(get_adler, be_u16)(i)?;
+    match sz {
+        0 => map(
+            terminated(be_u32, pair(take(6usize), tag(cs))),
+            Frame::TimeSync,
+        )(i),
+        size => map(
+            terminated(
+                length_value(success(size), message),
+                pair(padding((size + 6) as usize), tag(cs)),
+            ),
+            Frame::Standard,
+        )(i),
+    }
+}
 
 pub fn gen_frame<'a>(
     input: (&'a mut [u8], usize),

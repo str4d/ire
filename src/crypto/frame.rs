@@ -1,5 +1,13 @@
+use std::convert::TryInto;
+
 use cookie_factory::*;
-use nom::*;
+use nom::{
+    bytes::streaming::take,
+    combinator::{map, map_opt, map_res},
+    error::{Error as NomError, ErrorKind},
+    number::streaming::be_u16,
+    IResult,
+};
 
 use crate::constants;
 use crate::crypto::{
@@ -7,18 +15,19 @@ use crate::crypto::{
     SigningPublicKey,
 };
 
-named!(pub sig_type<SigType>,
-    switch!(be_u16,
-        constants::DSA_SHA1 => value!(SigType::DsaSha1) |
-        constants::ECDSA_SHA256_P256 => value!(SigType::EcdsaSha256P256) |
-        constants::ECDSA_SHA384_P384 => value!(SigType::EcdsaSha384P384) |
-        constants::ECDSA_SHA512_P521 => value!(SigType::EcdsaSha512P521) |
-        constants::RSA_SHA256_2048 => value!(SigType::Rsa2048Sha256) |
-        constants::RSA_SHA384_3072 => value!(SigType::Rsa3072Sha384) |
-        constants::RSA_SHA512_4096 => value!(SigType::Rsa4096Sha512) |
-        constants::ED25519 => value!(SigType::Ed25519)
-    )
-);
+pub fn sig_type(i: &[u8]) -> IResult<&[u8], SigType> {
+    map_opt(be_u16, |sig_type| match sig_type {
+        constants::DSA_SHA1 => Some(SigType::DsaSha1),
+        constants::ECDSA_SHA256_P256 => Some(SigType::EcdsaSha256P256),
+        constants::ECDSA_SHA384_P384 => Some(SigType::EcdsaSha384P384),
+        constants::ECDSA_SHA512_P521 => Some(SigType::EcdsaSha512P521),
+        constants::RSA_SHA256_2048 => Some(SigType::Rsa2048Sha256),
+        constants::RSA_SHA384_3072 => Some(SigType::Rsa3072Sha384),
+        constants::RSA_SHA512_4096 => Some(SigType::Rsa4096Sha512),
+        constants::ED25519 => Some(SigType::Ed25519),
+        _ => None,
+    })(i)
+}
 
 pub fn gen_sig_type(
     input: (&mut [u8], usize),
@@ -27,11 +36,12 @@ pub fn gen_sig_type(
     gen_be_u16!(input, sig_type.code())
 }
 
-named!(pub enc_type<EncType>,
-    switch!(be_u16,
-        constants::ELGAMAL2048 => value!(EncType::ElGamal2048)
-    )
-);
+pub fn enc_type(i: &[u8]) -> IResult<&[u8], EncType> {
+    map_opt(be_u16, |enc_type| match enc_type {
+        constants::ELGAMAL2048 => Some(EncType::ElGamal2048),
+        _ => None,
+    })(i)
+}
 
 pub fn gen_enc_type(
     input: (&mut [u8], usize),
@@ -40,9 +50,11 @@ pub fn gen_enc_type(
     gen_be_u16!(input, enc_type.code())
 }
 
-named!(pub session_key<SessionKey>, do_parse!(
-    k: take!(32) >> (SessionKey::from_bytes(array_ref![k, 0, 32]))
-));
+pub fn session_key(i: &[u8]) -> IResult<&[u8], SessionKey> {
+    map(take(32usize), |k: &[u8]| {
+        SessionKey::from_bytes(k.try_into().unwrap())
+    })(i)
+}
 
 pub fn gen_session_key<'a>(
     input: (&'a mut [u8], usize),
@@ -57,9 +69,11 @@ pub fn gen_session_key<'a>(
 
 // PublicKey
 
-named!(pub public_key<PublicKey>, do_parse!(
-    k: take!(256) >> (PublicKey::from_bytes(array_ref![k, 0, 256]))
-));
+pub fn public_key(i: &[u8]) -> IResult<&[u8], PublicKey> {
+    map(take(256usize), |k: &[u8]| {
+        PublicKey::from_bytes(k.try_into().unwrap())
+    })(i)
+}
 
 pub fn gen_public_key<'a>(
     input: (&'a mut [u8], usize),
@@ -70,9 +84,11 @@ pub fn gen_public_key<'a>(
 
 // PrivateKey
 
-named!(pub private_key<PrivateKey>, do_parse!(
-    k: take!(256) >> (PrivateKey::from_bytes(array_ref![k, 0, 256]))
-));
+pub fn private_key(i: &[u8]) -> IResult<&[u8], PrivateKey> {
+    map(take(256usize), |k: &[u8]| {
+        PrivateKey::from_bytes(k.try_into().unwrap())
+    })(i)
+}
 
 pub fn gen_private_key<'a>(
     input: (&'a mut [u8], usize),
@@ -83,13 +99,11 @@ pub fn gen_private_key<'a>(
 
 // SigningPublicKey
 
-pub fn signing_key(input: &[u8], sig_type: SigType) -> IResult<&[u8], SigningPublicKey> {
-    match do_parse!(
-        input,
-        sig_key: take!(sig_type.pubkey_len()) >> (SigningPublicKey::from_bytes(sig_type, sig_key))
-    )? {
-        (i, Ok(value)) => Ok((i, value)),
-        (_, Err(_)) => Err(Err::Error(error_position!(input, ErrorKind::Custom(1)))),
+pub fn signing_key(sig_type: SigType) -> impl Fn(&[u8]) -> IResult<&[u8], SigningPublicKey> {
+    move |input: &[u8]| {
+        map_res(take(sig_type.pubkey_len()), |sig_key| {
+            SigningPublicKey::from_bytes(sig_type, sig_key)
+        })(input)
     }
 }
 
@@ -102,13 +116,13 @@ pub fn gen_signing_key<'a>(
 
 // SigningPrivateKey
 
-pub fn signing_private_key(input: &[u8], sig_type: SigType) -> IResult<&[u8], SigningPrivateKey> {
-    match do_parse!(
-        input,
-        sig_key: take!(sig_type.pubkey_len()) >> (SigningPrivateKey::from_bytes(sig_type, sig_key))
-    )? {
-        (i, Ok(value)) => Ok((i, value)),
-        (_, Err(_)) => Err(Err::Error(error_position!(input, ErrorKind::Custom(1)))),
+pub fn signing_private_key(
+    sig_type: SigType,
+) -> impl Fn(&[u8]) -> IResult<&[u8], SigningPrivateKey> {
+    move |input: &[u8]| {
+        map_res(take(sig_type.pubkey_len()), |sig_key| {
+            SigningPrivateKey::from_bytes(sig_type, sig_key)
+        })(input)
     }
 }
 
@@ -121,13 +135,11 @@ pub fn gen_signing_private_key<'a>(
 
 // Signature
 
-pub fn signature(input: &[u8], sig_type: SigType) -> IResult<&[u8], Signature> {
-    match do_parse!(
-        input,
-        sig: take!(sig_type.sig_len()) >> (Signature::from_bytes(sig_type, sig))
-    )? {
-        (i, Ok(value)) => Ok((i, value)),
-        (_, Err(_)) => Err(Err::Error(error_position!(input, ErrorKind::Custom(1)))),
+pub fn signature(sig_type: SigType) -> impl Fn(&[u8]) -> IResult<&[u8], Signature> {
+    move |input: &[u8]| {
+        map_res(take(sig_type.sig_len()), |sig| {
+            Signature::from_bytes(sig_type, sig)
+        })(input)
     }
 }
 

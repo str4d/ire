@@ -1,5 +1,14 @@
 use cookie_factory::*;
-use nom::*;
+use nom::{
+    bits::{bits, streaming::take as take_bits},
+    bytes::streaming::{tag, take},
+    combinator::{complete, map},
+    error::Error as NomError,
+    multi::{length_data, length_value, many1},
+    number::streaming::{be_u16, be_u32, be_u64, be_u8},
+    sequence::{pair, preceded, tuple},
+    IResult,
+};
 use rand::{rngs::OsRng, Rng};
 
 use crate::data::frame::{gen_router_info, router_info};
@@ -15,10 +24,9 @@ use super::{Block, Frame, RouterInfoFlags};
 
 // DateTime
 
-named!(
-    datetime<Block>,
-    do_parse!(tag!("\x00\x04") >> ts: be_u32 >> (Block::DateTime(ts)))
-);
+fn datetime(i: &[u8]) -> IResult<&[u8], Block> {
+    map(preceded(tag("\x00\x04"), be_u32), Block::DateTime)(i)
+}
 
 fn gen_datetime(input: (&mut [u8], usize), ts: u32) -> Result<(&mut [u8], usize), GenError> {
     do_gen!(input, gen_be_u16!(4) >> gen_be_u32!(ts))
@@ -26,10 +34,11 @@ fn gen_datetime(input: (&mut [u8], usize), ts: u32) -> Result<(&mut [u8], usize)
 
 // Options
 
-named!(
-    options<Block>,
-    do_parse!(options: length_bytes!(be_u16) >> (Block::Options(options.to_vec())))
-);
+fn options(i: &[u8]) -> IResult<&[u8], Block> {
+    map(length_data(be_u16), |options| {
+        Block::Options(Vec::from(options))
+    })(i)
+}
 
 fn gen_options<'a>(
     input: (&'a mut [u8], usize),
@@ -40,17 +49,15 @@ fn gen_options<'a>(
 
 // RouterInfo
 
-#[cfg_attr(rustfmt, rustfmt_skip)]
-named!(
-    routerinfo_flags<RouterInfoFlags>,
-    bits!(do_parse!(
-               take_bits!(u8, 7) >>
-        flood: take_bits!(u8, 1) >>
-        (RouterInfoFlags {
-            flood: flood > 0,
-        })
-    ))
-);
+fn routerinfo_flags(i: &[u8]) -> IResult<&[u8], RouterInfoFlags> {
+    map(
+        bits(preceded(
+            take_bits::<_, u8, _, NomError<_>>(7u8),
+            take_bits(1u8),
+        )),
+        |flood: u8| RouterInfoFlags { flood: flood > 0 },
+    )(i)
+}
 
 fn gen_routerinfo_flags<'a>(
     input: (&'a mut [u8], usize),
@@ -63,13 +70,12 @@ fn gen_routerinfo_flags<'a>(
     gen_be_u8!(input, x)
 }
 
-named!(
-    routerinfo<Block>,
-    length_value!(
-        be_u16,
-        do_parse!(flags: routerinfo_flags >> ri: router_info >> (Block::RouterInfo(ri, flags)))
-    )
-);
+fn routerinfo(i: &[u8]) -> IResult<&[u8], Block> {
+    map(
+        length_value(be_u16, pair(routerinfo_flags, router_info)),
+        |(flags, ri)| Block::RouterInfo(ri, flags),
+    )(i)
+}
 
 fn gen_routerinfo<'a>(
     input: (&'a mut [u8], usize),
@@ -87,10 +93,9 @@ fn gen_routerinfo<'a>(
 
 // I2NP Message
 
-named!(
-    message<Block>,
-    do_parse!(message: length_value!(be_u16, ntcp2_message) >> (Block::Message(message)))
-);
+fn message(i: &[u8]) -> IResult<&[u8], Block> {
+    map(length_value(be_u16, ntcp2_message), Block::Message)(i)
+}
 
 fn gen_message<'a>(
     input: (&'a mut [u8], usize),
@@ -106,16 +111,15 @@ fn gen_message<'a>(
 
 // Termination
 
-named!(
-    termination<Block>,
-    do_parse!(
-        size: be_u16
-            >> valid_received: be_u64
-            >> rsn: be_u8
-            >> addl_data: take!(size - 9)
-            >> (Block::Termination(valid_received, rsn, addl_data.to_vec()))
-    )
-);
+fn termination(i: &[u8]) -> IResult<&[u8], Block> {
+    let (i, size) = be_u16(i)?;
+    map(
+        tuple((be_u64, be_u8, take(size - 9))),
+        |(valid_received, rsn, addl_data)| {
+            Block::Termination(valid_received, rsn, Vec::from(addl_data))
+        },
+    )(i)
+}
 
 fn gen_termination<'a>(
     input: (&'a mut [u8], usize),
@@ -135,10 +139,10 @@ fn gen_termination<'a>(
 
 // Padding
 
-named!(
-    padding<Block>,
-    do_parse!(size: be_u16 >> take!(size) >> (Block::Padding(size)))
-);
+fn padding(i: &[u8]) -> IResult<&[u8], Block> {
+    let (i, size) = be_u16(i)?;
+    take(size as usize)(i).map(|(i, _)| (i, Block::Padding(size)))
+}
 
 fn gen_padding(input: (&mut [u8], usize), size: u16) -> Result<(&mut [u8], usize), GenError> {
     let mut padding = vec![0u8; size as usize];
@@ -149,10 +153,9 @@ fn gen_padding(input: (&mut [u8], usize), size: u16) -> Result<(&mut [u8], usize
 
 // Unknown
 
-named!(
-    unknown<Vec<u8>>,
-    do_parse!(size: be_u16 >> data: take!(size) >> (data.to_vec()))
-);
+fn unknown(i: &[u8]) -> IResult<&[u8], Vec<u8>> {
+    map(length_data(be_u16), Vec::from)(i)
+}
 
 fn gen_unknown<'a>(
     input: (&'a mut [u8], usize),
@@ -165,18 +168,18 @@ fn gen_unknown<'a>(
 // Framing
 //
 
-named!(
-    block<Block>,
-    switch!(be_u8,
-        0 => call!(datetime) |
-        1 => call!(options) |
-        2 => call!(routerinfo) |
-        3 => call!(message) |
-        4 => call!(termination) |
-        254 => call!(padding) |
-        blk => do_parse!(data: call!(unknown) >> (Block::Unknown(blk, data)))
-    )
-);
+fn block(i: &[u8]) -> IResult<&[u8], Block> {
+    let (i, blk) = be_u8(i)?;
+    match blk {
+        0 => datetime(i),
+        1 => options(i),
+        2 => routerinfo(i),
+        3 => message(i),
+        4 => termination(i),
+        254 => padding(i),
+        _ => map(unknown, |data| Block::Unknown(blk, data))(i),
+    }
+}
 
 fn gen_block<'a>(
     input: (&'a mut [u8], usize),
@@ -201,7 +204,9 @@ fn gen_block<'a>(
     }
 }
 
-named!(pub frame<Frame>, many1!(complete!(block)));
+pub fn frame(i: &[u8]) -> IResult<&[u8], Frame> {
+    many1(complete(block))(i)
+}
 
 #[allow(clippy::ptr_arg)]
 pub fn gen_frame<'a>(
@@ -217,19 +222,21 @@ pub fn gen_frame<'a>(
 
 // SessionRequest
 
-named!(
-    pub session_request<(u8, u16, u16, u32)>,
-    do_parse!(
-                take!(1) >>
-        ver:    be_u8 >>
-        padlen: be_u16 >>
-        sclen:  be_u16 >>
-                take!(2) >>
-        ts_a:   be_u32 >>
-                take!(4) >>
-        (ver, padlen, sclen, ts_a)
-    )
-);
+pub fn session_request(i: &[u8]) -> IResult<&[u8], (u8, u16, u16, u32)> {
+    map(
+        tuple((
+            // TODO(0.9.42): id
+            take(1usize),
+            be_u8,
+            be_u16,
+            be_u16,
+            take(2usize),
+            be_u32,
+            take(4usize),
+        )),
+        |(_, ver, padlen, sclen, _, ts_a, _)| (ver, padlen, sclen, ts_a),
+    )(i)
+}
 
 pub fn gen_session_request(
     input: (&mut [u8], usize),
@@ -252,16 +259,12 @@ pub fn gen_session_request(
 
 // SessionCreated
 
-named!(
-    pub session_created<(u16, u32)>,
-    do_parse!(
-                take!(2) >>
-        padlen: be_u16 >>
-                take!(4) >>
-        ts_b:   be_u32 >>
-                take!(4) >>
-        (padlen, ts_b))
-);
+pub fn session_created(i: &[u8]) -> IResult<&[u8], (u16, u32)> {
+    map(
+        tuple((take(2usize), be_u16, take(4usize), be_u32, take(4usize))),
+        |(_, padlen, _, ts_b, _)| (padlen, ts_b),
+    )(i)
+}
 
 pub fn gen_session_created(
     input: (&mut [u8], usize),
@@ -280,7 +283,9 @@ pub fn gen_session_created(
 
 // SessionConfirmed
 
-named!(pub session_confirmed<(Frame)>, call!(frame));
+pub fn session_confirmed(i: &[u8]) -> IResult<&[u8], (Frame)> {
+    frame(i)
+}
 
 pub fn gen_session_confirmed<'a>(
     input: (&'a mut [u8], usize),

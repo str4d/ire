@@ -1,6 +1,16 @@
+use std::convert::TryInto;
+
 use cookie_factory::*;
 use itertools::Itertools;
-use nom::*;
+use nom::{
+    bytes::streaming::{tag, take},
+    combinator::{complete, map, map_res},
+    error::{Error as NomError, ErrorKind},
+    multi::{length_count, length_data, length_value, many0},
+    number::streaming::{be_u16, be_u32, be_u64, be_u8},
+    sequence::{pair, separated_pair, terminated, tuple},
+    IResult,
+};
 
 use super::*;
 use crate::constants;
@@ -13,9 +23,11 @@ use crate::crypto::frame::{
 // Simple data types
 //
 
-named!(pub hash<Hash>, do_parse!(
-    h: take!(32) >> (Hash::from_bytes(array_ref![h, 0, 32]))
-));
+pub fn hash(i: &[u8]) -> IResult<&[u8], Hash> {
+    map(take(32usize), |bytes: &[u8]| {
+        Hash::from_bytes(bytes.try_into().unwrap())
+    })(i)
+}
 pub fn gen_hash<'a>(
     input: (&'a mut [u8], usize),
     h: &Hash,
@@ -23,18 +35,18 @@ pub fn gen_hash<'a>(
     gen_slice!(input, h.0)
 }
 
-named!(pub i2p_date<I2PDate>, do_parse!(
-    date: be_u64 >> (I2PDate(date))
-));
+pub fn i2p_date(i: &[u8]) -> IResult<&[u8], I2PDate> {
+    map(be_u64, I2PDate)(i)
+}
 pub fn gen_i2p_date<'a>(
     input: (&'a mut [u8], usize),
     date: &I2PDate,
 ) -> Result<(&'a mut [u8], usize), GenError> {
     gen_be_u64!(input, date.0)
 }
-named!(pub short_expiry<I2PDate>, do_parse!(
-    seconds: be_u32 >> (I2PDate(u64::from(seconds) * 1_000))
-));
+pub fn short_expiry(i: &[u8]) -> IResult<&[u8], I2PDate> {
+    map(be_u32, |seconds| I2PDate(u64::from(seconds) * 1_000))(i)
+}
 pub fn gen_short_expiry<'a>(
     input: (&'a mut [u8], usize),
     date: &I2PDate,
@@ -42,9 +54,11 @@ pub fn gen_short_expiry<'a>(
     gen_be_u32!(input, date.0 / 1_000)
 }
 
-named!(pub i2p_string<I2PString>, do_parse!(
-    len: be_u8 >> s: take_str!(len) >> (I2PString(String::from(s)))
-));
+pub fn i2p_string(i: &[u8]) -> IResult<&[u8], I2PString> {
+    map_res(length_data(be_u8), |s: &[u8]| {
+        String::from_utf8(s.to_vec()).map(I2PString)
+    })(i)
+}
 pub fn gen_i2p_string<'a>(
     input: (&'a mut [u8], usize),
     s: &I2PString,
@@ -53,14 +67,18 @@ pub fn gen_i2p_string<'a>(
     do_gen!(input, gen_be_u8!(buf.len() as u8) >> gen_slice!(buf))
 }
 
-named!(pub mapping<Mapping>,
-    do_parse!(
-        pairs: length_value!(be_u16, many0!(complete!(
-            terminated!(separated_pair!(i2p_string, tag!("="), i2p_string), tag!(";"))
-        ))) >>
-        (Mapping(pairs.into_iter().collect()))
-    )
-);
+pub fn mapping(i: &[u8]) -> IResult<&[u8], Mapping> {
+    map(
+        length_value(
+            be_u16,
+            many0(complete(terminated(
+                separated_pair(i2p_string, tag("="), i2p_string),
+                tag(";"),
+            ))),
+        ),
+        |pairs| Mapping(pairs.into_iter().collect()),
+    )(i)
+}
 pub fn gen_mapping_pair<'a>(
     input: (&'a mut [u8], usize),
     pair: (&I2PString, &I2PString),
@@ -84,9 +102,11 @@ pub fn gen_mapping<'a>(
     )
 }
 
-named!(pub session_tag<SessionTag>, do_parse!(
-    t: take!(32) >> (SessionTag::from_bytes(array_ref![t, 0, 32]))
-));
+pub fn session_tag(i: &[u8]) -> IResult<&[u8], SessionTag> {
+    map(take(32usize), |t: &[u8]| {
+        SessionTag::from_bytes(t.try_into().unwrap())
+    })(i)
+}
 pub fn gen_session_tag<'a>(
     input: (&'a mut [u8], usize),
     t: &SessionTag,
@@ -94,9 +114,9 @@ pub fn gen_session_tag<'a>(
     gen_slice!(input, t.0)
 }
 
-named!(pub tunnel_id<TunnelId>, do_parse!(
-    tid: be_u32 >> (TunnelId(tid))
-));
+pub fn tunnel_id(i: &[u8]) -> IResult<&[u8], TunnelId> {
+    map(be_u32, TunnelId)(i)
+}
 pub fn gen_tunnel_id<'a>(
     input: (&'a mut [u8], usize),
     tid: &TunnelId,
@@ -106,13 +126,12 @@ pub fn gen_tunnel_id<'a>(
 
 // SigningPublicKey
 
-pub(crate) fn split_signing_key<'a>(
-    input: &'a [u8],
+pub(crate) fn split_signing_key(
     base_data: &[u8; constants::KEYCERT_SIGKEY_BYTES],
     cert: &Certificate,
-) -> IResult<&'a [u8], SigningPublicKey> {
-    let res = match *cert {
-        Certificate::Key(ref kc) => {
+) -> Result<SigningPublicKey, crypto::Error> {
+    match cert {
+        Certificate::Key(kc) => {
             if kc.sig_type.extra_data_len(kc.enc_type) > 0 {
                 let mut data = Vec::from(&base_data[..]);
                 data.extend(&kc.sig_data);
@@ -123,10 +142,6 @@ pub(crate) fn split_signing_key<'a>(
             }
         }
         _ => SigningPublicKey::from_bytes(SigType::DsaSha1, &base_data[..]),
-    };
-    match res {
-        Ok(spk) => Ok((input, spk)),
-        Err(_) => Err(Err::Error(error_position!(input, ErrorKind::Custom(1)))),
     }
 }
 
@@ -143,41 +158,32 @@ pub(crate) fn gen_truncated_signing_key<'a>(
 
 // KeyCertificate
 
-pub(crate) fn keycert_padding<'a>(
-    input: &'a [u8],
-    base_data: &[u8; 128],
-    cert: &Certificate,
-) -> IResult<&'a [u8], Option<Padding>> {
-    let spk = match *cert {
-        Certificate::Key(ref kc) => {
-            let pad_len = kc.sig_type.pad_len(kc.enc_type);
-            if pad_len > 0 {
-                Some(Padding(Vec::from(&base_data[0..pad_len])))
-            } else {
-                None
-            }
-        }
+pub(crate) fn keycert_padding(base_data: &[u8; 128], cert: &Certificate) -> Option<Padding> {
+    let pad_len = match cert {
+        Certificate::Key(kc) => Some(kc.sig_type.pad_len(kc.enc_type)),
         _ => None,
     };
-    Ok((input, spk))
+    match pad_len {
+        Some(pad_len) if pad_len > 0 => Some(Padding(Vec::from(&base_data[0..pad_len]))),
+        _ => None,
+    }
 }
 
-#[cfg_attr(rustfmt, rustfmt_skip)]
-named!(
-    key_certificate<KeyCertificate>,
-    do_parse!(
-        sig_type: sig_type >>
-        enc_type: enc_type >>
-        sig_data: take!(sig_type.extra_data_len(enc_type)) >>
-        enc_data: take!(enc_type.extra_data_len(sig_type)) >>
-        (KeyCertificate {
+fn key_certificate(i: &[u8]) -> IResult<&[u8], KeyCertificate> {
+    let (i, (sig_type, enc_type)) = pair(sig_type, enc_type)(i)?;
+    map(
+        pair(
+            take(sig_type.extra_data_len(enc_type)),
+            take(enc_type.extra_data_len(sig_type)),
+        ),
+        move |(sig_data, enc_data)| KeyCertificate {
             sig_type,
             enc_type,
             sig_data: Vec::from(sig_data),
             enc_data: Vec::from(enc_data),
-        })
-    )
-);
+        },
+    )(i)
+}
 
 fn gen_key_certificate<'a>(
     input: (&'a mut [u8], usize),
@@ -194,35 +200,24 @@ fn gen_key_certificate<'a>(
 
 // Certificate
 
-named!(pub certificate<Certificate>,
-    switch!(be_u8,
-        constants::NULL_CERT => do_parse!(
-            tag!(b"\x00\x00") >>
-            (Certificate::Null)
-        ) |
-        constants::HASH_CERT => do_parse!(
-            payload: length_bytes!(be_u16) >>
-            (Certificate::HashCash(Vec::from(payload)))
-        ) |
-        constants::HIDDEN_CERT => do_parse!(
-            tag!(b"\x00\x00") >>
-            (Certificate::Hidden)
-        ) |
-        constants::SIGNED_CERT => do_parse!(
-            payload: length_bytes!(be_u16) >>
-            (Certificate::Signed(Vec::from(payload)))
-        ) |
-        constants::MULTI_CERT => do_parse!(
-            payload: length_bytes!(be_u16) >>
-            (Certificate::Multiple(Vec::from(payload)))
-        ) |
-        constants::KEY_CERT => do_parse!(
-            _len:  be_u16 >>
-            cert: key_certificate >>
-            (Certificate::Key(cert))
-        )
-    )
-);
+pub fn certificate(i: &[u8]) -> IResult<&[u8], Certificate> {
+    let (i, cert_type) = be_u8(i)?;
+    match cert_type {
+        constants::NULL_CERT => map(tag(b"\x00\x00"), |_| Certificate::Null)(i),
+        constants::HASH_CERT => map(length_data(be_u16), |payload| {
+            Certificate::HashCash(Vec::from(payload))
+        })(i),
+        constants::HIDDEN_CERT => map(tag(b"\x00\x00"), |_| Certificate::Hidden)(i),
+        constants::SIGNED_CERT => map(length_data(be_u16), |payload| {
+            Certificate::Signed(Vec::from(payload))
+        })(i),
+        constants::MULTI_CERT => map(length_data(be_u16), |payload| {
+            Certificate::Multiple(Vec::from(payload))
+        })(i),
+        constants::KEY_CERT => map(length_value(be_u16, key_certificate), Certificate::Key)(i),
+        _ => Err(nom::Err::Error(NomError::new(i, ErrorKind::Switch))),
+    }
+}
 
 pub fn gen_certificate<'a>(
     input: (&'a mut [u8], usize),
@@ -270,25 +265,31 @@ pub fn gen_certificate<'a>(
 
 // RouterIdentity
 
-named!(pub router_identity<RouterIdentity>,
-    do_parse!(
-        public_key:   public_key >>
-        signing_data: take!(constants::KEYCERT_SIGKEY_BYTES) >>
-        certificate:  certificate >>
-        padding:      call!(keycert_padding,
-                            array_ref![signing_data, 0, constants::KEYCERT_SIGKEY_BYTES],
-                            &certificate) >>
-        signing_key:  call!(split_signing_key,
-                            array_ref![signing_data, 0, constants::KEYCERT_SIGKEY_BYTES],
-                            &certificate) >>
-        (RouterIdentity {
+pub fn router_identity(i: &[u8]) -> IResult<&[u8], RouterIdentity> {
+    map_res(
+        tuple((
             public_key,
-            padding,
-            signing_key,
+            take(constants::KEYCERT_SIGKEY_BYTES),
             certificate,
-        })
-    )
-);
+        )),
+        |(public_key, signing_data, certificate)| {
+            let padding = keycert_padding(
+                array_ref![signing_data, 0, constants::KEYCERT_SIGKEY_BYTES],
+                &certificate,
+            );
+            split_signing_key(
+                array_ref![signing_data, 0, constants::KEYCERT_SIGKEY_BYTES],
+                &certificate,
+            )
+            .map(|signing_key| RouterIdentity {
+                public_key,
+                padding,
+                signing_key,
+                certificate,
+            })
+        },
+    )(i)
+}
 
 pub fn gen_router_identity<'a>(
     input: (&'a mut [u8], usize),
@@ -309,14 +310,18 @@ pub fn gen_router_identity<'a>(
 
 // RouterSecretKeys
 
-named!(pub router_secret_keys<RouterSecretKeys>,
-    do_parse!(
-        rid: router_identity >>
-        private_key: private_key >>
-        signing_private_key: call!(signing_private_key, rid.signing_key.sig_type()) >>
-        (RouterSecretKeys { rid, private_key, signing_private_key })
-    )
-);
+pub fn router_secret_keys(i: &[u8]) -> IResult<&[u8], RouterSecretKeys> {
+    let (i, (rid, private_key)) = pair(router_identity, private_key)(i)?;
+    let (i, signing_private_key) = signing_private_key(rid.signing_key.sig_type())(i)?;
+    Ok((
+        i,
+        RouterSecretKeys {
+            rid,
+            private_key,
+            signing_private_key,
+        },
+    ))
+}
 
 pub fn gen_router_secret_keys<'a>(
     input: (&'a mut [u8], usize),
@@ -332,22 +337,17 @@ pub fn gen_router_secret_keys<'a>(
 
 // RouterAddress
 
-#[cfg_attr(rustfmt, rustfmt_skip)]
-named!(
-    router_address<RouterAddress>,
-    do_parse!(
-        cost:            be_u8 >>
-        expiration:      i2p_date >>
-        transport_style: i2p_string >>
-        options:         mapping >>
-        (RouterAddress {
+fn router_address(i: &[u8]) -> IResult<&[u8], RouterAddress> {
+    map(
+        tuple((be_u8, i2p_date, i2p_string, mapping)),
+        |(cost, expiration, transport_style, options)| RouterAddress {
             cost,
             expiration,
             transport_style,
             options,
-        })
-    )
-);
+        },
+    )(i)
+}
 
 fn gen_router_address<'a>(
     input: (&'a mut [u8], usize),
@@ -365,24 +365,27 @@ fn gen_router_address<'a>(
 
 // RouterInfo
 
-named!(pub router_info<RouterInfo>,
-    do_parse!(
-        router_id: router_identity >>
-        published: i2p_date >>
-        addresses: length_count!(be_u8, router_address) >>
-        peers:     length_count!(be_u8, hash) >>
-        options:   mapping >>
-        signature: call!(signature, router_id.signing_key.sig_type()) >>
-        (RouterInfo {
+pub fn router_info(i: &[u8]) -> IResult<&[u8], RouterInfo> {
+    let (i, router_id) = router_identity(i)?;
+    let (i, (published, addresses, peers, options, signature)) = tuple((
+        i2p_date,
+        length_count(be_u8, router_address),
+        length_count(be_u8, hash),
+        mapping,
+        signature(router_id.signing_key.sig_type()),
+    ))(i)?;
+    Ok((
+        i,
+        RouterInfo {
             router_id,
             published,
             addresses,
             peers,
             options,
             signature: Some(signature),
-        })
-    )
-);
+        },
+    ))
+}
 
 pub fn gen_router_info_minus_sig<'a>(
     input: (&'a mut [u8], usize),
@@ -416,7 +419,7 @@ mod tests {
     use super::*;
     use crate::tests::ROUTER_INFO;
 
-    use nom::HexDisplay;
+    use nom::{Err, HexDisplay};
 
     #[test]
     fn test_router_info() {

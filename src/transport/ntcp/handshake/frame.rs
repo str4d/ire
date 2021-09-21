@@ -1,5 +1,12 @@
 use cookie_factory::*;
-use nom::*;
+use nom::sequence::{separated_pair, terminated};
+use nom::IResult;
+use nom::{
+    bytes::streaming::take,
+    combinator::map,
+    number::streaming::{be_u16, be_u32},
+    sequence::pair,
+};
 
 use super::super::frame::{gen_padding, padding, padding_len};
 use super::{HandshakeFrame, SessionConfirmA, SessionConfirmB, SessionCreated, SessionRequest};
@@ -17,16 +24,14 @@ use crate::data::{Hash, RouterIdentity};
 // +-------+----------------+
 //  octets       octets
 
-named!(pub session_request<HandshakeFrame>,
-    do_parse!(
-        dh_x: take!(256) >>
-        hash: hash >>
-        (HandshakeFrame::SessionRequest(SessionRequest {
+pub fn session_request(i: &[u8]) -> IResult<&[u8], HandshakeFrame> {
+    map(pair(take(256usize), hash), |(dh_x, hash)| {
+        HandshakeFrame::SessionRequest(SessionRequest {
             dh_x: Vec::from(dh_x),
             hash,
-        }))
-    )
-);
+        })
+    })(i)
+}
 
 pub fn gen_session_request<'a>(
     input: (&'a mut [u8], usize),
@@ -41,13 +46,11 @@ pub fn gen_session_request<'a>(
 // +-------+--------------------+
 //  octets       octets
 
-named!(pub session_created_enc<(Vec<u8>, Vec<u8>)>,
-    do_parse!(
-        dh_y: take!(256) >>
-        ct:   take!(48)  >>
-        ((Vec::from(dh_y), Vec::from(ct)))
-    )
-);
+pub fn session_created_enc(i: &[u8]) -> IResult<&[u8], (Vec<u8>, Vec<u8>)> {
+    map(pair(take(256usize), take(48usize)), |(dh_y, ct)| {
+        (Vec::from(dh_y), Vec::from(ct))
+    })(i)
+}
 
 pub fn gen_session_created_enc<'a>(
     input: (&'a mut [u8], usize),
@@ -63,14 +66,9 @@ pub fn gen_session_created_enc<'a>(
 // +-------+-----+---------+
 //  octets  long   octets
 
-named!(pub session_created_dec<(Hash, u32)>,
-    do_parse!(
-        hash: hash >>
-        ts_b: be_u32    >>
-              take!(12) >>
-        ((hash, ts_b ))
-    )
-);
+pub fn session_created_dec(i: &[u8]) -> IResult<&[u8], (Hash, u32)> {
+    terminated(pair(hash, be_u32), take(12usize))(i)
+}
 
 pub fn gen_session_created_dec<'a>(
     input: (&'a mut [u8], usize),
@@ -114,17 +112,18 @@ pub fn gen_session_confirm_sig_msg<'a>(
     )
 }
 
-named!(pub session_confirm_a<HandshakeFrame>,
-    do_parse!(
-        size:     be_u16 >>
-        ri_a:     router_identity >>
-        ts_a:     be_u32 >>
-                  call!(padding,
-                        size as usize + 6 + ri_a.signing_key.sig_type().sig_len() as usize) >>
-        sig:      call!(signature, ri_a.signing_key.sig_type()) >>
-        (HandshakeFrame::SessionConfirmA(SessionConfirmA { ri_a, ts_a, sig }))
-    )
-);
+pub fn session_confirm_a(i: &[u8]) -> IResult<&[u8], HandshakeFrame> {
+    let (i, (size, ri_a)) = pair(be_u16, router_identity)(i)?;
+    let (i, (ts_a, sig)) = separated_pair(
+        be_u32,
+        padding(size as usize + 6 + ri_a.signing_key.sig_type().sig_len() as usize),
+        signature(ri_a.signing_key.sig_type()),
+    )(i)?;
+    Ok((
+        i,
+        HandshakeFrame::SessionConfirmA(SessionConfirmA { ri_a, ts_a, sig }),
+    ))
+}
 
 pub fn gen_session_confirm_a<'a>(
     input: (&'a mut [u8], usize),
@@ -148,16 +147,19 @@ pub fn gen_session_confirm_a<'a>(
 //
 // Length determined by RI_B, which the recipient already knows.
 
-pub fn session_confirm_b<'a>(
-    input: &'a [u8],
+pub fn session_confirm_b(
     ri_b: &RouterIdentity,
-) -> IResult<&'a [u8], HandshakeFrame> {
-    do_parse!(
-        input,
-        sig: call!(signature, ri_b.signing_key.sig_type())
-            >> take!(padding_len(ri_b.signing_key.sig_type().sig_len() as usize))
-            >> (HandshakeFrame::SessionConfirmB(SessionConfirmB { sig }))
-    )
+) -> impl Fn(&[u8]) -> IResult<&[u8], HandshakeFrame> {
+    let sig_type = ri_b.signing_key.sig_type();
+    move |input: &[u8]| {
+        map(
+            terminated(
+                signature(sig_type),
+                take(padding_len(sig_type.sig_len() as usize)),
+            ),
+            |sig| HandshakeFrame::SessionConfirmB(SessionConfirmB { sig }),
+        )(input)
+    }
 }
 
 pub fn gen_session_confirm_b<'a>(

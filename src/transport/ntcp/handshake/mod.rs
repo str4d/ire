@@ -384,7 +384,7 @@ impl Decoder for OutboundHandshakeCodec {
                         Some(end) => self.decrypted += end,
                         None => return Ok(None),
                     };
-                    frame::session_confirm_b(&buf[0..self.decrypted], &self.ri_remote)
+                    frame::session_confirm_b(&self.ri_remote)(&buf[0..self.decrypted])
                 }
                 _ => return Ok(None),
             };

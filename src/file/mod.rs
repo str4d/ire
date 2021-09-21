@@ -1,4 +1,4 @@
-use nom::{self, take_until};
+use nom::bytes::streaming::take_until;
 use std::collections::HashMap;
 
 use crate::crypto::{self, OfflineSigningPublicKey, SigType, Signature};
@@ -54,7 +54,8 @@ impl Su3File {
             return Err(e);
         }
 
-        let (data, _) = take_until!(input, &SU3_MAGIC[..])?;
+        let res: Result<_, nom::Err<()>> = take_until(&SU3_MAGIC[..])(input);
+        let (data, _) = res?;
         Su3File::from_bytes(data, signers)
     }
 
@@ -79,6 +80,7 @@ impl Su3File {
 mod tests {
     use nom::Needed;
     use std::collections::HashMap;
+    use std::num::NonZeroUsize;
 
     use super::{Error, Su3Content, Su3File};
     use crate::crypto::SigType;
@@ -92,8 +94,8 @@ mod tests {
 
         for (incomplete, needed) in [
             (&b""[..], 7),
-            (&b"HTTP"[..], 7),
-            (&b"HTTP/1"[..], 7),
+            (&b"HTTP"[..], 3),
+            (&b"HTTP/1"[..], 1),
             (&b"HTTP/1."[..], 1),
             (&b"HTTP/1.0"[..], 1),
             (&b"HTTP/1.1"[..], 1),
@@ -103,7 +105,12 @@ mod tests {
         {
             match Su3File::from_http_data(incomplete, &signers) {
                 Ok(_) => panic!("Wat"),
-                Err(e) => assert_eq!(e, Error::Read(ReadError::Incomplete(Needed::Size(*needed)))),
+                Err(e) => assert_eq!(
+                    e,
+                    Error::Read(ReadError::Incomplete(Needed::Size(
+                        NonZeroUsize::new(*needed).unwrap()
+                    )))
+                ),
             }
         }
 
@@ -143,7 +150,7 @@ mod tests {
         // Now just missing SU3_MAGIC
         match Su3File::from_http_data(b"HTTP/1.0 200", &signers) {
             Ok(_) => panic!("Wat"),
-            Err(e) => assert_eq!(e, Error::Read(ReadError::Incomplete(Needed::Size(6)))),
+            Err(e) => assert_eq!(e, Error::Read(ReadError::Incomplete(Needed::Unknown))),
         }
     }
 

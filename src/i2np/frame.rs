@@ -3,6 +3,15 @@ use flate2::read::GzDecoder;
 use flate2::write::GzEncoder;
 use flate2::Compression;
 use nom::*;
+use nom::{
+    bits::streaming::take as take_bits,
+    bytes::streaming::take,
+    combinator::{cond, map, map_opt, peek, verify},
+    error::{Error as NomError, ErrorKind},
+    multi::{count, length_count, length_data},
+    number::streaming::{be_u16, be_u32, be_u8},
+    sequence::{pair, preceded, terminated, tuple},
+};
 use rand::rngs::OsRng;
 use sha2::{
     digest::generic_array::{typenum::U32, GenericArray},
@@ -26,7 +35,7 @@ use crate::data::{
 //
 
 fn iv(input: &[u8]) -> IResult<&[u8], [u8; 16]> {
-    let (i, iv) = take!(input, 16)?;
+    let (i, iv) = take(16usize)(input)?;
     let mut x = [0u8; 16];
     x.copy_from_slice(iv);
     Ok((i, x))
@@ -36,53 +45,68 @@ fn iv(input: &[u8]) -> IResult<&[u8], [u8; 16]> {
 // Common structures
 //
 
-named!(
-    pub build_request_record<BuildRequestRecord>,
-    do_parse!(
-        receive_tid: tunnel_id
-            >> our_ident: hash
-            >> next_tid: tunnel_id
-            >> next_ident: hash
-            >> layer_key: session_key
-            >> iv_key: session_key
-            >> reply_key: session_key
-            >> reply_iv: iv
-            >> hop_type:
-                map!(
-                    verify!(
-                        bits!(do_parse!(
-                            ibgw: take_bits!(u8, 1)
-                                >> obep: take_bits!(u8, 1)
-                                >> take_bits!(u8, 6)
-                                >> ((ibgw > 0, obep > 0))
-                        )),
-                        |(ibgw, obep)| !(ibgw && obep)
+pub fn build_request_record(i: &[u8]) -> IResult<&[u8], BuildRequestRecord> {
+    map(
+        terminated(
+            tuple((
+                tunnel_id,
+                hash,
+                tunnel_id,
+                hash,
+                session_key,
+                session_key,
+                session_key,
+                iv,
+                map(
+                    verify(
+                        map(
+                            bits(terminated(
+                                tuple((take_bits(1u8), take_bits(1u8))),
+                                take_bits::<_, u8, _, NomError<_>>(6u8),
+                            )),
+                            |(ibgw, obep): (u8, u8)| (ibgw > 0, obep > 0),
+                        ),
+                        |(ibgw, obep)| !(*ibgw && *obep),
                     ),
                     |(ibgw, obep)| match (ibgw, obep) {
                         (false, false) => ParticipantType::Intermediate,
                         (true, false) => ParticipantType::InboundGateway,
                         (false, true) => ParticipantType::OutboundEndpoint,
                         (true, true) => unreachable!(),
-                    }
-                )
-            >> request_time: be_u32
-            >> send_msg_id: be_u32
-            >> take!(29)
-            >> (BuildRequestRecord {
-                receive_tid,
-                our_ident,
-                next_tid,
-                next_ident,
-                layer_key,
-                iv_key,
-                reply_key,
-                reply_iv,
-                hop_type,
-                request_time,
-                send_msg_id,
-            })
-    )
-);
+                    },
+                ),
+                be_u32,
+                be_u32,
+            )),
+            take(29usize),
+        ),
+        |(
+            receive_tid,
+            our_ident,
+            next_tid,
+            next_ident,
+            layer_key,
+            iv_key,
+            reply_key,
+            reply_iv,
+            hop_type,
+            request_time,
+            send_msg_id,
+        )| BuildRequestRecord {
+            receive_tid,
+            our_ident,
+            next_tid,
+            next_ident,
+            layer_key,
+            iv_key,
+            reply_key,
+            reply_iv,
+            hop_type,
+            request_time,
+            send_msg_id,
+        },
+    )(i)
+}
 
 pub fn gen_build_request_record<'a>(
     input: (&'a mut [u8], usize),
@@ -120,29 +144,19 @@ fn calculate_build_response_record_hash(padding: &[u8], reply: u8) -> GenericArr
     hasher.finalize()
 }
 
-fn validate_build_response_record<'a>(
-    input: &'a [u8],
-    hash: &Hash,
-    padding: &[u8],
-    reply: u8,
-) -> IResult<&'a [u8], ()> {
-    let res = calculate_build_response_record_hash(padding, reply);
-    if hash.eq(&Hash::from_bytes(array_ref![res, 0, 32])) {
-        Ok((input, ()))
-    } else {
-        Err(Err::Error(error_position!(input, ErrorKind::Custom(1))))
-    }
+pub fn build_response_record(i: &[u8]) -> IResult<&[u8], BuildResponseRecord> {
+    map_opt(
+        tuple((hash, take(495usize), be_u8)),
+        |(hash, padding, reply)| {
+            let res = calculate_build_response_record_hash(padding, reply);
+            if hash.eq(&Hash::from_bytes(array_ref![res, 0, 32])) {
+                Some(BuildResponseRecord { reply })
+            } else {
+                None
+            }
+        },
+    )(i)
 }
-
-named!(pub build_response_record<BuildResponseRecord>,
-    do_parse!(
-        hash:    hash >>
-        padding: take!(495) >>
-        reply:   be_u8 >>
-                 call!(validate_build_response_record, &hash, padding, reply) >>
-        (BuildResponseRecord { reply })
-    )
-);
 
 pub fn gen_build_response_record<'a>(
     input: (&'a mut [u8], usize),
@@ -165,17 +179,19 @@ pub fn gen_build_response_record<'a>(
 // DatabaseStore
 
 fn compressed_ri(input: &[u8]) -> IResult<&[u8], RouterInfo> {
-    let (i, payload) = do_parse!(input, size: be_u16 >> payload: take!(size) >> (payload))?;
+    let (i, payload) = length_data(be_u16)(input)?;
     let mut buf = Vec::new();
     let mut d = GzDecoder::new(payload);
     match d.read_to_end(&mut buf) {
         Ok(_) => match router_info(&buf) {
             Ok((_, ri)) => Ok((i, ri)),
             Err(Err::Incomplete(n)) => Err(Err::Incomplete(n)),
-            Err(Err::Error(c)) => Err(Err::Error(Context::Code(input, c.into_error_kind()))),
-            Err(Err::Failure(c)) => Err(Err::Failure(Context::Code(input, c.into_error_kind()))),
+            Err(Err::Error(NomError { code, .. })) => Err(Err::Error(NomError::new(input, code))),
+            Err(Err::Failure(NomError { code, .. })) => {
+                Err(Err::Failure(NomError::new(input, code)))
+            }
         },
-        Err(_) => Err(Err::Error(error_position!(input, ErrorKind::Custom(1)))),
+        Err(_) => Err(Err::Error(NomError::new(input, ErrorKind::Eof))),
     }
 }
 
@@ -196,26 +212,19 @@ fn gen_compressed_ri<'a>(
     }
 }
 
-#[cfg_attr(rustfmt, rustfmt_skip)]
-named!(
-    reply_path<Option<ReplyPath>>,
-    do_parse!(
-        reply_tok: be_u32 >>
-        reply: cond!(
-            reply_tok > 0,
-            do_parse!(
-                reply_tid: tunnel_id >>
-                reply_gw:  hash >>
-                (ReplyPath {
-                    token: reply_tok,
-                    tid: reply_tid,
-                    gateway: reply_gw,
-                })
-            )
-        ) >>
-        (reply)
-    )
-);
+fn reply_path(i: &[u8]) -> IResult<&[u8], Option<ReplyPath>> {
+    let (i, reply_tok) = be_u32(i)?;
+    cond(
+        reply_tok > 0,
+        map(pair(tunnel_id, hash), move |(reply_tid, reply_gw)| {
+            ReplyPath {
+                token: reply_tok,
+                tid: reply_tid,
+                gateway: reply_gw,
+            }
+        }),
+    )(i)
+}
 
 fn gen_reply_path<'a>(
     input: (&'a mut [u8], usize),
@@ -230,24 +239,24 @@ fn gen_reply_path<'a>(
     }
 }
 
-#[cfg_attr(rustfmt, rustfmt_skip)]
-named!(
-    database_store<MessagePayload>,
-    do_parse!(
-        key:     hash >>
-        ds_type: be_u8 >>
-        reply:   reply_path >>
-        data: switch!(value!(ds_type),
-            0 => do_parse!(ri: compressed_ri >> (DatabaseStoreData::RI(ri))) |
-            1 => do_parse!(ls: lease_set >> (DatabaseStoreData::LS(ls)))
-        ) >> (MessagePayload::DatabaseStore(DatabaseStore {
+fn database_store(i: &[u8]) -> IResult<&[u8], MessagePayload> {
+    let (i, (key, ds_type)) = pair(hash, be_u8)(i)?;
+    let (i, reply) = reply_path(i)?;
+    let (i, data) = match ds_type {
+        0 => map(compressed_ri, |ri| DatabaseStoreData::RI(ri))(i),
+        1 => map(lease_set, |ls| DatabaseStoreData::LS(ls))(i),
+        _ => unimplemented!(),
+    }?;
+    Ok((
+        i,
+        MessagePayload::DatabaseStore(DatabaseStore {
             key,
             ds_type,
             reply,
             data,
-        }))
-    )
-);
+        }),
+    ))
+}
 
 fn gen_database_store_data<'a>(
     input: (&'a mut [u8], usize),
@@ -274,15 +283,13 @@ fn gen_database_store<'a>(
 
 // DatabaseLookup
 
-#[cfg_attr(rustfmt, rustfmt_skip)]
-named!(
-    database_lookup_flags<DatabaseLookupFlags>,
-    bits!(do_parse!(
-                     take_bits!(u8, 4) >>
-        lookup_type: take_bits!(u8, 2) >>
-        encryption:  take_bits!(u8, 1) >>
-        delivery:    take_bits!(u8, 1) >>
-        (DatabaseLookupFlags {
+fn database_lookup_flags(i: &[u8]) -> IResult<&[u8], DatabaseLookupFlags> {
+    map(
+        bits::<_, _, NomError<_>, _, _>(preceded(
+            take_bits::<_, u8, _, _>(4u8),
+            tuple((take_bits(2u8), take_bits(1u8), take_bits(1u8))),
+        )),
+        |(lookup_type, encryption, delivery): (u8, u8, u8)| DatabaseLookupFlags {
             delivery: delivery > 0,
             encryption: encryption > 0,
             lookup_type: match lookup_type {
@@ -292,9 +299,9 @@ named!(
                 3 => DatabaseLookupType::Exploratory,
                 _ => unreachable!(),
             },
-        })
-    ))
-);
+        },
+    )(i)
+}
 
 fn gen_database_lookup_flags<'a>(
     input: (&'a mut [u8], usize),
@@ -317,30 +324,28 @@ fn gen_database_lookup_flags<'a>(
     gen_be_u8!(input, x)
 }
 
-#[cfg_attr(rustfmt, rustfmt_skip)]
-named!(
-    database_lookup<MessagePayload>,
-    do_parse!(
-        key:            hash >>
-        from:           hash >>
-        flags:          database_lookup_flags >>
-        reply_tid:      cond!(flags.delivery, call!(tunnel_id)) >>
-        excluded_peers: length_count!(be_u16, hash) >>
-        reply_enc:      cond!(flags.encryption, do_parse!(
-            reply_key:  call!(session_key) >>
-            tags:       length_count!(be_u8, session_tag) >>
-            ((reply_key, tags))
-        )) >>
-        (MessagePayload::DatabaseLookup(DatabaseLookup {
+fn database_lookup(i: &[u8]) -> IResult<&[u8], MessagePayload> {
+    let (i, (key, from, flags)) = tuple((hash, hash, database_lookup_flags))(i)?;
+    let (i, (reply_tid, excluded_peers, reply_enc)) = tuple((
+        cond(flags.delivery, tunnel_id),
+        length_count(be_u16, hash),
+        cond(
+            flags.encryption,
+            pair(session_key, length_count(be_u8, session_tag)),
+        ),
+    ))(i)?;
+    Ok((
+        i,
+        MessagePayload::DatabaseLookup(DatabaseLookup {
             key,
             from,
             lookup_type: flags.lookup_type,
             reply_tid,
             excluded_peers,
             reply_enc,
-        }))
-    )
-);
+        }),
+    ))
+}
 
 fn gen_database_lookup<'a>(
     input: (&'a mut [u8], usize),
@@ -376,15 +381,14 @@ fn gen_database_lookup<'a>(
 
 // DatabaseSearchReply
 
-named!(
-    database_search_reply<MessagePayload>,
-    do_parse!(
-        key: hash
-            >> peers: length_count!(be_u8, hash)
-            >> from: hash
-            >> (MessagePayload::DatabaseSearchReply(DatabaseSearchReply { key, peers, from }))
-    )
-);
+fn database_search_reply(i: &[u8]) -> IResult<&[u8], MessagePayload> {
+    map(
+        tuple((hash, length_count(be_u8, hash), hash)),
+        |(key, peers, from)| {
+            MessagePayload::DatabaseSearchReply(DatabaseSearchReply { key, peers, from })
+        },
+    )(i)
+}
 
 fn gen_database_search_reply<'a>(
     input: (&'a mut [u8], usize),
@@ -401,14 +405,11 @@ fn gen_database_search_reply<'a>(
 
 // DeliveryStatus
 
-named!(
-    delivery_status<MessagePayload>,
-    do_parse!(
-        msg_id: be_u32
-            >> time_stamp: i2p_date
-            >> (MessagePayload::DeliveryStatus(DeliveryStatus { msg_id, time_stamp }))
-    )
-);
+fn delivery_status(i: &[u8]) -> IResult<&[u8], MessagePayload> {
+    map(pair(be_u32, i2p_date), |(msg_id, time_stamp)| {
+        MessagePayload::DeliveryStatus(DeliveryStatus { msg_id, time_stamp })
+    })(i)
+}
 
 fn gen_delivery_status<'a>(
     input: (&'a mut [u8], usize),
@@ -422,32 +423,34 @@ fn gen_delivery_status<'a>(
 
 // Garlic
 
-#[cfg_attr(rustfmt, rustfmt_skip)]
-named!(
-    garlic_clove_delivery_instructions<GarlicCloveDeliveryInstructions>,
-    do_parse!(
-        flags: bits!(do_parse!(
-            encrypted:     take_bits!(u8, 1) >>
-            delivery_type: take_bits!(u8, 2) >>
-            delay_set:     take_bits!(u8, 1) >>
-                           take_bits!(u8, 4) >>
+fn garlic_clove_delivery_instructions(i: &[u8]) -> IResult<&[u8], GarlicCloveDeliveryInstructions> {
+    let (i, (encrypted, delivery_type, delay_set)) = map(
+        bits(terminated(
+            tuple((take_bits(1u8), take_bits(2u8), take_bits(1u8))),
+            take_bits::<_, u8, _, NomError<_>>(4u8),
+        )),
+        |(encrypted, delivery_type, delay_set): (u8, u8, u8)| {
             (encrypted > 0, delivery_type, delay_set > 0)
-        )) >>
-        session_key: cond!(flags.0, call!(session_key)) >>
-        to_hash:     cond!(flags.1 != 0, call!(hash)) >>
-        tid:         cond!(flags.1 == 3, call!(tunnel_id)) >>
-        delay:       cond!(flags.2, call!(be_u32)) >>
-        (GarlicCloveDeliveryInstructions {
-            encrypted: flags.0,
-            delivery_type: flags.1,
-            delay_set: flags.2,
+        },
+    )(i)?;
+    map(
+        tuple((
+            cond(encrypted, session_key),
+            cond(delivery_type != 0, hash),
+            cond(delivery_type == 3, tunnel_id),
+            cond(delay_set, be_u32),
+        )),
+        move |(session_key, to_hash, tid, delay)| GarlicCloveDeliveryInstructions {
+            encrypted,
+            delivery_type,
+            delay_set,
             session_key,
             to_hash,
             tid,
             delay,
-        })
-    )
-);
+        },
+    )(i)
+}
 
 fn gen_garlic_clove_delivery_instructions<'a>(
     input: (&'a mut [u8], usize),
@@ -484,24 +487,24 @@ fn gen_garlic_clove_delivery_instructions<'a>(
     )
 }
 
-#[cfg_attr(rustfmt, rustfmt_skip)]
-named!(
-    garlic_clove<GarlicClove>,
-    do_parse!(
-        delivery_instructions: garlic_clove_delivery_instructions >>
-        msg:                   message >>
-        clove_id:              be_u32 >>
-        expiration:            i2p_date >>
-        cert:                  certificate >>
-        (GarlicClove {
+fn garlic_clove(i: &[u8]) -> IResult<&[u8], GarlicClove> {
+    map(
+        tuple((
+            garlic_clove_delivery_instructions,
+            message,
+            be_u32,
+            i2p_date,
+            certificate,
+        )),
+        |(delivery_instructions, msg, clove_id, expiration, cert)| GarlicClove {
             delivery_instructions,
             msg,
             clove_id,
             expiration,
             cert,
-        })
-    )
-);
+        },
+    )(i)
+}
 
 fn gen_garlic_clove<'a>(
     input: (&'a mut [u8], usize),
@@ -517,22 +520,24 @@ fn gen_garlic_clove<'a>(
     )
 }
 
-#[cfg_attr(rustfmt, rustfmt_skip)]
-named!(
-    garlic<MessagePayload>,
-    do_parse!(
-        cloves:     length_count!(be_u8, garlic_clove) >>
-        cert:       certificate >>
-        msg_id:     be_u32 >>
-        expiration: i2p_date >>
-        (MessagePayload::Garlic(Garlic {
-            cloves,
-            cert,
-            msg_id,
-            expiration,
-        }))
-    )
-);
+fn garlic(i: &[u8]) -> IResult<&[u8], MessagePayload> {
+    map(
+        tuple((
+            length_count(be_u8, garlic_clove),
+            certificate,
+            be_u32,
+            i2p_date,
+        )),
+        |(cloves, cert, msg_id, expiration)| {
+            MessagePayload::Garlic(Garlic {
+                cloves,
+                cert,
+                msg_id,
+                expiration,
+            })
+        },
+    )(i)
+}
 
 fn gen_garlic<'a>(
     input: (&'a mut [u8], usize),
@@ -550,14 +555,11 @@ fn gen_garlic<'a>(
 
 // TunnelData
 
-named!(
-    tunnel_data<MessagePayload>,
-    do_parse!(
-        tid: tunnel_id
-            >> data: take!(1024)
-            >> (MessagePayload::TunnelData(TunnelData::from(tid, array_ref![data, 0, 1024])))
-    )
-);
+fn tunnel_data(i: &[u8]) -> IResult<&[u8], MessagePayload> {
+    map(pair(tunnel_id, take(1024usize)), |(tid, data)| {
+        MessagePayload::TunnelData(TunnelData::from(tid, array_ref![data, 0, 1024]))
+    })(i)
+}
 
 fn gen_tunnel_data<'a>(
     input: (&'a mut [u8], usize),
@@ -568,17 +570,14 @@ fn gen_tunnel_data<'a>(
 
 // TunnelGateway
 
-named!(
-    tunnel_gateway<MessagePayload>,
-    do_parse!(
-        tid: tunnel_id
-            >> data: length_bytes!(be_u16)
-            >> (MessagePayload::TunnelGateway(TunnelGateway {
-                tid,
-                data: Vec::from(data),
-            }))
-    )
-);
+fn tunnel_gateway(i: &[u8]) -> IResult<&[u8], MessagePayload> {
+    map(pair(tunnel_id, length_data(be_u16)), |(tid, data)| {
+        MessagePayload::TunnelGateway(TunnelGateway {
+            tid,
+            data: Vec::from(data),
+        })
+    })(i)
+}
 
 fn gen_tunnel_gateway<'a>(
     input: (&'a mut [u8], usize),
@@ -589,10 +588,11 @@ fn gen_tunnel_gateway<'a>(
 
 // Data
 
-named!(
-    data<MessagePayload>,
-    do_parse!(data: length_bytes!(be_u32) >> (MessagePayload::Data(Vec::from(data))))
-);
+fn data(i: &[u8]) -> IResult<&[u8], MessagePayload> {
+    map(length_data(be_u32), |data| {
+        MessagePayload::Data(Vec::from(data))
+    })(i)
+}
 
 fn gen_data<'a>(input: (&'a mut [u8], usize), d: &[u8]) -> Result<(&'a mut [u8], usize), GenError> {
     do_gen!(input, gen_be_u32!(d.len()) >> gen_slice!(d))
@@ -601,7 +601,7 @@ fn gen_data<'a>(input: (&'a mut [u8], usize), d: &[u8]) -> Result<(&'a mut [u8],
 // TunnelBuild
 
 fn tunnel_build(input: &[u8]) -> IResult<&[u8], MessagePayload> {
-    let (i, r) = count!(input, take!(528), 8)?;
+    let (i, r) = count(take(528usize), 8)(input)?;
     let mut xs = [[0u8; 528]; 8];
     for (i, &s) in r.iter().enumerate() {
         xs[i].copy_from_slice(s);
@@ -629,7 +629,7 @@ fn gen_tunnel_build<'a>(
 // TunnelBuildReply
 
 fn tunnel_build_reply(input: &[u8]) -> IResult<&[u8], MessagePayload> {
-    let (i, r) = count!(input, take!(528), 8)?;
+    let (i, r) = count(take(528usize), 8)(input)?;
     let mut xs = [[0u8; 528]; 8];
     for (i, &s) in r.iter().enumerate() {
         xs[i].copy_from_slice(s);
@@ -657,7 +657,7 @@ fn gen_tunnel_build_reply<'a>(
 // VariableTunnelBuild
 
 fn variable_tunnel_build(input: &[u8]) -> IResult<&[u8], MessagePayload> {
-    let (i, r) = length_count!(input, be_u8, take!(528))?;
+    let (i, r) = length_count(be_u8, take(528usize))(input)?;
     Ok((
         i,
         MessagePayload::VariableTunnelBuild(
@@ -687,7 +687,7 @@ fn gen_variable_tunnel_build<'a>(
 // VariableTunnelBuildReply
 
 fn variable_tunnel_build_reply(input: &[u8]) -> IResult<&[u8], MessagePayload> {
-    let (i, r) = length_count!(input, be_u8, take!(528))?;
+    let (i, r) = length_count(be_u8, take(528usize))(input)?;
     Ok((
         i,
         MessagePayload::VariableTunnelBuildReply(
@@ -722,14 +722,6 @@ fn checksum(buf: &[u8]) -> u8 {
     Sha256::digest(&buf)[0]
 }
 
-fn validate_checksum<'a>(input: &'a [u8], cs: u8, buf: &[u8]) -> IResult<&'a [u8], ()> {
-    if cs.eq(&checksum(&buf)) {
-        Ok((input, ()))
-    } else {
-        Err(Err::Error(error_position!(input, ErrorKind::Custom(1))))
-    }
-}
-
 fn gen_checksum(
     input: (&mut [u8], usize),
     start: usize,
@@ -738,70 +730,61 @@ fn gen_checksum(
     gen_be_u8!(input, checksum(&input.0[start..end]))
 }
 
-named!(
-    header<(u8, u32, I2PDate, u16, u8)>,
-    do_parse!(
-        msg_type: be_u8
-            >> msg_id: be_u32
-            >> expiration: i2p_date
-            >> size: be_u16
-            >> cs: be_u8
-            >> ((msg_type, msg_id, expiration, size, cs))
-    )
-);
-
-named!(
-    ntcp2_header<(u8, u32, I2PDate)>,
-    do_parse!(
-        msg_type: be_u8
-            >> msg_id: be_u32
-            >> expiration: short_expiry
-            >> ((msg_type, msg_id, expiration))
-    )
-);
-
-fn payload(input: &[u8], msg_type: u8) -> IResult<&[u8], MessagePayload> {
-    switch!(input, value!(msg_type),
-        1  => call!(database_store) |
-        2  => call!(database_lookup) |
-        3  => call!(database_search_reply) |
-        10 => call!(delivery_status) |
-        11 => call!(garlic) |
-        18 => call!(tunnel_data) |
-        19 => call!(tunnel_gateway) |
-        20 => call!(data) |
-        21 => call!(tunnel_build) |
-        22 => call!(tunnel_build_reply) |
-        23 => call!(variable_tunnel_build) |
-        24 => call!(variable_tunnel_build_reply)
-    )
+fn header(i: &[u8]) -> IResult<&[u8], (u8, u32, I2PDate, u16, u8)> {
+    // (msg_type, msg_id, expiration, size, cs)
+    tuple((be_u8, be_u32, i2p_date, be_u16, be_u8))(i)
 }
 
-named!(pub message<Message>,
-    do_parse!(
-        hdr:           header >>
-        payload_bytes: peek!(take!(hdr.3)) >>
-                       call!(validate_checksum, hdr.4, payload_bytes) >>
-        payload: call!(payload, hdr.0) >>
-        (Message {
-            id: hdr.1,
-            expiration: hdr.2,
-            payload,
-        })
-    )
-);
+fn ntcp2_header(i: &[u8]) -> IResult<&[u8], (u8, u32, I2PDate)> {
+    // (msg_type, msg_id, expiration)
+    tuple((be_u8, be_u32, short_expiry))(i)
+}
 
-named!(pub ntcp2_message<Message>,
-    do_parse!(
-        hdr:     ntcp2_header >>
-        payload: call!(payload, hdr.0) >>
-        (Message {
+fn payload(msg_type: u8) -> impl Fn(&[u8]) -> IResult<&[u8], MessagePayload> {
+    move |i: &[u8]| match msg_type {
+        1 => database_store(i),
+        2 => database_lookup(i),
+        3 => database_search_reply(i),
+        10 => delivery_status(i),
+        11 => garlic(i),
+        18 => tunnel_data(i),
+        19 => tunnel_gateway(i),
+        20 => data(i),
+        21 => tunnel_build(i),
+        22 => tunnel_build_reply(i),
+        23 => variable_tunnel_build(i),
+        24 => variable_tunnel_build_reply(i),
+        _ => unimplemented!(),
+    }
+}
+
+pub fn message(i: &[u8]) -> IResult<&[u8], Message> {
+    let (i, (msg_type, id, expiration, size, cs)) = header(i)?;
+    map(
+        preceded(
+            peek(verify(take(size), move |buf| checksum(buf) == cs)),
+            payload(msg_type),
+        ),
+        move |payload| Message {
+            id,
+            expiration,
+            payload,
+        },
+    )(i)
+}
+
+pub fn ntcp2_message(i: &[u8]) -> IResult<&[u8], Message> {
+    let (i, hdr) = ntcp2_header(i)?;
+    let (i, payload) = payload(hdr.0)(i)?;
+    Ok((
+        i,
+        Message {
             id: hdr.1,
             expiration: hdr.2,
             payload,
-        })
-    )
-);
+        },
+    ))
+}
 
 fn gen_message_type<'a>(
     input: (&'a mut [u8], usize),
@@ -878,6 +861,8 @@ pub fn gen_ntcp2_message<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use nom::error::Error as NomError;
 
     use std::time::UNIX_EPOCH;
 
@@ -1021,14 +1006,14 @@ mod tests {
         // Flag bits 7 and 6 set
         eval!(
             0xc0,
-            Err(nom::Err::Error(nom::Context::Code(
-                &vec![
+            Err(nom::Err::Error(NomError {
+                input: &vec![
                     0xc0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                     0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
                 ][..],
-                nom::ErrorKind::Verify
-            )))
+                code: nom::error::ErrorKind::Verify
+            }))
         );
     }
 
@@ -1102,16 +1087,6 @@ mod tests {
                 lookup_type: DatabaseLookupType::Exploratory,
             },
             [15]
-        );
-    }
-
-    #[test]
-    fn test_validate_checksum() {
-        let a = b"payloadspam";
-        assert_eq!(validate_checksum(&a[..], 0x23, &a[..7]), Ok((&a[..], ())));
-        assert_eq!(
-            validate_checksum(&a[..], 0x23, &a[..8]),
-            Err(Err::Error(error_position!(&a[..], ErrorKind::Custom(1))))
         );
     }
 
