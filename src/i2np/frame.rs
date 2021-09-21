@@ -8,7 +8,7 @@ use nom::{
     bytes::streaming::take,
     combinator::{cond, map, map_opt, peek, verify},
     error::{Error as NomError, ErrorKind},
-    multi::{length_count, length_data},
+    multi::{count, length_count, length_data},
     number::streaming::{be_u16, be_u32, be_u8},
     sequence::{pair, preceded, terminated, tuple},
 };
@@ -35,7 +35,7 @@ use crate::data::{
 //
 
 fn iv(input: &[u8]) -> IResult<&[u8], [u8; 16]> {
-    let (i, iv) = take!(input, 16)?;
+    let (i, iv) = take(16usize)(input)?;
     let mut x = [0u8; 16];
     x.copy_from_slice(iv);
     Ok((i, x))
@@ -179,7 +179,7 @@ pub fn gen_build_response_record<'a>(
 // DatabaseStore
 
 fn compressed_ri(input: &[u8]) -> IResult<&[u8], RouterInfo> {
-    let (i, payload) = do_parse!(input, size: be_u16 >> payload: take!(size) >> (payload))?;
+    let (i, payload) = length_data(be_u16)(input)?;
     let mut buf = Vec::new();
     let mut d = GzDecoder::new(payload);
     match d.read_to_end(&mut buf) {
@@ -601,7 +601,7 @@ fn gen_data<'a>(input: (&'a mut [u8], usize), d: &[u8]) -> Result<(&'a mut [u8],
 // TunnelBuild
 
 fn tunnel_build(input: &[u8]) -> IResult<&[u8], MessagePayload> {
-    let (i, r) = count!(input, take!(528), 8)?;
+    let (i, r) = count(take(528usize), 8)(input)?;
     let mut xs = [[0u8; 528]; 8];
     for (i, &s) in r.iter().enumerate() {
         xs[i].copy_from_slice(s);
@@ -629,7 +629,7 @@ fn gen_tunnel_build<'a>(
 // TunnelBuildReply
 
 fn tunnel_build_reply(input: &[u8]) -> IResult<&[u8], MessagePayload> {
-    let (i, r) = count!(input, take!(528), 8)?;
+    let (i, r) = count(take(528usize), 8)(input)?;
     let mut xs = [[0u8; 528]; 8];
     for (i, &s) in r.iter().enumerate() {
         xs[i].copy_from_slice(s);
@@ -657,7 +657,7 @@ fn gen_tunnel_build_reply<'a>(
 // VariableTunnelBuild
 
 fn variable_tunnel_build(input: &[u8]) -> IResult<&[u8], MessagePayload> {
-    let (i, r) = length_count!(input, be_u8, take!(528))?;
+    let (i, r) = length_count(be_u8, take(528usize))(input)?;
     Ok((
         i,
         MessagePayload::VariableTunnelBuild(
@@ -687,7 +687,7 @@ fn gen_variable_tunnel_build<'a>(
 // VariableTunnelBuildReply
 
 fn variable_tunnel_build_reply(input: &[u8]) -> IResult<&[u8], MessagePayload> {
-    let (i, r) = length_count!(input, be_u8, take!(528))?;
+    let (i, r) = length_count(be_u8, take(528usize))(input)?;
     Ok((
         i,
         MessagePayload::VariableTunnelBuildReply(
@@ -741,21 +741,20 @@ fn ntcp2_header(i: &[u8]) -> IResult<&[u8], (u8, u32, I2PDate)> {
 }
 
 fn payload(msg_type: u8) -> impl Fn(&[u8]) -> IResult<&[u8], MessagePayload> {
-    move |input: &[u8]| {
-        switch!(input, value!(msg_type),
-            1  => call!(database_store) |
-            2  => call!(database_lookup) |
-            3  => call!(database_search_reply) |
-            10 => call!(delivery_status) |
-            11 => call!(garlic) |
-            18 => call!(tunnel_data) |
-            19 => call!(tunnel_gateway) |
-            20 => call!(data) |
-            21 => call!(tunnel_build) |
-            22 => call!(tunnel_build_reply) |
-            23 => call!(variable_tunnel_build) |
-            24 => call!(variable_tunnel_build_reply)
-        )
+    move |i: &[u8]| match msg_type {
+        1 => database_store(i),
+        2 => database_lookup(i),
+        3 => database_search_reply(i),
+        10 => delivery_status(i),
+        11 => garlic(i),
+        18 => tunnel_data(i),
+        19 => tunnel_gateway(i),
+        20 => data(i),
+        21 => tunnel_build(i),
+        22 => tunnel_build_reply(i),
+        23 => variable_tunnel_build(i),
+        24 => variable_tunnel_build_reply(i),
+        _ => unimplemented!(),
     }
 }
 

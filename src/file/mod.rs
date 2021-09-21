@@ -1,4 +1,4 @@
-use nom::{self, take_until};
+use nom::bytes::streaming::take_until;
 use std::collections::HashMap;
 
 use crate::crypto::{self, OfflineSigningPublicKey, SigType, Signature};
@@ -54,7 +54,7 @@ impl Su3File {
             return Err(e);
         }
 
-        let res: Result<_, nom::Err<()>> = take_until!(input, &SU3_MAGIC[..]);
+        let res: Result<_, nom::Err<()>> = take_until(&SU3_MAGIC[..])(input);
         let (data, _) = res?;
         Su3File::from_bytes(data, signers)
     }
