@@ -1,11 +1,13 @@
 use cookie_factory::*;
-use nom::*;
 use nom::{
     bits::{bits, streaming::take as take_bits},
-    combinator::{cond, map},
+    bytes::streaming::{tag, take, take_until},
+    combinator::{complete, cond, map, peek, verify},
     error::{Error as NomError, ErrorKind},
+    multi::{length_data, many0},
     number::streaming::{be_u16, be_u32},
-    sequence::{pair, tuple},
+    sequence::{pair, preceded, terminated, tuple},
+    Err, IResult,
 };
 use sha2::{Digest, Sha256};
 use std::iter;
@@ -164,20 +166,20 @@ fn gen_follow_on_frag_di<'a>(
 
 // TunnelMessageDeliveryInstructions
 
-named!(
-    tmdi<TunnelMessageDeliveryInstructions>,
-    switch!(
-        peek!(bits!(take_bits!(1u8))),
-        0 => do_parse!(
-            di: first_frag_di >>
-            (TunnelMessageDeliveryInstructions::First(di))
-        ) |
-        1 => do_parse!(
-            di: follow_on_frag_di >>
-            (TunnelMessageDeliveryInstructions::FollowOn(di))
-        )
-    )
-);
+fn tmdi(i: &[u8]) -> IResult<&[u8], TunnelMessageDeliveryInstructions> {
+    let (i, first) = peek(map(
+        bits::<_, _, NomError<(&[u8], usize)>, _, _>(take_bits(1u8)),
+        |b: u8| b == 0,
+    ))(i)?;
+    if first {
+        map(first_frag_di, TunnelMessageDeliveryInstructions::First)(i)
+    } else {
+        map(
+            follow_on_frag_di,
+            TunnelMessageDeliveryInstructions::FollowOn,
+        )(i)
+    }
+}
 
 fn gen_tmdi<'a>(
     input: (&'a mut [u8], usize),
@@ -191,19 +193,22 @@ fn gen_tmdi<'a>(
 
 // TunnelMessage
 
-named!(
-    tunnel_message<TunnelMessage>,
-    do_parse!(
-        iv: take!(16)
-            >> checksum: be_u32
-            >> padding: take_until!(&b"\x00"[..])
-            >> take!(1)
-            >> msg_bytes: peek!(take!(1008 - 4 - padding.len() - 1))
-            >> call!(validate_checksum, checksum, msg_bytes, iv)
-            >> msg: many0!(complete!(pair!(tmdi, length_data!(be_u16))))
-            >> (TunnelMessage(msg))
-    )
-);
+fn tunnel_message(i: &[u8]) -> IResult<&[u8], TunnelMessage> {
+    let (i, (iv, cs, padding)) = terminated(
+        tuple((take(16usize), be_u32, take_until(&b"\x00"[..]))),
+        tag(&[0]),
+    )(i)?;
+
+    preceded(
+        verify(peek(take(1008 - 4 - padding.len() - 1)), move |msg_bytes| {
+            checksum(msg_bytes, iv) == cs
+        }),
+        map(
+            many0(complete(pair(tmdi, length_data(be_u16)))),
+            TunnelMessage,
+        ),
+    )(i)
+}
 
 fn gen_tmdi_fragment_pair<'a>(
     input: (&'a mut [u8], usize),
