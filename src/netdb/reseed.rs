@@ -103,7 +103,15 @@ fn reseed_from_host(
     (host, path): ((&'static str, u16), &'static str),
 ) -> IoFuture<Su3File> {
     debug!("Reseeding from {}:{}", host.0, host.1);
-    let addr = host.to_socket_addrs().unwrap().next().unwrap();
+    let addr = match host.to_socket_addrs().ok().and_then(|mut iter| iter.next()) {
+        None => {
+            return Box::new(future::err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("Failed to resolve {}", host.0),
+            )))
+        }
+        Some(a) => a,
+    };
 
     let socket = TcpStream::connect(&addr);
     let cx = tokio_tls::TlsConnector::from(cx.clone());
