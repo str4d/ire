@@ -86,7 +86,7 @@ jobs:
           version: '0.13.3'
           args: --release --timeout 180 --out Xml
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v2.1.0
+        uses: codecov/codecov-action@v3.1.0
 
   doc-links:
     name: Nightly lint
