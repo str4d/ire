@@ -1,4 +1,14 @@
-use cookie_factory::*;
+use std::io::Write;
+
+use cookie_factory::{
+    bytes::{be_u16 as gen_be_u16, be_u32 as gen_be_u32, be_u8 as gen_be_u8},
+    combinator::back_to_the_buffer,
+    combinator::{skip as gen_skip, slice as gen_slice},
+    gen, gen_simple,
+    multi::all as gen_all,
+    sequence::{pair as gen_pair, tuple as gen_tuple},
+    Seek, SerializeFn, WriteContext,
+};
 use nom::{
     bytes::streaming::{tag, take},
     combinator::{map, peek, success},
@@ -7,10 +17,14 @@ use nom::{
     sequence::{pair, terminated},
     IResult,
 };
+use rand::{rngs::OsRng, Rng};
 
 use super::Frame;
-use crate::i2np::frame::{gen_message, message};
 use crate::i2np::Message;
+use crate::{
+    i2np::frame::{gen_message, message},
+    util::serialize,
+};
 
 //
 // Utils
@@ -24,13 +38,9 @@ pub fn padding(content_len: usize) -> impl Fn(&[u8]) -> IResult<&[u8], &[u8]> {
     move |i: &[u8]| take(padding_len(content_len))(i)
 }
 
-pub fn gen_padding(
-    input: (&mut [u8], usize),
-    content_len: usize,
-) -> Result<(&mut [u8], usize), GenError> {
+pub fn gen_padding<W: Write>(content_len: usize) -> impl SerializeFn<W> {
     let pad_len = padding_len(content_len);
-    // TODO: Fill this with random padding
-    gen_skip!(input, pad_len)
+    gen_all((0..pad_len).map(|_| OsRng.gen()).map(gen_be_u8))
 }
 
 //
@@ -65,13 +75,9 @@ fn get_adler(input: &[u8]) -> IResult<&[u8], [u8; 4]> {
     Ok((input, adler(data)))
 }
 
-fn gen_adler(
-    input: (&mut [u8], usize),
-    start: usize,
-    end: usize,
-) -> Result<(&mut [u8], usize), GenError> {
-    let cs = adler(&input.0[start..end]);
-    gen_slice!(input, cs)
+fn gen_adler<W: Write>(content: &[u8]) -> impl SerializeFn<W> {
+    let cs = adler(content);
+    gen_slice(cs)
 }
 
 // 0      2         size+2         12      size+6
@@ -80,19 +86,23 @@ fn gen_adler(
 // +------+------------+---------+-------+
 //  short  size octets     octets    octets
 
-fn gen_standard_frame<'a>(
-    input: (&'a mut [u8], usize),
-    msg: &Message,
-) -> Result<(&'a mut [u8], usize), GenError> {
-    #[cfg_attr(rustfmt, rustfmt_skip)]
-    do_gen!(
-        input,
-        start:     gen_skip!(2) >>
-        msg_start: gen_message(msg) >>
-        msg_end:   gen_at_offset!(start, gen_be_u16!(msg_end - msg_start)) >>
-                   gen_padding(msg_end - msg_start + 6) >>
-        end:       gen_adler(start, end)
-    )
+fn gen_standard_frame<'a, W: 'a + Seek>(msg: &'a Message) -> impl SerializeFn<W> + 'a {
+    move |w: WriteContext<W>| {
+        let content = serialize(back_to_the_buffer(
+            2,
+            move |buf| {
+                let data = serialize(gen_message(msg));
+                let data_len = data.len();
+                gen_simple(
+                    gen_tuple((gen_slice(&data), gen_padding(data_len + 6))),
+                    buf,
+                )
+                .map(|w| (w, data_len))
+            },
+            move |buf, data_len| gen_simple(gen_be_u16(data_len as u16), buf),
+        ));
+        gen_simple(gen_pair(gen_slice(&content), gen_adler(&content)), w)
+    }
 }
 
 // 0     2           6         12      16
@@ -101,18 +111,15 @@ fn gen_standard_frame<'a>(
 // +-----+-----------+---------+-------+
 //  short    long      octets    octets
 
-fn gen_timestamp_frame(
-    input: (&mut [u8], usize),
-    timestamp: u32,
-) -> Result<(&mut [u8], usize), GenError> {
-    #[cfg_attr(rustfmt, rustfmt_skip)]
-    do_gen!(
-        input,
-        start: gen_be_u16!(0) >>
-               gen_be_u32!(timestamp) >>
-               gen_padding(10) >>
-        end:   gen_adler(start, end)
-    )
+fn gen_timestamp_frame<W: Write>(timestamp: u32) -> impl SerializeFn<W> {
+    move |w: WriteContext<W>| {
+        let data = serialize(gen_tuple((
+            gen_be_u16(0),
+            gen_be_u32(timestamp),
+            gen_padding(10),
+        )));
+        gen_simple(gen_pair(gen_slice(&data), gen_adler(&data)), w)
+    }
 }
 
 pub fn frame(i: &[u8]) -> IResult<&[u8], Frame> {
@@ -132,13 +139,10 @@ pub fn frame(i: &[u8]) -> IResult<&[u8], Frame> {
     }
 }
 
-pub fn gen_frame<'a>(
-    input: (&'a mut [u8], usize),
-    frame: &Frame,
-) -> Result<(&'a mut [u8], usize), GenError> {
-    match *frame {
-        Frame::Standard(ref msg) => gen_standard_frame(input, &msg),
-        Frame::TimeSync(ts) => gen_timestamp_frame(input, ts),
+pub fn gen_frame<'a, W: 'a + Seek>(frame: &'a Frame) -> impl SerializeFn<W> + 'a {
+    move |w: WriteContext<W>| match frame {
+        Frame::Standard(msg) => gen_standard_frame(msg)(w),
+        Frame::TimeSync(ts) => gen_timestamp_frame(*ts)(w),
     }
 }
 

@@ -3,17 +3,17 @@
 //! [NTCP specification](https://geti2p.net/en/docs/transport/ntcp)
 
 use bytes::BytesMut;
-use cookie_factory::GenError;
+use cookie_factory::{gen, GenError};
 use futures::{
     stream::{SplitSink, SplitStream},
     sync::mpsc,
     try_ready, Async, AsyncSink, Future, Poll, Sink, StartSend, Stream,
 };
 use nom::{Err, Offset};
-use std::iter::repeat;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
+use std::{io::Cursor, iter::repeat};
 use tokio::{
     codec::{Decoder, Encoder, Framed},
     io::{self, AsyncRead, AsyncWrite},
@@ -114,8 +114,9 @@ impl Encoder for Codec {
         let start = buf.len();
         buf.extend(repeat(0).take(NTCP_MTU));
 
-        match frame::gen_frame((buf, start), &frame).map(|tup| tup.1) {
+        match gen(frame::gen_frame(&frame), Cursor::new(&mut buf[start..])).map(|tup| tup.1) {
             Ok(sz) => {
+                let sz = sz as usize;
                 buf.truncate(sz);
                 // Encrypt message in-place
                 match self.aes.encrypt_blocks(&mut buf[start..]) {
@@ -132,11 +133,13 @@ impl Encoder for Codec {
                     format!("message ({}) larger than MTU ({})", sz - start, NTCP_MTU),
                 )),
                 GenError::InvalidOffset
+                | GenError::BufferTooBig(_)
                 | GenError::CustomError(_)
                 | GenError::NotYetImplemented => Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     "could not generate",
                 )),
+                GenError::IoError(e) => Err(e),
             },
         }
     }

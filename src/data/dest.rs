@@ -31,7 +31,7 @@ impl Destination {
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
-        serialize(|input| frame::gen_destination(input, self))
+        serialize(frame::gen_destination(self))
     }
 
     pub fn hash(&self) -> Hash {
@@ -111,7 +111,7 @@ impl LeaseSet {
     }
 
     pub fn sign(&mut self, sk: &SigningPrivateKey) -> Result<(), crypto::Error> {
-        let sig_bytes = serialize(|input| frame::gen_lease_set_minus_sig(input, self));
+        let sig_bytes = serialize(frame::gen_lease_set_minus_sig(self));
         self.signature = Some(sk.sign(&sig_bytes)?);
         Ok(())
     }
@@ -119,7 +119,7 @@ impl LeaseSet {
     pub fn verify(&self) -> Result<(), crypto::Error> {
         match self.signature.as_ref() {
             Some(s) => {
-                let sig_bytes = serialize(|input| frame::gen_lease_set_minus_sig(input, self));
+                let sig_bytes = serialize(frame::gen_lease_set_minus_sig(self));
                 self.dest.signing_key.verify(&sig_bytes, s)
             }
             None => Err(crypto::Error::NoSignature),

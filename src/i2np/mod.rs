@@ -8,6 +8,7 @@
 //!
 //! [I2NP specification](https://geti2p.net/spec/i2np)
 
+use cookie_factory::gen;
 use rand::{rngs::OsRng, thread_rng, Rng};
 use std::fmt;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -118,7 +119,7 @@ impl BuildRequestRecord {
 
     pub fn encrypt(&self, encryptor: &elgamal::Encryptor) -> [u8; 528] {
         let mut pt = [0; 222];
-        frame::gen_build_request_record((&mut pt, 0), self).unwrap();
+        gen(frame::gen_build_request_record(self), &mut pt[..]).unwrap();
 
         let mut ct = [0; 528];
         ct[0..16].copy_from_slice(&self.our_ident.0[0..16]);
@@ -462,11 +463,11 @@ impl Message {
     }
 
     pub fn size(&self) -> usize {
-        serialize(|input| frame::gen_message(input, self)).len()
+        serialize(frame::gen_message(self)).len()
     }
 
     pub fn ntcp2_size(&self) -> usize {
-        serialize(|input| frame::gen_ntcp2_message(input, self)).len()
+        serialize(frame::gen_ntcp2_message(self)).len()
     }
 }
 

@@ -1,7 +1,8 @@
 use bytes::BytesMut;
-use cookie_factory::GenError;
+use cookie_factory::{gen, GenError};
 use futures::{sink, stream::StreamFuture, try_ready, Async, Future, Poll, Sink, Stream};
 use nom::{Err, Offset};
+use std::io::Cursor;
 use std::iter::repeat;
 use std::ops::AddAssign;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -192,17 +193,26 @@ impl Encoder for InboundHandshakeCodec {
                 self.aes = Some(Aes256::new(&session_key, &self.iv_enc, &self.iv_dec));
                 // Serialise inner part of SessionCreated
                 let mut tmp = [0u8; 48];
-                match frame::gen_session_created_dec((&mut tmp, 0), &sc).map(|tup| tup.1) {
+                match gen(
+                    frame::gen_session_created_dec(&sc),
+                    Cursor::new(&mut tmp[..]),
+                )
+                .map(|tup| tup.1)
+                {
                     Ok(inner_sz) => {
+                        let inner_sz = inner_sz as usize;
                         // Encrypt message in-place
                         match self.aes.as_mut().unwrap().encrypt_blocks(&mut tmp) {
                             Some(end) if end == inner_sz => {
                                 // Serialise outer SessionCreated
-                                match frame::gen_session_created_enc((buf, start), &sc.dh_y, &tmp)
-                                    .map(|tup| tup.1)
+                                match gen(
+                                    frame::gen_session_created_enc(&sc.dh_y, &tmp),
+                                    &mut buf[start..],
+                                )
+                                .map(|tup| tup.1)
                                 {
                                     Ok(sz) => {
-                                        buf.truncate(sz);
+                                        buf.truncate(sz as usize);
                                         Ok(())
                                     }
                                     Err(e) => Err(e),
@@ -220,8 +230,9 @@ impl Encoder for InboundHandshakeCodec {
                 }
             }
             (HandshakeState::SessionConfirmB, HandshakeFrame::SessionConfirmB(ref scb)) => {
-                match frame::gen_session_confirm_b((buf, start), &scb).map(|tup| tup.1) {
+                match gen(frame::gen_session_confirm_b(&scb), &mut buf[start..]).map(|tup| tup.1) {
                     Ok(sz) => {
+                        let sz = sz as usize;
                         buf.truncate(sz);
                         // Encrypt message in-place
                         match self.aes.as_mut().unwrap().encrypt_blocks(&mut buf[start..]) {
@@ -261,11 +272,13 @@ impl Encoder for InboundHandshakeCodec {
                     format!("message ({}) larger than MTU ({})", sz - start, NTCP_MTU),
                 )),
                 GenError::InvalidOffset
+                | GenError::BufferTooBig(_)
                 | GenError::CustomError(_)
                 | GenError::NotYetImplemented => Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     "could not generate",
                 )),
+                GenError::IoError(e) => Err(e),
             },
         }
     }
@@ -429,17 +442,23 @@ impl Encoder for OutboundHandshakeCodec {
 
         let res = match (self.state, frame) {
             (HandshakeState::SessionRequest, HandshakeFrame::SessionRequest(ref sr)) => {
-                match frame::gen_session_request((buf, start), &sr).map(|tup| tup.1) {
+                match gen(frame::gen_session_request(&sr), &mut buf[start..]).map(|tup| tup.1) {
                     Ok(sz) => {
-                        buf.truncate(sz);
+                        buf.truncate(sz as usize);
                         Ok(())
                     }
                     Err(e) => Err(e),
                 }
             }
             (HandshakeState::SessionConfirmA, HandshakeFrame::SessionConfirmA(ref sca)) => {
-                match frame::gen_session_confirm_a((buf, start), &sca).map(|tup| tup.1) {
+                match gen(
+                    frame::gen_session_confirm_a(&sca),
+                    Cursor::new(&mut buf[start..]),
+                )
+                .map(|tup| tup.1)
+                {
                     Ok(sz) => {
+                        let sz = sz as usize;
                         buf.truncate(sz);
                         // Encrypt message in-place
                         match self.aes.as_mut().unwrap().encrypt_blocks(&mut buf[start..]) {
@@ -479,11 +498,13 @@ impl Encoder for OutboundHandshakeCodec {
                     format!("message ({}) larger than MTU ({})", sz - start, NTCP_MTU),
                 )),
                 GenError::InvalidOffset
+                | GenError::BufferTooBig(_)
                 | GenError::CustomError(_)
                 | GenError::NotYetImplemented => Err(io::Error::new(
                     io::ErrorKind::InvalidData,
                     "could not generate",
                 )),
+                GenError::IoError(e) => Err(e),
             },
         }
     }
@@ -499,16 +520,13 @@ fn gen_session_confirm_sig_msg(state: &SharedHandshakeState, own_ri: bool) -> Ve
     } else {
         &state.ri_remote.as_ref().unwrap()
     };
-    serialize(|input| {
-        frame::gen_session_confirm_sig_msg(
-            input,
-            &state.dh_x,
-            &state.dh_y,
-            ri,
-            state.ts_a,
-            state.ts_b,
-        )
-    })
+    serialize(frame::gen_session_confirm_sig_msg(
+        &state.dh_x,
+        &state.dh_y,
+        ri,
+        state.ts_a,
+        state.ts_b,
+    ))
 }
 
 struct SharedHandshakeState {

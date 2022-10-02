@@ -1,4 +1,11 @@
-use cookie_factory::*;
+use cookie_factory::{
+    bytes::{be_u16 as gen_be_u16, be_u32 as gen_be_u32, be_u8 as gen_be_u8},
+    combinator::{back_to_the_buffer, cond as gen_cond, slice as gen_slice},
+    gen, gen_simple,
+    multi::many_ref as gen_many_ref,
+    sequence::{pair as gen_pair, tuple as gen_tuple},
+    Seek, SerializeFn, WriteContext,
+};
 use nom::{
     bits::{bits, streaming::take as take_bits},
     bytes::streaming::{tag, take, take_until},
@@ -10,7 +17,7 @@ use nom::{
     Err, IResult,
 };
 use sha2::{Digest, Sha256};
-use std::iter;
+use std::{io::Write, iter};
 
 use super::{
     FirstFragmentDeliveryInstructions, FollowOnFragmentDeliveryInstructions, TunnelMessage,
@@ -37,23 +44,15 @@ fn validate_checksum<'a>(input: &'a [u8], cs: u32, buf: &[u8], iv: &[u8]) -> IRe
     }
 }
 
-fn gen_checksum<'a>(
-    input: (&'a mut [u8], usize),
-    start: usize,
-    end: usize,
-    iv: &[u8],
-) -> Result<(&'a mut [u8], usize), GenError> {
-    gen_be_u32!(input, checksum(&input.0[start..end], iv))
+fn gen_checksum<'a, W: 'a + Write>(contents: &[u8], iv: &[u8]) -> impl SerializeFn<W> + 'a {
+    gen_be_u32(checksum(contents, iv))
 }
 
 // Padding
 
-fn gen_nonzero_padding(
-    input: (&mut [u8], usize),
-    length: usize,
-) -> Result<(&mut [u8], usize), GenError> {
+fn gen_nonzero_padding<'a, W: 'a + Write>(length: usize) -> impl SerializeFn<W> + 'a {
     // TODO: real non-zero padding
-    do_gen!(input, gen_many!(iter::repeat(1).take(length), set_be_u8))
+    gen_many_ref(iter::repeat(1).take(length), gen_be_u8)
 }
 
 // FirstFragmentDeliveryInstructions
@@ -94,10 +93,9 @@ fn first_frag_di(i: &[u8]) -> IResult<&[u8], FirstFragmentDeliveryInstructions> 
     ))
 }
 
-fn gen_first_frag_di<'a>(
-    input: (&'a mut [u8], usize),
-    di: &FirstFragmentDeliveryInstructions,
-) -> Result<(&'a mut [u8], usize), GenError> {
+fn gen_first_frag_di<'a, W: 'a + Write>(
+    di: &'a FirstFragmentDeliveryInstructions,
+) -> impl SerializeFn<W> + 'a {
     let mut x = 0;
     x |= (match di.delivery_type {
         TunnelMessageDeliveryType::Local => DELIVERY_TYPE_LOCAL,
@@ -108,24 +106,22 @@ fn gen_first_frag_di<'a>(
     if di.msg_id.is_some() {
         x |= 0b1000;
     }
-    match &di.delivery_type {
-        TunnelMessageDeliveryType::Local => do_gen!(
-            input,
-            gen_be_u8!(x) >> gen_cond!(di.msg_id.is_some(), gen_be_u32!(di.msg_id.unwrap()))
-        ),
-        TunnelMessageDeliveryType::Tunnel(tid, to) => do_gen!(
-            input,
-            gen_be_u8!(x)
-                >> gen_tunnel_id(&tid)
-                >> gen_hash(&to)
-                >> gen_cond!(di.msg_id.is_some(), gen_be_u32!(di.msg_id.unwrap()))
-        ),
-        TunnelMessageDeliveryType::Router(to) => do_gen!(
-            input,
-            gen_be_u8!(x)
-                >> gen_hash(&to)
-                >> gen_cond!(di.msg_id.is_some(), gen_be_u32!(di.msg_id.unwrap()))
-        ),
+    move |w: WriteContext<W>| match &di.delivery_type {
+        TunnelMessageDeliveryType::Local => gen_tuple((
+            gen_be_u8(x),
+            gen_cond(di.msg_id.is_some(), gen_be_u32(di.msg_id.unwrap())),
+        ))(w),
+        TunnelMessageDeliveryType::Tunnel(tid, to) => gen_tuple((
+            gen_be_u8(x),
+            gen_tunnel_id(&tid),
+            gen_hash(&to),
+            gen_cond(di.msg_id.is_some(), gen_be_u32(di.msg_id.unwrap())),
+        ))(w),
+        TunnelMessageDeliveryType::Router(to) => gen_tuple((
+            gen_be_u8(x),
+            gen_hash(&to),
+            gen_cond(di.msg_id.is_some(), gen_be_u32(di.msg_id.unwrap())),
+        ))(w),
     }
 }
 
@@ -152,16 +148,15 @@ fn follow_on_frag_di(i: &[u8]) -> IResult<&[u8], FollowOnFragmentDeliveryInstruc
     )(i)
 }
 
-fn gen_follow_on_frag_di<'a>(
-    input: (&'a mut [u8], usize),
-    di: &FollowOnFragmentDeliveryInstructions,
-) -> Result<(&'a mut [u8], usize), GenError> {
+fn gen_follow_on_frag_di<'a, W: 'a + Write>(
+    di: &'a FollowOnFragmentDeliveryInstructions,
+) -> impl SerializeFn<W> + 'a {
     let mut x = 0b10000000;
     x |= (di.fragment_number << 1) & 0b01111110;
     if di.last_fragment {
         x |= 0b1;
     }
-    do_gen!(input, gen_be_u8!(x) >> gen_be_u32!(di.msg_id))
+    gen_pair(gen_be_u8(x), gen_be_u32(di.msg_id))
 }
 
 // TunnelMessageDeliveryInstructions
@@ -181,13 +176,12 @@ fn tmdi(i: &[u8]) -> IResult<&[u8], TunnelMessageDeliveryInstructions> {
     }
 }
 
-fn gen_tmdi<'a>(
-    input: (&'a mut [u8], usize),
-    tmdi: &TunnelMessageDeliveryInstructions,
-) -> Result<(&'a mut [u8], usize), GenError> {
-    match tmdi {
-        TunnelMessageDeliveryInstructions::First(di) => gen_first_frag_di(input, di),
-        TunnelMessageDeliveryInstructions::FollowOn(di) => gen_follow_on_frag_di(input, di),
+fn gen_tmdi<'a, W: 'a + Write>(
+    tmdi: &'a TunnelMessageDeliveryInstructions,
+) -> impl SerializeFn<W> + 'a {
+    move |w: WriteContext<W>| match tmdi {
+        TunnelMessageDeliveryInstructions::First(di) => gen_first_frag_di(di)(w),
+        TunnelMessageDeliveryInstructions::FollowOn(di) => gen_follow_on_frag_di(di)(w),
     }
 }
 
@@ -210,41 +204,51 @@ fn tunnel_message(i: &[u8]) -> IResult<&[u8], TunnelMessage> {
     )(i)
 }
 
-fn gen_tmdi_fragment_pair<'a>(
-    input: (&'a mut [u8], usize),
-    (tmdi, frag): &(TunnelMessageDeliveryInstructions, &[u8]),
-) -> Result<(&'a mut [u8], usize), GenError> {
-    do_gen!(
-        input,
-        gen_tmdi(tmdi) >> gen_be_u16!(frag.len() as u16) >> gen_slice!(frag)
+fn gen_tmdi_fragment_pair<'a, W: 'a + Write>(
+    (tmdi, frag): &'a (TunnelMessageDeliveryInstructions, &[u8]),
+) -> impl SerializeFn<W> + 'a {
+    gen_pair(
+        gen_tmdi(tmdi),
+        gen_pair(gen_be_u16(frag.len() as u16), gen_slice(frag)),
     )
 }
 
-fn gen_tunnel_message<'a>(
-    input: (&'a mut [u8], usize),
-    iv: &[u8],
-    tm: &TunnelMessage,
-) -> Result<(&'a mut [u8], usize), GenError> {
-    do_gen!(
-        input,
-        gen_slice!(iv)
-            >> checksum: gen_skip!(4)
-            >> gen_nonzero_padding(1008 - 4 - 1 - tm.byte_len())
-            >> gen_be_u8!(0)
-            >> msg_start: gen_many!(&tm.0, gen_tmdi_fragment_pair)
-            >> msg_end: gen_at_offset!(checksum, gen_checksum(msg_start, msg_end, iv))
+fn gen_tunnel_message<'a, W: 'a + Seek>(
+    iv: &'a [u8],
+    tm: &'a TunnelMessage,
+) -> impl SerializeFn<W> + 'a {
+    gen_pair(
+        gen_slice(iv),
+        back_to_the_buffer(
+            4,
+            move |buf| {
+                let buf = gen_pair(
+                    gen_nonzero_padding(1008 - 4 - 1 - tm.byte_len()),
+                    gen_be_u8(0),
+                )(buf)?;
+
+                // We need to capture these bytes so we can calculate the checksum.
+                let mut contents = vec![];
+                let (_, len) = gen(gen_many_ref(&tm.0, gen_tmdi_fragment_pair), &mut contents)?;
+                contents.truncate(len as usize);
+                Ok((gen(gen_slice(&contents), buf)?.0, contents))
+            },
+            move |buf, contents| gen_simple(gen_checksum(&contents, iv), buf),
+        ),
     )
 }
 
 #[cfg(test)]
 mod tests {
+    use std::io::Cursor;
+
     use super::*;
 
     macro_rules! bake_and_eat {
         ($oven:expr, $monster:expr, $value:expr, $expected:expr) => {
             let mut res = vec![];
             res.resize($expected.len(), 0);
-            match $oven((&mut res, 0), &$value) {
+            match gen($oven(&$value), &mut res) {
                 Ok(_) => assert_eq!(&res, &$expected),
                 Err(e) => panic!("Unexpected error: {:?}", e),
             }
@@ -282,7 +286,7 @@ mod tests {
         b.extend_from_slice(&[0; 4][..]);
         b.extend(a[4..].iter().cloned());
         // Generate and validate checksum of payload
-        let res = gen_checksum((&mut b[..], 0), 4, 11, &iv[..]);
+        let res = gen(gen_checksum(&b[4..11], &iv[..]), &mut b);
         assert!(res.is_ok());
         let (o, n) = res.unwrap();
         assert_eq!(o, &a[..]);
@@ -349,7 +353,10 @@ mod tests {
             ($value:expr, $expected:expr) => {
                 let mut res = vec![];
                 res.resize(1024, 0);
-                match gen_tunnel_message((&mut res, 0), &iv[..], &$value) {
+                match gen(
+                    gen_tunnel_message(&iv[..], &$value),
+                    Cursor::new(&mut res[..]),
+                ) {
                     Ok(_) => {
                         // IV
                         assert_eq!(&res[0..16], &iv[..]);

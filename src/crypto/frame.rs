@@ -1,6 +1,6 @@
-use std::convert::TryInto;
+use std::{convert::TryInto, io::Write};
 
-use cookie_factory::*;
+use cookie_factory::{bytes::be_u16 as gen_be_u16, combinator::slice as gen_slice, SerializeFn};
 use nom::{
     bytes::streaming::take,
     combinator::{map, map_opt, map_res},
@@ -29,11 +29,8 @@ pub fn sig_type(i: &[u8]) -> IResult<&[u8], SigType> {
     })(i)
 }
 
-pub fn gen_sig_type(
-    input: (&mut [u8], usize),
-    sig_type: SigType,
-) -> Result<(&mut [u8], usize), GenError> {
-    gen_be_u16!(input, sig_type.code())
+pub fn gen_sig_type<W: Write>(sig_type: SigType) -> impl SerializeFn<W> {
+    gen_be_u16(sig_type.code())
 }
 
 pub fn enc_type(i: &[u8]) -> IResult<&[u8], EncType> {
@@ -43,11 +40,8 @@ pub fn enc_type(i: &[u8]) -> IResult<&[u8], EncType> {
     })(i)
 }
 
-pub fn gen_enc_type(
-    input: (&mut [u8], usize),
-    enc_type: EncType,
-) -> Result<(&mut [u8], usize), GenError> {
-    gen_be_u16!(input, enc_type.code())
+pub fn gen_enc_type<W: Write>(enc_type: EncType) -> impl SerializeFn<W> {
+    gen_be_u16(enc_type.code())
 }
 
 pub fn session_key(i: &[u8]) -> IResult<&[u8], SessionKey> {
@@ -56,11 +50,8 @@ pub fn session_key(i: &[u8]) -> IResult<&[u8], SessionKey> {
     })(i)
 }
 
-pub fn gen_session_key<'a>(
-    input: (&'a mut [u8], usize),
-    k: &SessionKey,
-) -> Result<(&'a mut [u8], usize), GenError> {
-    gen_slice!(input, k.0)
+pub fn gen_session_key<'a, W: 'a + Write>(k: &SessionKey) -> impl SerializeFn<W> + 'a {
+    gen_slice(k.0)
 }
 
 //
@@ -75,11 +66,8 @@ pub fn public_key(i: &[u8]) -> IResult<&[u8], PublicKey> {
     })(i)
 }
 
-pub fn gen_public_key<'a>(
-    input: (&'a mut [u8], usize),
-    key: &PublicKey,
-) -> Result<(&'a mut [u8], usize), GenError> {
-    gen_slice!(input, key.0)
+pub fn gen_public_key<'a, W: 'a + Write>(key: &PublicKey) -> impl SerializeFn<W> + 'a {
+    gen_slice(key.0)
 }
 
 // PrivateKey
@@ -90,11 +78,8 @@ pub fn private_key(i: &[u8]) -> IResult<&[u8], PrivateKey> {
     })(i)
 }
 
-pub fn gen_private_key<'a>(
-    input: (&'a mut [u8], usize),
-    key: &PrivateKey,
-) -> Result<(&'a mut [u8], usize), GenError> {
-    gen_slice!(input, key.0)
+pub fn gen_private_key<'a, W: 'a + Write>(key: &PrivateKey) -> impl SerializeFn<W> + 'a {
+    gen_slice(key.0)
 }
 
 // SigningPublicKey
@@ -107,11 +92,8 @@ pub fn signing_key(sig_type: SigType) -> impl Fn(&[u8]) -> IResult<&[u8], Signin
     }
 }
 
-pub fn gen_signing_key<'a>(
-    input: (&'a mut [u8], usize),
-    key: &SigningPublicKey,
-) -> Result<(&'a mut [u8], usize), GenError> {
-    gen_slice!(input, key.as_bytes())
+pub fn gen_signing_key<'a, W: 'a + Write>(key: &'a SigningPublicKey) -> impl SerializeFn<W> + 'a {
+    gen_slice(key.as_bytes())
 }
 
 // SigningPrivateKey
@@ -126,11 +108,10 @@ pub fn signing_private_key(
     }
 }
 
-pub fn gen_signing_private_key<'a>(
-    input: (&'a mut [u8], usize),
-    key: &SigningPrivateKey,
-) -> Result<(&'a mut [u8], usize), GenError> {
-    gen_slice!(input, key.as_bytes())
+pub fn gen_signing_private_key<'a, W: 'a + Write>(
+    key: &'a SigningPrivateKey,
+) -> impl SerializeFn<W> + 'a {
+    gen_slice(key.as_bytes())
 }
 
 // Signature
@@ -143,9 +124,6 @@ pub fn signature(sig_type: SigType) -> impl Fn(&[u8]) -> IResult<&[u8], Signatur
     }
 }
 
-pub fn gen_signature<'a>(
-    input: (&'a mut [u8], usize),
-    sig: &Signature,
-) -> Result<(&'a mut [u8], usize), GenError> {
-    gen_slice!(input, sig.to_bytes())
+pub fn gen_signature<'a, W: 'a + Write>(sig: &Signature) -> impl SerializeFn<W> + 'a {
+    gen_slice(sig.to_bytes())
 }

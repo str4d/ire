@@ -1,6 +1,7 @@
 //! Logic for processing incoming tunnel build requests.
 
 use block_modes::{block_padding::NoPadding, BlockMode, Cbc};
+use cookie_factory::gen;
 use futures::{sink, sync::mpsc, try_ready, Async, Future, Poll, Sink, Stream};
 use std::slice::IterMut;
 use std::sync::{Arc, Mutex};
@@ -320,7 +321,7 @@ impl<TB: TunnelBuildRequest> Future for HopAcceptor<TB> {
                             // Write our response
                             {
                                 let tb_entry = info.tb.entry_mut(info.i);
-                                gen_build_response_record((tb_entry, 0), &info.response)
+                                gen(gen_build_response_record(&info.response), &mut tb_entry[..])
                                     .expect("Should not fail!");
                             }
 

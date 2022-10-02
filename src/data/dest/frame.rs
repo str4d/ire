@@ -1,11 +1,19 @@
-use cookie_factory::*;
-use nom::*;
+use std::io::Write;
+
+use cookie_factory::{
+    bytes::be_u8 as gen_be_u8,
+    combinator::{cond as gen_cond, slice as gen_slice},
+    multi::many_ref as gen_many_ref,
+    sequence::{pair as gen_pair, tuple as gen_tuple},
+    Seek, SerializeFn,
+};
 use nom::{
     bytes::streaming::take,
     combinator::{map, map_res},
     multi::length_count,
     number::streaming::be_u8,
     sequence::{pair, tuple},
+    IResult,
 };
 
 use super::{Destination, Lease, LeaseSet};
@@ -46,20 +54,16 @@ fn destination(i: &[u8]) -> IResult<&[u8], Destination> {
     )(i)
 }
 
-pub fn gen_destination<'a>(
-    input: (&'a mut [u8], usize),
-    dest: &Destination,
-) -> Result<(&'a mut [u8], usize), GenError> {
-    do_gen!(
-        input,
-        gen_public_key(&dest.public_key)
-            >> gen_cond!(
-                dest.padding.is_some(),
-                gen_slice!(dest.padding.as_ref().unwrap().0)
-            )
-            >> gen_truncated_signing_key(&dest.signing_key)
-            >> gen_certificate(&dest.certificate)
-    )
+pub fn gen_destination<'a, W: 'a + Seek>(dest: &'a Destination) -> impl SerializeFn<W> + 'a {
+    gen_tuple((
+        gen_public_key(&dest.public_key),
+        gen_cond(
+            dest.padding.is_some(),
+            gen_slice(&dest.padding.as_ref().unwrap().0),
+        ),
+        gen_truncated_signing_key(&dest.signing_key),
+        gen_certificate(&dest.certificate),
+    ))
 }
 
 // Lease
@@ -75,14 +79,12 @@ fn lease(i: &[u8]) -> IResult<&[u8], Lease> {
     )(i)
 }
 
-fn gen_lease<'a>(
-    input: (&'a mut [u8], usize),
-    lease: &Lease,
-) -> Result<(&'a mut [u8], usize), GenError> {
-    do_gen!(
-        input,
-        gen_hash(&lease.tunnel_gw) >> gen_tunnel_id(&lease.tid) >> gen_i2p_date(&lease.end_date)
-    )
+fn gen_lease<'a, W: 'a + Write>(lease: &Lease) -> impl SerializeFn<W> + 'a {
+    gen_tuple((
+        gen_hash(&lease.tunnel_gw),
+        gen_tunnel_id(&lease.tid),
+        gen_i2p_date(&lease.end_date),
+    ))
 }
 
 // LeaseSet
@@ -107,26 +109,19 @@ pub fn lease_set(i: &[u8]) -> IResult<&[u8], LeaseSet> {
     ))
 }
 
-pub fn gen_lease_set_minus_sig<'a>(
-    input: (&'a mut [u8], usize),
-    ls: &LeaseSet,
-) -> Result<(&'a mut [u8], usize), GenError> {
-    do_gen!(
-        input,
-        gen_destination(&ls.dest)
-            >> gen_public_key(&ls.enc_key)
-            >> gen_signing_key(&ls.sig_key)
-            >> gen_be_u8!(ls.leases.len() as u8)
-            >> gen_many!(&ls.leases, gen_lease)
-    )
+pub fn gen_lease_set_minus_sig<'a, W: 'a + Seek>(ls: &'a LeaseSet) -> impl SerializeFn<W> + 'a {
+    gen_tuple((
+        gen_destination(&ls.dest),
+        gen_public_key(&ls.enc_key),
+        gen_signing_key(&ls.sig_key),
+        gen_be_u8(ls.leases.len() as u8),
+        gen_many_ref(&ls.leases, gen_lease),
+    ))
 }
 
-pub fn gen_lease_set<'a>(
-    input: (&'a mut [u8], usize),
-    ls: &LeaseSet,
-) -> Result<(&'a mut [u8], usize), GenError> {
-    do_gen!(
-        input,
-        gen_lease_set_minus_sig(ls) >> gen_signature(ls.signature.as_ref().unwrap())
+pub fn gen_lease_set<'a, W: 'a + Seek>(ls: &'a LeaseSet) -> impl SerializeFn<W> + 'a {
+    gen_pair(
+        gen_lease_set_minus_sig(ls),
+        gen_signature(ls.signature.as_ref().unwrap()),
     )
 }

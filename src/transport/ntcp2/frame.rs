@@ -1,4 +1,13 @@
-use cookie_factory::*;
+use std::io::Write;
+
+use cookie_factory::{
+    bytes::{be_u16 as gen_be_u16, be_u32 as gen_be_u32, be_u64 as gen_be_u64, be_u8 as gen_be_u8},
+    combinator::{back_to_the_buffer, slice as gen_slice},
+    gen, gen_simple,
+    multi::many_ref as gen_many_ref,
+    sequence::{pair as gen_pair, tuple as gen_tuple},
+    Seek, SerializeFn, WriteContext,
+};
 use nom::{
     bits::{bits, streaming::take as take_bits},
     bytes::streaming::{tag, take},
@@ -11,10 +20,13 @@ use nom::{
 };
 use rand::{rngs::OsRng, Rng};
 
-use crate::data::frame::{gen_router_info, router_info};
 use crate::data::RouterInfo;
 use crate::i2np::frame::{gen_ntcp2_message, ntcp2_message};
 use crate::i2np::Message;
+use crate::{
+    data::frame::{gen_router_info, router_info},
+    util::gen_bttb,
+};
 
 use super::{Block, Frame, RouterInfoFlags};
 
@@ -28,8 +40,8 @@ fn datetime(i: &[u8]) -> IResult<&[u8], Block> {
     map(preceded(tag("\x00\x04"), be_u32), Block::DateTime)(i)
 }
 
-fn gen_datetime(input: (&mut [u8], usize), ts: u32) -> Result<(&mut [u8], usize), GenError> {
-    do_gen!(input, gen_be_u16!(4) >> gen_be_u32!(ts))
+fn gen_datetime<W: Write>(ts: u32) -> impl SerializeFn<W> {
+    gen_pair(gen_be_u16(4), gen_be_u32(ts))
 }
 
 // Options
@@ -40,11 +52,8 @@ fn options(i: &[u8]) -> IResult<&[u8], Block> {
     })(i)
 }
 
-fn gen_options<'a>(
-    input: (&'a mut [u8], usize),
-    options: &[u8],
-) -> Result<(&'a mut [u8], usize), GenError> {
-    do_gen!(input, gen_be_u16!(options.len()) >> gen_slice!(options))
+fn gen_options<'a, W: 'a + Write>(options: &'a [u8]) -> impl SerializeFn<W> + 'a {
+    gen_pair(gen_be_u16(options.len() as u16), gen_slice(options))
 }
 
 // RouterInfo
@@ -59,15 +68,12 @@ fn routerinfo_flags(i: &[u8]) -> IResult<&[u8], RouterInfoFlags> {
     )(i)
 }
 
-fn gen_routerinfo_flags<'a>(
-    input: (&'a mut [u8], usize),
-    flags: &RouterInfoFlags,
-) -> Result<(&'a mut [u8], usize), GenError> {
+fn gen_routerinfo_flags<'a, W: 'a + Write>(flags: &RouterInfoFlags) -> impl SerializeFn<W> + 'a {
     let mut x: u8 = 0;
     if flags.flood {
         x |= 0b01;
     }
-    gen_be_u8!(input, x)
+    gen_be_u8(x)
 }
 
 fn routerinfo(i: &[u8]) -> IResult<&[u8], Block> {
@@ -77,17 +83,19 @@ fn routerinfo(i: &[u8]) -> IResult<&[u8], Block> {
     )(i)
 }
 
-fn gen_routerinfo<'a>(
-    input: (&'a mut [u8], usize),
-    ri: &RouterInfo,
-    flags: &RouterInfoFlags,
-) -> Result<(&'a mut [u8], usize), GenError> {
-    do_gen!(
-        input,
-        size: gen_skip!(2)
-            >> start: gen_routerinfo_flags(flags)
-            >> gen_router_info(ri)
-            >> end: gen_at_offset!(size, gen_be_u16!(end - start))
+fn gen_routerinfo<'a, W: 'a + Seek>(
+    ri: &'a RouterInfo,
+    flags: &'a RouterInfoFlags,
+) -> impl SerializeFn<W> + 'a {
+    back_to_the_buffer(
+        2,
+        move |buf| {
+            gen_bttb(
+                gen_pair(gen_routerinfo_flags(flags), gen_router_info(ri)),
+                buf,
+            )
+        },
+        move |buf, len| gen_be_u16(len as u16)(buf),
     )
 }
 
@@ -97,15 +105,11 @@ fn message(i: &[u8]) -> IResult<&[u8], Block> {
     map(length_value(be_u16, ntcp2_message), Block::Message)(i)
 }
 
-fn gen_message<'a>(
-    input: (&'a mut [u8], usize),
-    message: &Message,
-) -> Result<(&'a mut [u8], usize), GenError> {
-    do_gen!(
-        input,
-        size: gen_skip!(2)
-            >> start: gen_ntcp2_message(message)
-            >> end: gen_at_offset!(size, gen_be_u16!(end - start))
+fn gen_message<'a, W: 'a + Seek>(message: &'a Message) -> impl SerializeFn<W> + 'a {
+    back_to_the_buffer(
+        2,
+        move |buf| gen_bttb(gen_ntcp2_message(message), buf),
+        move |buf, len| gen_be_u16(len as u16)(buf),
     )
 }
 
@@ -121,19 +125,24 @@ fn termination(i: &[u8]) -> IResult<&[u8], Block> {
     )(i)
 }
 
-fn gen_termination<'a>(
-    input: (&'a mut [u8], usize),
+fn gen_termination<'a, W: 'a + Seek>(
     valid_received: u64,
     rsn: u8,
-    addl_data: &[u8],
-) -> Result<(&'a mut [u8], usize), GenError> {
-    do_gen!(
-        input,
-        size: gen_skip!(2)
-            >> start: gen_be_u64!(valid_received)
-            >> gen_be_u8!(rsn)
-            >> gen_slice!(addl_data)
-            >> end: gen_at_offset!(size, gen_be_u16!(end - start))
+    addl_data: &'a [u8],
+) -> impl SerializeFn<W> + 'a {
+    back_to_the_buffer(
+        2,
+        move |buf| {
+            gen(
+                gen_tuple((
+                    gen_be_u64(valid_received),
+                    gen_be_u8(rsn),
+                    gen_slice(addl_data),
+                )),
+                buf,
+            )
+        },
+        move |buf, len| gen_simple(gen_be_u16(len as u16), buf),
     )
 }
 
@@ -144,11 +153,11 @@ fn padding(i: &[u8]) -> IResult<&[u8], Block> {
     take(size as usize)(i).map(|(i, _)| (i, Block::Padding(size)))
 }
 
-fn gen_padding(input: (&mut [u8], usize), size: u16) -> Result<(&mut [u8], usize), GenError> {
+fn gen_padding<W: Write>(size: u16) -> impl SerializeFn<W> {
     let mut padding = vec![0u8; size as usize];
     let mut rng = OsRng;
     rng.fill(&mut padding[..]);
-    do_gen!(input, gen_be_u16!(size) >> gen_slice!(padding))
+    gen_pair(gen_be_u16(size), gen_slice(padding))
 }
 
 // Unknown
@@ -157,11 +166,8 @@ fn unknown(i: &[u8]) -> IResult<&[u8], Vec<u8>> {
     map(length_data(be_u16), Vec::from)(i)
 }
 
-fn gen_unknown<'a>(
-    input: (&'a mut [u8], usize),
-    data: &[u8],
-) -> Result<(&'a mut [u8], usize), GenError> {
-    do_gen!(input, gen_be_u16!(data.len()) >> gen_slice!(data))
+fn gen_unknown<'a, W: 'a + Write>(data: &'a [u8]) -> impl SerializeFn<W> + 'a {
+    gen_pair(gen_be_u16(data.len() as u16), gen_slice(data))
 }
 
 //
@@ -181,26 +187,23 @@ fn block(i: &[u8]) -> IResult<&[u8], Block> {
     }
 }
 
-fn gen_block<'a>(
-    input: (&'a mut [u8], usize),
-    block: &Block,
-) -> Result<(&'a mut [u8], usize), GenError> {
+fn gen_block<'a, W: 'a + Seek>(block: &'a Block) -> impl SerializeFn<W> + 'a {
     macro_rules! blockgen {
         ($block_type: expr, $block_gen: ident($($block_data: expr),+)) => {
-            do_gen!(input, gen_be_u8!($block_type) >> $block_gen($($block_data),+))
+            gen_pair(gen_be_u8($block_type), $block_gen($($block_data),+))
         };
     }
 
-    match *block {
-        Block::DateTime(ts) => blockgen!(0, gen_datetime(ts)),
-        Block::Options(ref options) => blockgen!(1, gen_options(options)),
-        Block::RouterInfo(ref ri, ref flags) => blockgen!(2, gen_routerinfo(ri, flags)),
-        Block::Message(ref message) => blockgen!(3, gen_message(message)),
+    move |w: WriteContext<W>| match block {
+        Block::DateTime(ts) => blockgen!(0, gen_datetime(*ts))(w),
+        Block::Options(ref options) => blockgen!(1, gen_options(options))(w),
+        Block::RouterInfo(ref ri, ref flags) => blockgen!(2, gen_routerinfo(ri, flags))(w),
+        Block::Message(ref message) => blockgen!(3, gen_message(message))(w),
         Block::Termination(valid_received, rsn, ref addl_data) => {
-            blockgen!(4, gen_termination(valid_received, rsn, addl_data))
+            blockgen!(4, gen_termination(*valid_received, *rsn, addl_data))(w)
         }
-        Block::Padding(size) => blockgen!(254, gen_padding(size)),
-        Block::Unknown(blk, ref data) => blockgen!(blk, gen_unknown(data)),
+        Block::Padding(size) => blockgen!(254, gen_padding(*size))(w),
+        Block::Unknown(blk, ref data) => blockgen!(*blk, gen_unknown(data))(w),
     }
 }
 
@@ -209,11 +212,8 @@ pub fn frame(i: &[u8]) -> IResult<&[u8], Frame> {
 }
 
 #[allow(clippy::ptr_arg)]
-pub fn gen_frame<'a>(
-    input: (&'a mut [u8], usize),
-    frame: &Frame,
-) -> Result<(&'a mut [u8], usize), GenError> {
-    do_gen!(input, gen_many_ref!(frame, gen_block))
+pub fn gen_frame<'a, W: 'a + Seek>(frame: &'a Frame) -> impl SerializeFn<W> + 'a {
+    gen_many_ref(frame, gen_block)
 }
 
 //
@@ -238,23 +238,21 @@ pub fn session_request(i: &[u8]) -> IResult<&[u8], (u8, u16, u16, u32)> {
     )(i)
 }
 
-pub fn gen_session_request(
-    input: (&mut [u8], usize),
+pub fn gen_session_request<W: Write>(
     ver: u8,
     padlen: u16,
     sclen: u16,
     ts_a: u32,
-) -> Result<(&mut [u8], usize), GenError> {
-    do_gen!(
-        input,
-        gen_slice!([0u8])
-            >> gen_be_u8!(ver)
-            >> gen_be_u16!(padlen)
-            >> gen_be_u16!(sclen)
-            >> gen_slice!([0u8; 2])
-            >> gen_be_u32!(ts_a)
-            >> gen_slice!([0u8; 4])
-    )
+) -> impl SerializeFn<W> {
+    gen_tuple((
+        gen_slice([0u8]),
+        gen_be_u8(ver),
+        gen_be_u16(padlen),
+        gen_be_u16(sclen),
+        gen_slice([0u8; 2]),
+        gen_be_u32(ts_a),
+        gen_slice([0u8; 4]),
+    ))
 }
 
 // SessionCreated
@@ -266,19 +264,14 @@ pub fn session_created(i: &[u8]) -> IResult<&[u8], (u16, u32)> {
     )(i)
 }
 
-pub fn gen_session_created(
-    input: (&mut [u8], usize),
-    padlen: u16,
-    ts_b: u32,
-) -> Result<(&mut [u8], usize), GenError> {
-    do_gen!(
-        input,
-        gen_slice!([0u8; 2])
-            >> gen_be_u16!(padlen)
-            >> gen_slice!([0u8; 4])
-            >> gen_be_u32!(ts_b)
-            >> gen_slice!([0u8; 4])
-    )
+pub fn gen_session_created<W: Write>(padlen: u16, ts_b: u32) -> impl SerializeFn<W> {
+    gen_tuple((
+        gen_slice([0u8; 2]),
+        gen_be_u16(padlen),
+        gen_slice([0u8; 4]),
+        gen_be_u32(ts_b),
+        gen_slice([0u8; 4]),
+    ))
 }
 
 // SessionConfirmed
@@ -287,22 +280,21 @@ pub fn session_confirmed(i: &[u8]) -> IResult<&[u8], (Frame)> {
     frame(i)
 }
 
-pub fn gen_session_confirmed<'a>(
-    input: (&'a mut [u8], usize),
-    ri_a: &RouterInfo,
+pub fn gen_session_confirmed<'a, W: 'a + Seek>(
+    ri_a: &'a RouterInfo,
     padlen: u16,
-) -> Result<(&'a mut [u8], usize), GenError> {
-    do_gen!(
-        input,
+) -> impl SerializeFn<W> + 'a {
+    move |w: WriteContext<W>| {
         gen_frame(&vec![
             Block::RouterInfo(ri_a.clone(), RouterInfoFlags { flood: false }),
             Block::Padding(padlen),
-        ])
-    )
+        ])(w)
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::io::Cursor;
     use std::time::{Duration, UNIX_EPOCH};
 
     use crate::data::I2PDate;
@@ -315,7 +307,7 @@ mod tests {
         ($oven:expr, $monster:expr, $value:expr, $expected:expr) => {
             let mut res = vec![];
             res.resize($expected.len(), 0);
-            match $oven((&mut res, 0), &$value) {
+            match gen($oven(&$value), Cursor::new(&mut res[..])) {
                 Ok(_) => assert_eq!(&res, &$expected),
                 Err(e) => panic!("Unexpected error: {:?}", e),
             }
@@ -400,13 +392,13 @@ mod tests {
         let pad_block = Block::Padding(10);
         let mut res1 = vec![];
         res1.resize(13, 0);
-        match gen_block((&mut res1, 0), &pad_block) {
+        match gen(gen_block(&pad_block), Cursor::new(&mut res1[..])) {
             Ok(_) => (),
             Err(e) => panic!("Unexpected error: {:?}", e),
         }
         let mut res2 = vec![];
         res2.resize(13, 0);
-        match gen_block((&mut res2, 0), &pad_block) {
+        match gen(gen_block(&pad_block), Cursor::new(&mut res2[..])) {
             Ok(_) => (),
             Err(e) => panic!("Unexpected error: {:?}", e),
         }
@@ -428,7 +420,10 @@ mod tests {
     fn test_session_request() {
         let mut res = vec![];
         res.resize(16, 0);
-        match gen_session_request((&mut res, 0), 0x12, 0x3456, 0x789a, 0xbcde_f123) {
+        match gen(
+            gen_session_request(0x12, 0x3456, 0x789a, 0xbcde_f123),
+            &mut res,
+        ) {
             Ok(_) => assert_eq!(
                 &res,
                 &[
@@ -448,7 +443,7 @@ mod tests {
     fn test_session_created() {
         let mut res = vec![];
         res.resize(16, 0);
-        match gen_session_created((&mut res, 0), 0x1234, 0x5678_9abc) {
+        match gen(gen_session_created(0x1234, 0x5678_9abc), &mut res) {
             Ok(_) => assert_eq!(
                 &res,
                 &[

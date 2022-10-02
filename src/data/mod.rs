@@ -297,7 +297,7 @@ impl RouterIdentity {
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
-        serialize(|input| frame::gen_router_identity(input, self))
+        serialize(frame::gen_router_identity(self))
     }
 
     pub fn to_file(&self, path: &str) -> io::Result<()> {
@@ -339,7 +339,7 @@ impl RouterSecretKeys {
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
-        serialize(|input| frame::gen_router_secret_keys(input, self))
+        serialize(frame::gen_router_secret_keys(self))
     }
 
     pub fn to_file(&self, path: &str) -> io::Result<()> {
@@ -474,7 +474,7 @@ impl RouterInfo {
     }
 
     pub fn to_bytes(&self) -> Vec<u8> {
-        serialize(|input| frame::gen_router_info(input, self))
+        serialize(frame::gen_router_info(self))
     }
 
     pub fn to_file(&self, path: &str) -> io::Result<()> {
@@ -483,7 +483,7 @@ impl RouterInfo {
     }
 
     fn signature_bytes(&self) -> Vec<u8> {
-        serialize(|input| frame::gen_router_info_minus_sig(input, self))
+        serialize(frame::gen_router_info_minus_sig(self))
     }
 
     pub fn sign(&mut self, spk: &SigningPrivateKey) {

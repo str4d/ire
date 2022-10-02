@@ -1,9 +1,10 @@
-use cookie_factory::GenError;
+use cookie_factory::{gen, GenError};
 use futures::{Async, Future, Poll};
 use i2p_snow::{Builder, Session};
 use nom::Err;
 use rand::{rngs::OsRng, Rng};
 use siphasher::sip::SipHasher;
+use std::io::Cursor;
 use std::net::SocketAddr;
 use std::ops::AddAssign;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -141,18 +142,20 @@ where
 
                     // SessionCreated
                     let mut sc_buf = [0u8; SESSION_CREATED_PT_LEN];
-                    match frame::gen_session_created((&mut sc_buf, 0), sc_padlen, ts_b)
+                    match gen(frame::gen_session_created(sc_padlen, ts_b), &mut sc_buf[..])
                         .map(|tup| tup.1)
                     {
-                        Ok(sz) if sz == sc_buf.len() => (),
+                        Ok(sz) if sz as usize == sc_buf.len() => (),
                         Ok(_) => panic!("Size mismatch"),
                         Err(e) => match e {
                             GenError::BufferTooSmall(_) => panic!("Size mismatch"),
                             GenError::InvalidOffset
+                            | GenError::BufferTooBig(_)
                             | GenError::CustomError(_)
                             | GenError::NotYetImplemented => {
                                 return io_err!(InvalidData, "could not generate");
                             }
+                            GenError::IoError(e) => return Err(e),
                         },
                     };
 
@@ -348,10 +351,13 @@ where
         };
 
         let mut sc_buf = vec![0u8; NTCP2_MTU - 16];
-        let sc_len = match frame::gen_session_confirmed((&mut sc_buf, 0), own_ri, sc_padlen)
-            .map(|tup| tup.1)
+        let sc_len = match gen(
+            frame::gen_session_confirmed(own_ri, sc_padlen),
+            Cursor::new(&mut sc_buf[..]),
+        )
+        .map(|tup| tup.1)
         {
-            Ok(sz) => sz,
+            Ok(sz) => sz as usize,
             Err(e) => match e {
                 GenError::BufferTooSmall(sz) => {
                     return Err(format!(
@@ -361,8 +367,10 @@ where
                     ));
                 }
                 GenError::InvalidOffset
+                | GenError::BufferTooBig(_)
                 | GenError::CustomError(_)
                 | GenError::NotYetImplemented => return Err("could not generate".to_string()),
+                GenError::IoError(e) => return Err(e.to_string()),
             },
         };
         sc_buf.truncate(sc_len);
@@ -415,24 +423,23 @@ where
 
                     // SessionRequest
                     let mut sr_buf = [0u8; SESSION_REQUEST_PT_LEN];
-                    match frame::gen_session_request(
-                        (&mut sr_buf, 0),
-                        2,
-                        padlen,
-                        self.sc_len as u16,
-                        ts_a,
+                    match gen(
+                        frame::gen_session_request(2, padlen, self.sc_len as u16, ts_a),
+                        &mut sr_buf[..],
                     )
                     .map(|tup| tup.1)
                     {
-                        Ok(sz) if sz == sr_buf.len() => (),
+                        Ok(sz) if sz as usize == sr_buf.len() => (),
                         Ok(_) => panic!("Size mismatch"),
                         Err(e) => match e {
                             GenError::BufferTooSmall(_) => panic!("Size mismatch"),
                             GenError::InvalidOffset
+                            | GenError::BufferTooBig(_)
                             | GenError::CustomError(_)
                             | GenError::NotYetImplemented => {
                                 return io_err!(InvalidData, "could not generate");
                             }
+                            GenError::IoError(e) => return Err(e),
                         },
                     };
 

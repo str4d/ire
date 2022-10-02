@@ -1,20 +1,21 @@
 //! Helper functions
 
 use bloom_filter_rs::{BloomFilter, Murmur3};
-use cookie_factory::GenError;
+use cookie_factory::{gen, GenError, SerializeFn, WriteContext};
 use core::fmt;
+use std::io::{Cursor, Write};
 use std::iter::repeat;
 use std::mem;
 
-pub fn serialize<S>(serializer: S) -> Vec<u8>
+pub fn serialize<'a, S>(serializer: S) -> Vec<u8>
 where
-    S: Fn((&mut [u8], usize)) -> Result<(&mut [u8], usize), GenError>,
+    S: SerializeFn<Cursor<&'a mut [u8]>>,
 {
     let mut buf = vec![];
     loop {
-        match serializer((&mut buf, 0)).map(|tup| tup.1) {
+        match gen(serializer, Cursor::new(&mut buf)).map(|tup| tup.1) {
             Ok(sz) => {
-                buf.truncate(sz);
+                buf.truncate(sz as usize);
                 break;
             }
             Err(e) => match e {
@@ -27,6 +28,18 @@ where
         }
     }
     buf
+}
+
+/// For use inside a nested `back_to_the_buffer`.
+pub(crate) fn gen_bttb<W: Write, F: SerializeFn<W>>(
+    f: F,
+    w: WriteContext<W>,
+) -> Result<(WriteContext<W>, u64), GenError> {
+    let begin = w.position;
+    f(w).map(|wctx| {
+        let pos = wctx.position;
+        (wctx, pos - begin)
+    })
 }
 
 /// Format a byte array as a colon-delimited hex string.

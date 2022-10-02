@@ -28,7 +28,7 @@
 //! [NTCP2 specification](https://geti2p.net/spec/ntcp2)
 
 use bytes::BytesMut;
-use cookie_factory::GenError;
+use cookie_factory::{gen, GenError};
 use futures::{
     stream::{SplitSink, SplitStream},
     sync::mpsc,
@@ -38,7 +38,6 @@ use i2p_snow::{self, Builder};
 use nom::Err;
 use rand::{rngs::OsRng, Rng};
 use siphasher::sip::SipHasher;
-use std::collections::VecDeque;
 use std::fmt;
 use std::fs::File;
 use std::hash::Hasher;
@@ -46,6 +45,7 @@ use std::iter::repeat;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
+use std::{collections::VecDeque, io::Cursor};
 use tokio::{
     codec::{Decoder, Encoder, Framed},
     io::{self, AsyncRead, AsyncWrite, Read, Write},
@@ -230,8 +230,14 @@ impl Encoder for Codec {
     type Error = io::Error;
 
     fn encode(&mut self, frame: Frame, buf: &mut BytesMut) -> io::Result<()> {
-        match frame::gen_frame((&mut self.noise_buf, 0), &frame).map(|tup| tup.1) {
+        match gen(
+            frame::gen_frame(&frame),
+            Cursor::new(&mut self.noise_buf[..]),
+        )
+        .map(|tup| tup.1)
+        {
             Ok(sz) => {
+                let sz = sz as usize;
                 let msg_len = sz + 16;
 
                 let start = buf.len();
@@ -265,8 +271,10 @@ impl Encoder for Codec {
                     format!("message ({}) larger than MTU ({})", sz, NTCP2_MTU)
                 ),
                 GenError::InvalidOffset
+                | GenError::BufferTooBig(_)
                 | GenError::CustomError(_)
                 | GenError::NotYetImplemented => io_err!(InvalidData, "could not generate"),
+                GenError::IoError(e) => Err(e),
             },
         }
     }
