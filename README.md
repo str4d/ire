@@ -11,8 +11,12 @@ global, decentralised [I2P network].
 
 ## Development Status
 
+### WARNING 
+
 Ire is in pre-alpha; much of the internal architecture still needs to be defined
-and implemented.
+and implemented. Do not use for production services use with CAUTION!! 
+
+### DO NOT USE OUTSIDE OF TESTING/PERSONAL DEVELOPMENT
 
 ### Implemented Features
 
@@ -32,7 +36,8 @@ and implemented.
     - [x] RSA_SHA512_4096
     - [x] Ed25519
   - [x] ElGamal
-  - [x] AES256
+  - [ ] ChaCha20/Poly1305
+  - [Deprecated] AES256
 - I2NP
   - [x] Message parsing
   - [ ] Message handling
@@ -55,7 +60,9 @@ and implemented.
     - [x] Handshake
     - [x] Session tracking
     - [x] Automatic session creation
-  - [ ] SSU
+  - [Deprecated ] SSU
+  - [] SSU2
+	
 
 ## Usage
 
@@ -98,7 +105,7 @@ Bug reports and pull requests are welcome on GitHub at https://github.com/str4d/
 
 ## Copyright
 
-Copyright (c) 2017 [The Ire Developers][AUTHORS].
+Copyright (c) 2017 - 2023  [The Ire Developers][AUTHORS].
 See [LICENSE.txt] for further details.
 
 [AUTHORS]: https://github.com/str4d/ire/blob/master/AUTHORS.md
