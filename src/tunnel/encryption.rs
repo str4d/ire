@@ -1,9 +1,12 @@
 //! Tunnel encryption operations.
 
-use aes::{cipher::BlockCipherKey, Block, BlockDecrypt, BlockEncrypt, NewBlockCipher};
+use aes::cipher::{BlockDecrypt, BlockEncrypt, KeyInit};
 
 use crate::crypto::{Aes256, SessionKey};
 use crate::i2np::TunnelData;
+
+type Block = aes::cipher::Block<aes::Aes256>;
+type Key = aes::cipher::Key<aes::Aes256>;
 
 /// Implements layered encryption and decryption of tunnel messages.
 ///
@@ -20,7 +23,7 @@ pub struct LayerCipher {
 impl LayerCipher {
     /// Create a `LayerCipher` for the tunnel hop with the given IV and layer keys.
     pub fn new(iv_key: &SessionKey, layer_key: SessionKey) -> Self {
-        let iv_key = BlockCipherKey::<aes::Aes256>::from_slice(&iv_key.0);
+        let iv_key = Key::from_slice(&iv_key.0);
         LayerCipher {
             iv_cipher: aes::Aes256::new(iv_key),
             layer_key,

@@ -1,7 +1,9 @@
 //! Cryptographic types and operations.
 
-use aes::cipher::generic_array::{ArrayLength, GenericArray as AesGenericArray};
-use block_modes::{block_padding::NoPadding, BlockMode, Cbc};
+use aes::cipher::{
+    generic_array::{ArrayLength, GenericArray as AesGenericArray},
+    BlockDecryptMut, BlockEncryptMut, KeyIvInit,
+};
 use nom::Err;
 use rand::Rng;
 use ring::signature::{
@@ -595,7 +597,7 @@ impl SessionKey {
 // Algorithm implementations
 //
 
-fn to_blocks<N>(data: &mut [u8]) -> &mut [AesGenericArray<u8, N>]
+pub(crate) fn to_blocks<N>(data: &mut [u8]) -> &mut [AesGenericArray<u8, N>]
 where
     N: ArrayLength<u8>,
 {
@@ -609,15 +611,17 @@ where
 }
 
 pub(crate) struct Aes256 {
-    cbc_enc: Cbc<aes::Aes256, NoPadding>,
-    cbc_dec: Cbc<aes::Aes256, NoPadding>,
+    cbc_enc: cbc::Encryptor<aes::Aes256>,
+    cbc_dec: cbc::Decryptor<aes::Aes256>,
 }
 
 impl Aes256 {
     pub fn new(key: &SessionKey, iv_enc: &[u8], iv_dec: &[u8]) -> Self {
         Aes256 {
-            cbc_enc: Cbc::new_from_slices(&key.0, iv_enc).expect("key and iv are correct length"),
-            cbc_dec: Cbc::new_from_slices(&key.0, iv_dec).expect("key and iv are correct length"),
+            cbc_enc: cbc::Encryptor::new_from_slices(&key.0, iv_enc)
+                .expect("key and iv are correct length"),
+            cbc_dec: cbc::Decryptor::new_from_slices(&key.0, iv_dec)
+                .expect("key and iv are correct length"),
         }
     }
 
@@ -629,7 +633,7 @@ impl Aes256 {
 
         // Integer division, leaves extra bytes unencrypted at the end
         let end = (buf.len() / AES_BLOCK_SIZE) * AES_BLOCK_SIZE;
-        self.cbc_enc.encrypt_blocks(to_blocks(&mut buf[..end]));
+        self.cbc_enc.encrypt_blocks_mut(to_blocks(&mut buf[..end]));
         Some(end)
     }
 
@@ -641,7 +645,7 @@ impl Aes256 {
 
         // Integer division, leaves extra bytes undecrypted at the end
         let end = (buf.len() / AES_BLOCK_SIZE) * AES_BLOCK_SIZE;
-        self.cbc_dec.decrypt_blocks(to_blocks(&mut buf[..end]));
+        self.cbc_dec.decrypt_blocks_mut(to_blocks(&mut buf[..end]));
         Some(end)
     }
 }
