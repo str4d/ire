@@ -47,7 +47,7 @@ pub enum ReadError {
     Parser,
 }
 
-#[cfg_attr(tarpaulin, skip)]
+#[cfg(not(tarpaulin_include))]
 impl fmt::Display for ReadError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -100,7 +100,7 @@ impl Hash {
     }
 }
 
-#[cfg_attr(tarpaulin, skip)]
+#[cfg(not(tarpaulin_include))]
 impl fmt::Debug for Hash {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         write!(f, "Hash(")?;
@@ -109,7 +109,7 @@ impl fmt::Debug for Hash {
     }
 }
 
-#[cfg_attr(tarpaulin, skip)]
+#[cfg(not(tarpaulin_include))]
 impl fmt::Display for Hash {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", constants::I2P_BASE64.encode(&self.0))
@@ -134,7 +134,7 @@ impl I2PDate {
     }
 }
 
-#[cfg_attr(tarpaulin, skip)]
+#[cfg(not(tarpaulin_include))]
 impl fmt::Display for I2PDate {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         DateTime::<Utc>::from(self.to_system_time()).fmt(f)
@@ -182,7 +182,7 @@ impl SessionTag {
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct TunnelId(pub u32);
 
-#[cfg_attr(tarpaulin, skip)]
+#[cfg(not(tarpaulin_include))]
 impl fmt::Display for TunnelId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
@@ -232,7 +232,7 @@ impl Certificate {
 #[derive(Clone, PartialEq)]
 pub(crate) struct Padding(Vec<u8>);
 
-#[cfg_attr(tarpaulin, skip)]
+#[cfg(not(tarpaulin_include))]
 impl fmt::Debug for Padding {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         write!(f, "Padding(")?;
