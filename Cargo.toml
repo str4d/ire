@@ -17,11 +17,9 @@ arrayref = "0.3"
 bloom-filter-rs = "0.1"
 bytes = "0.4"
 chrono = "0.4"
-clap = { version = "2.32", optional = true }
 config = { version = "0.11", default-features = false, features = ["toml"] }
 cookie-factory = "0.2"
 data-encoding = "2.1"
-env_logger = { version = "0.9", optional = true }
 flate2 = "1.0"
 futures = "0.1"
 i2p_snow = "0.5.1"
@@ -53,6 +51,10 @@ sha2 = "0.10"
 
 # Secret management
 subtle = "2"
+
+# CLI dependencies
+clap = { version = "2.32", optional = true }
+env_logger = { version = "0.10", optional = true }
 
 [dev-dependencies]
 pretty_assertions = "0.7"
