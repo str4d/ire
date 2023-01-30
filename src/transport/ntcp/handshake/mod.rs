@@ -192,7 +192,7 @@ impl Encoder for InboundHandshakeCodec {
                 self.aes = Some(Aes256::new(&session_key, &self.iv_enc, &self.iv_dec));
                 // Serialise inner part of SessionCreated
                 let mut tmp = [0u8; 48];
-                match frame::gen_session_created_dec((&mut tmp, 0), &sc).map(|tup| tup.1) {
+                match frame::gen_session_created_dec((&mut tmp, 0), sc).map(|tup| tup.1) {
                     Ok(inner_sz) => {
                         // Encrypt message in-place
                         match self.aes.as_mut().unwrap().encrypt_blocks(&mut tmp) {
@@ -220,7 +220,7 @@ impl Encoder for InboundHandshakeCodec {
                 }
             }
             (HandshakeState::SessionConfirmB, HandshakeFrame::SessionConfirmB(ref scb)) => {
-                match frame::gen_session_confirm_b((buf, start), &scb).map(|tup| tup.1) {
+                match frame::gen_session_confirm_b((buf, start), scb).map(|tup| tup.1) {
                     Ok(sz) => {
                         buf.truncate(sz);
                         // Encrypt message in-place
@@ -315,7 +315,7 @@ impl Decoder for OutboundHandshakeCodec {
             // Parse frame for the current state
             let res = match self.state {
                 HandshakeState::SessionCreated => {
-                    match frame::session_created_enc(&buf) {
+                    match frame::session_created_enc(buf) {
                         Err(Err::Incomplete(_)) => return Ok(None),
                         Err(Err::Error(e)) | Err(Err::Failure(e)) => {
                             return Err(io::Error::new(
@@ -429,7 +429,7 @@ impl Encoder for OutboundHandshakeCodec {
 
         let res = match (self.state, frame) {
             (HandshakeState::SessionRequest, HandshakeFrame::SessionRequest(ref sr)) => {
-                match frame::gen_session_request((buf, start), &sr).map(|tup| tup.1) {
+                match frame::gen_session_request((buf, start), sr).map(|tup| tup.1) {
                     Ok(sz) => {
                         buf.truncate(sz);
                         Ok(())
@@ -438,7 +438,7 @@ impl Encoder for OutboundHandshakeCodec {
                 }
             }
             (HandshakeState::SessionConfirmA, HandshakeFrame::SessionConfirmA(ref sca)) => {
-                match frame::gen_session_confirm_a((buf, start), &sca).map(|tup| tup.1) {
+                match frame::gen_session_confirm_a((buf, start), sca).map(|tup| tup.1) {
                     Ok(sz) => {
                         buf.truncate(sz);
                         // Encrypt message in-place
@@ -497,7 +497,7 @@ fn gen_session_confirm_sig_msg(state: &SharedHandshakeState, own_ri: bool) -> Ve
     let ri = if own_ri {
         &state.own_ri
     } else {
-        &state.ri_remote.as_ref().unwrap()
+        state.ri_remote.as_ref().unwrap()
     };
     serialize(|input| {
         frame::gen_session_confirm_sig_msg(

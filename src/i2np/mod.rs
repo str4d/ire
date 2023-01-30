@@ -49,7 +49,7 @@ impl<T> From<nom::Err<T>> for BuildRequestError {
 // Common structures
 //
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum ParticipantType {
     InboundGateway,
     Intermediate,
@@ -129,7 +129,7 @@ impl BuildRequestRecord {
 
 /// Reply to a BuildRequestRecord stating whether or not a particular hop agrees
 /// to participate.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct BuildResponseRecord {
     pub reply: u8,
 }
@@ -178,14 +178,14 @@ impl DatabaseStore {
     }
 }
 
-#[cfg_attr(tarpaulin, skip)]
+#[cfg(not(tarpaulin_include))]
 impl fmt::Display for DatabaseStore {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         format!("DatabaseStore\n key: {}\ntype: {}", self.key, self.ds_type).fmt(f)
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DatabaseLookupType {
     Any,
     LeaseSet,
@@ -224,7 +224,7 @@ impl DatabaseLookup {
     }
 }
 
-#[cfg_attr(tarpaulin, skip)]
+#[cfg(not(tarpaulin_include))]
 impl fmt::Display for DatabaseLookup {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         format!(
@@ -252,7 +252,7 @@ pub struct DatabaseSearchReply {
     pub from: Hash,
 }
 
-#[cfg_attr(tarpaulin, skip)]
+#[cfg(not(tarpaulin_include))]
 impl fmt::Display for DatabaseSearchReply {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         format!(
@@ -280,7 +280,7 @@ pub struct DeliveryStatus {
     time_stamp: I2PDate,
 }
 
-#[cfg_attr(tarpaulin, skip)]
+#[cfg(not(tarpaulin_include))]
 impl fmt::Display for DeliveryStatus {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         format!(
@@ -356,7 +356,7 @@ pub enum MessagePayload {
     VariableTunnelBuildReply(Vec<[u8; 528]>),
 }
 
-#[cfg_attr(tarpaulin, skip)]
+#[cfg(not(tarpaulin_include))]
 impl fmt::Debug for MessagePayload {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
@@ -392,7 +392,7 @@ impl fmt::Debug for MessagePayload {
     }
 }
 
-#[cfg_attr(tarpaulin, skip)]
+#[cfg(not(tarpaulin_include))]
 impl fmt::Display for MessagePayload {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match *self {
@@ -425,7 +425,7 @@ pub struct Message {
     pub(crate) payload: MessagePayload,
 }
 
-#[cfg_attr(tarpaulin, skip)]
+#[cfg(not(tarpaulin_include))]
 impl fmt::Display for Message {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         format!(

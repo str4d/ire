@@ -243,8 +243,8 @@ fn database_store(i: &[u8]) -> IResult<&[u8], MessagePayload> {
     let (i, (key, ds_type)) = pair(hash, be_u8)(i)?;
     let (i, reply) = reply_path(i)?;
     let (i, data) = match ds_type {
-        0 => map(compressed_ri, |ri| DatabaseStoreData::RI(ri))(i),
-        1 => map(lease_set, |ls| DatabaseStoreData::LS(ls))(i),
+        0 => map(compressed_ri, DatabaseStoreData::RI)(i),
+        1 => map(lease_set, DatabaseStoreData::LS)(i),
         _ => unimplemented!(),
     }?;
     Ok((
@@ -263,8 +263,8 @@ fn gen_database_store_data<'a>(
     data: &DatabaseStoreData,
 ) -> Result<(&'a mut [u8], usize), GenError> {
     match *data {
-        DatabaseStoreData::RI(ref ri) => gen_compressed_ri(input, &ri),
-        DatabaseStoreData::LS(ref ls) => gen_lease_set(input, &ls),
+        DatabaseStoreData::RI(ref ri) => gen_compressed_ri(input, ri),
+        DatabaseStoreData::LS(ref ls) => gen_lease_set(input, ls),
     }
 }
 
@@ -347,6 +347,7 @@ fn database_lookup(i: &[u8]) -> IResult<&[u8], MessagePayload> {
     ))
 }
 
+#[rustfmt::skip]
 fn gen_database_lookup<'a>(
     input: (&'a mut [u8], usize),
     dl: &DatabaseLookup,
@@ -356,7 +357,6 @@ fn gen_database_lookup<'a>(
         encryption: dl.reply_enc.is_some(),
         lookup_type: dl.lookup_type,
     };
-    #[cfg_attr(rustfmt, rustfmt_skip)]
     do_gen!(
         input,
         gen_hash(&dl.key) >>
@@ -452,6 +452,7 @@ fn garlic_clove_delivery_instructions(i: &[u8]) -> IResult<&[u8], GarlicCloveDel
     )(i)
 }
 
+#[rustfmt::skip]
 fn gen_garlic_clove_delivery_instructions<'a>(
     input: (&'a mut [u8], usize),
     gcdi: &GarlicCloveDeliveryInstructions,
@@ -464,7 +465,6 @@ fn gen_garlic_clove_delivery_instructions<'a>(
     if gcdi.delay_set {
         flags |= 0b0001_0000;
     }
-    #[cfg_attr(rustfmt, rustfmt_skip)]
     do_gen!(
         input,
         gen_be_u8!(flags) >>
@@ -719,7 +719,7 @@ fn gen_variable_tunnel_build_reply<'a>(
 //
 
 fn checksum(buf: &[u8]) -> u8 {
-    Sha256::digest(&buf)[0]
+    Sha256::digest(buf)[0]
 }
 
 fn gen_checksum(
@@ -812,19 +812,19 @@ fn gen_payload<'a>(
     payload: &MessagePayload,
 ) -> Result<(&'a mut [u8], usize), GenError> {
     match *payload {
-        MessagePayload::DatabaseStore(ref ds) => gen_database_store(input, &ds),
-        MessagePayload::DatabaseLookup(ref dl) => gen_database_lookup(input, &dl),
-        MessagePayload::DatabaseSearchReply(ref dsr) => gen_database_search_reply(input, &dsr),
-        MessagePayload::DeliveryStatus(ref ds) => gen_delivery_status(input, &ds),
-        MessagePayload::Garlic(ref g) => gen_garlic(input, &g),
-        MessagePayload::TunnelData(ref td) => gen_tunnel_data(input, &td),
-        MessagePayload::TunnelGateway(ref tg) => gen_tunnel_gateway(input, &tg),
-        MessagePayload::Data(ref d) => gen_data(input, &d),
+        MessagePayload::DatabaseStore(ref ds) => gen_database_store(input, ds),
+        MessagePayload::DatabaseLookup(ref dl) => gen_database_lookup(input, dl),
+        MessagePayload::DatabaseSearchReply(ref dsr) => gen_database_search_reply(input, dsr),
+        MessagePayload::DeliveryStatus(ref ds) => gen_delivery_status(input, ds),
+        MessagePayload::Garlic(ref g) => gen_garlic(input, g),
+        MessagePayload::TunnelData(ref td) => gen_tunnel_data(input, td),
+        MessagePayload::TunnelGateway(ref tg) => gen_tunnel_gateway(input, tg),
+        MessagePayload::Data(ref d) => gen_data(input, d),
         MessagePayload::TunnelBuild(tb) => gen_tunnel_build(input, &tb),
         MessagePayload::TunnelBuildReply(tbr) => gen_tunnel_build_reply(input, &tbr),
-        MessagePayload::VariableTunnelBuild(ref vtb) => gen_variable_tunnel_build(input, &vtb),
+        MessagePayload::VariableTunnelBuild(ref vtb) => gen_variable_tunnel_build(input, vtb),
         MessagePayload::VariableTunnelBuildReply(ref vtbr) => {
-            gen_variable_tunnel_build_reply(input, &vtbr)
+            gen_variable_tunnel_build_reply(input, vtbr)
         }
     }
 }
@@ -1095,8 +1095,7 @@ mod tests {
         // Valid payload checksum
         let a = b"#payloadspam";
         // Copy payload into a buffer with an empty checksum
-        let mut b = Vec::new();
-        b.push(0);
+        let mut b = vec![0];
         b.extend(a[1..].iter().cloned());
         // Generate and validate checksum of payload
         let res = gen_checksum((&mut b[..], 0), 1, 8);

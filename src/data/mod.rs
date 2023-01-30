@@ -47,7 +47,7 @@ pub enum ReadError {
     Parser,
 }
 
-#[cfg_attr(tarpaulin, skip)]
+#[cfg(not(tarpaulin_include))]
 impl fmt::Display for ReadError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -100,7 +100,7 @@ impl Hash {
     }
 }
 
-#[cfg_attr(tarpaulin, skip)]
+#[cfg(not(tarpaulin_include))]
 impl fmt::Debug for Hash {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         write!(f, "Hash(")?;
@@ -109,7 +109,7 @@ impl fmt::Debug for Hash {
     }
 }
 
-#[cfg_attr(tarpaulin, skip)]
+#[cfg(not(tarpaulin_include))]
 impl fmt::Display for Hash {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", constants::I2P_BASE64.encode(&self.0))
@@ -118,7 +118,7 @@ impl fmt::Display for Hash {
 
 /// The number of milliseconds since midnight on January 1, 1970 in the GMT
 /// timezone. If the number is 0, the date is undefined or null.
-#[derive(Clone, Copy, Debug, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd)]
 pub struct I2PDate(pub(crate) u64);
 
 impl I2PDate {
@@ -134,7 +134,7 @@ impl I2PDate {
     }
 }
 
-#[cfg_attr(tarpaulin, skip)]
+#[cfg(not(tarpaulin_include))]
 impl fmt::Display for I2PDate {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         DateTime::<Utc>::from(self.to_system_time()).fmt(f)
@@ -151,7 +151,7 @@ impl I2PString {
     }
 
     pub fn to_csv(&self) -> Vec<Self> {
-        self.0.split(',').map(|s| Self::new(s)).collect()
+        self.0.split(',').map(Self::new).collect()
     }
 }
 
@@ -162,7 +162,7 @@ impl<'a> From<&'a str> for I2PString {
 }
 
 /// A set of key/value mappings or properties.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Mapping(pub HashMap<I2PString, I2PString>);
 
 /// A random number.
@@ -182,7 +182,7 @@ impl SessionTag {
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct TunnelId(pub u32);
 
-#[cfg_attr(tarpaulin, skip)]
+#[cfg(not(tarpaulin_include))]
 impl fmt::Display for TunnelId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.0.fmt(f)
@@ -196,7 +196,7 @@ impl fmt::Display for TunnelId {
 /// By maintaining exactly 384 bytes before the certificate, and putting any
 /// excess key data inside the certificate, we maintain compatibility for any
 /// software that parses Destinations and RouterIdentities.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct KeyCertificate {
     pub sig_type: SigType,
     enc_type: EncType,
@@ -206,7 +206,7 @@ pub struct KeyCertificate {
 
 /// A container for various receipts or proof of works used throughout the I2P
 /// network.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Certificate {
     Null,
     HashCash(Vec<u8>),
@@ -232,7 +232,7 @@ impl Certificate {
 #[derive(Clone, PartialEq)]
 pub(crate) struct Padding(Vec<u8>);
 
-#[cfg_attr(tarpaulin, skip)]
+#[cfg(not(tarpaulin_include))]
 impl fmt::Debug for Padding {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         write!(f, "Padding(")?;
@@ -349,7 +349,7 @@ impl RouterSecretKeys {
 }
 
 /// Defines the means to contact a router through a transport protocol.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct RouterAddress {
     cost: u8,
     expiration: I2PDate,

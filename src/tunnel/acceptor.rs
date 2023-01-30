@@ -1,6 +1,5 @@
 //! Logic for processing incoming tunnel build requests.
 
-use block_modes::{block_padding::NoPadding, BlockMode, Cbc};
 use futures::{sink, sync::mpsc, try_ready, Async, Future, Poll, Sink, Stream};
 use std::slice::IterMut;
 use std::sync::{Arc, Mutex};
@@ -8,8 +7,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::{io, spawn};
 use tokio_threadpool::blocking;
 
+use cbc::cipher::{BlockEncryptMut, KeyIvInit};
+
 use super::{encryption::LayerCipher, HopConfig, HopData, TUNNEL_LIFETIME};
-use crate::crypto::{elgamal, SessionKey};
+use crate::crypto::{elgamal, to_blocks, SessionKey};
 use crate::data::{Hash, RouterInfo, TunnelId};
 use crate::i2np::{
     frame::gen_build_response_record, BuildRequestError, BuildRequestRecord, BuildResponseRecord,
@@ -66,7 +67,7 @@ impl TunnelBuildRequest for [[u8; 528]; 8] {
     }
 
     fn iter_mut(&mut self) -> IterMut<[u8; 528]> {
-        (&mut self[..]).iter_mut()
+        self[..].iter_mut()
     }
 
     fn to_msg(self, msg_id: u32) -> Message {
@@ -88,7 +89,7 @@ impl TunnelBuildRequest for Vec<[u8; 528]> {
     }
 
     fn iter_mut(&mut self) -> IterMut<[u8; 528]> {
-        (&mut self[..]).iter_mut()
+        self[..].iter_mut()
     }
 
     fn to_msg(self, msg_id: u32) -> Message {
@@ -326,11 +327,14 @@ impl<TB: TunnelBuildRequest> Future for HopAcceptor<TB> {
 
                             // Now encrypt all the entries
                             for tb_entry in info.tb.iter_mut() {
-                                let cipher: Cbc<aes::Aes256, NoPadding> =
-                                    Cbc::new_from_slices(&info.reply_key.0, &info.reply_iv)
-                                        .expect("key and iv are correct length");
+                                let mut cipher: cbc::Encryptor<aes::Aes256> =
+                                    cbc::Encryptor::new_from_slices(
+                                        &info.reply_key.0,
+                                        &info.reply_iv,
+                                    )
+                                    .expect("key and iv are correct length");
                                 let len = tb_entry.len();
-                                cipher.encrypt(tb_entry, len).expect("Should not fail!");
+                                cipher.encrypt_blocks_mut(to_blocks(tb_entry));
                             }
                         }),
                         self,
@@ -586,7 +590,7 @@ mod tests {
         };
 
         let f = HopAcceptor::new(
-            from_ident.clone(),
+            from_ident,
             tb,
             0,
             decryptor,
@@ -636,7 +640,7 @@ mod tests {
         };
 
         let f = HopAcceptor::new(
-            from_ident.clone(),
+            from_ident,
             tb,
             0,
             decryptor,

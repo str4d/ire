@@ -16,7 +16,7 @@ type IoFuture<T> = Box<dyn Future<Item = T, Error = io::Error> + Send>;
 //
 // ((url, port), path)                      // certificates/reseed/      // certificates/ssl/          // notes
 // ----------------------------------       ------------------------     -------------------------     ---------------
-#[cfg_attr(rustfmt, rustfmt_skip)]
+#[rustfmt::skip]
 const DEFAULT_RESEED_HOSTS: [((&str, u16), &str); 12] = [
     (("i2p.novg.net", 443), "/"),           // igor_at_novg.net.crt      // CA
     (("i2pseed.creativecowpat.net", 8443), "/"), // creativecowpat_at_mail.i2p.crt // i2pseed.creativecowpat.net.crt

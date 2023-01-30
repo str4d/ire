@@ -59,16 +59,16 @@ trait Transport {
 impl<D: Distributor> Manager<D> {
     pub fn from_config(config: &config::Config, distributor: D) -> Self {
         let ntcp_addr = config
-            .get_str(config::NTCP_LISTEN)
+            .get_string(config::NTCP_LISTEN)
             .expect("Must configure an NTCP address")
             .parse()
             .unwrap();
         let ntcp2_addr = config
-            .get_str(config::NTCP2_LISTEN)
+            .get_string(config::NTCP2_LISTEN)
             .expect("Must configure an NTCP2 address")
             .parse()
             .unwrap();
-        let ntcp2_keyfile = config.get_str(config::NTCP2_KEYFILE).unwrap();
+        let ntcp2_keyfile = config.get_string(config::NTCP2_KEYFILE).unwrap();
 
         let ntcp_manager = ntcp::Manager::new(ntcp_addr, distributor.clone());
         let ntcp2_manager =
@@ -125,7 +125,7 @@ impl<D: Distributor> CommSystem for Manager<D> {
     fn send(&self, peer: RouterInfo, msg: Message) -> Result<IoFuture<()>, (RouterInfo, Message)> {
         match once(self.ntcp.bid(&peer, msg.size()))
             .chain(once(self.ntcp2.bid(&peer, msg.ntcp2_size())))
-            .filter_map(|b| b)
+            .flatten()
             .min_by_key(|b| b.bid)
         {
             Some(bid) => Ok(Box::new(bid.send((peer, msg)).map(|_| ()).map_err(|_| {
@@ -183,7 +183,7 @@ mod tests {
                 cable.bob_to_alice = cable.bob_to_alice.split_off(n_out);
                 Ok(n_out)
             } else {
-                (&mut buf[..n_in]).copy_from_slice(&cable.bob_to_alice);
+                buf[..n_in].copy_from_slice(&cable.bob_to_alice);
                 cable.bob_to_alice.clear();
                 Ok(n_in)
             }
@@ -231,7 +231,7 @@ mod tests {
                 cable.alice_to_bob = cable.alice_to_bob.split_off(n_out);
                 Ok(n_out)
             } else {
-                (&mut buf[..n_in]).copy_from_slice(&cable.alice_to_bob);
+                buf[..n_in].copy_from_slice(&cable.alice_to_bob);
                 cable.alice_to_bob.clear();
                 Ok(n_in)
             }
@@ -265,15 +265,14 @@ mod tests {
         let ntcp2_addr: SocketAddr = "127.0.0.2:0".parse().unwrap();
         let ntcp2_keyfile = dir.path().join("test.ntcp2.keys.dat");
 
-        let mut config = config::Config::default();
-        config
-            .set(config::NTCP_LISTEN, ntcp_addr.to_string())
-            .unwrap();
-        config
-            .set(config::NTCP2_LISTEN, ntcp2_addr.to_string())
-            .unwrap();
-        config
-            .set(config::NTCP2_KEYFILE, ntcp2_keyfile.to_str())
+        let config = config::Config::builder()
+            .set_override(config::NTCP_LISTEN, ntcp_addr.to_string())
+            .unwrap()
+            .set_override(config::NTCP2_LISTEN, ntcp2_addr.to_string())
+            .unwrap()
+            .set_override(config::NTCP2_KEYFILE, ntcp2_keyfile.to_str())
+            .unwrap()
+            .build()
             .unwrap();
 
         let distributor = MockDistributor::new();

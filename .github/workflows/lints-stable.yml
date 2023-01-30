@@ -5,7 +5,7 @@ on: pull_request
 
 jobs:
   clippy:
-    name: Clippy (1.51.0)
+    name: Clippy
     timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
@@ -13,6 +13,6 @@ jobs:
       - name: Run Clippy
         uses: actions-rs/clippy-check@v1
         with:
-          name: Clippy (1.51.0)
+          name: Clippy
           token: ${{ secrets.GITHUB_TOKEN }}
           args: --features cli --all-targets -- -D warnings

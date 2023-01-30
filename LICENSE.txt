@@ -1,4 +1,4 @@
-Copyright (c) 2017 The Ire Developers. The canonical list of project
+Copyright (c) 2017-2023 The Ire Developers. The canonical list of project
 contributors who hold copyright over the project can be found at:
 
 https://github.com/str4d/ire/blob/master/AUTHORS.md

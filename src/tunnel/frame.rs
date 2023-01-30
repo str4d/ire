@@ -116,14 +116,14 @@ fn gen_first_frag_di<'a>(
         TunnelMessageDeliveryType::Tunnel(tid, to) => do_gen!(
             input,
             gen_be_u8!(x)
-                >> gen_tunnel_id(&tid)
-                >> gen_hash(&to)
+                >> gen_tunnel_id(tid)
+                >> gen_hash(to)
                 >> gen_cond!(di.msg_id.is_some(), gen_be_u32!(di.msg_id.unwrap()))
         ),
         TunnelMessageDeliveryType::Router(to) => do_gen!(
             input,
             gen_be_u8!(x)
-                >> gen_hash(&to)
+                >> gen_hash(to)
                 >> gen_cond!(di.msg_id.is_some(), gen_be_u32!(di.msg_id.unwrap()))
         ),
     }

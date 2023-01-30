@@ -1,7 +1,9 @@
 //! Cryptographic types and operations.
 
-use aes::cipher::generic_array::{ArrayLength, GenericArray as AesGenericArray};
-use block_modes::{block_padding::NoPadding, BlockMode, Cbc};
+use aes::cipher::{
+    generic_array::{ArrayLength, GenericArray as AesGenericArray},
+    BlockDecryptMut, BlockEncryptMut, KeyIvInit,
+};
 use nom::Err;
 use rand::Rng;
 use ring::signature::{
@@ -22,6 +24,7 @@ use signatory::{
 use signatory_dalek::{Ed25519Signer, Ed25519Verifier};
 use signatory_ring::ecdsa::{p256, p384};
 use std::{fmt, slice};
+use subtle::{Choice, ConstantTimeEq};
 
 use crate::constants;
 use crate::util::fmt_colon_delimited_hex;
@@ -48,7 +51,7 @@ pub enum Error {
     TypeMismatch,
 }
 
-#[cfg_attr(tarpaulin, skip)]
+#[cfg(not(tarpaulin_include))]
 impl fmt::Display for Error {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -64,7 +67,7 @@ impl fmt::Display for Error {
 }
 
 /// Various signature algorithms present on the network.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SigType {
     DsaSha1,
     EcdsaSha256P256,
@@ -156,7 +159,7 @@ impl SigType {
 }
 
 /// Various encryption algorithms present on the network.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EncType {
     ElGamal2048,
 }
@@ -205,7 +208,7 @@ impl Clone for PublicKey {
     }
 }
 
-#[cfg_attr(tarpaulin, skip)]
+#[cfg(not(tarpaulin_include))]
 impl fmt::Debug for PublicKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         write!(f, "PublicKey(")?;
@@ -244,7 +247,7 @@ impl Clone for PrivateKey {
     }
 }
 
-#[cfg_attr(tarpaulin, skip)]
+#[cfg(not(tarpaulin_include))]
 impl fmt::Debug for PrivateKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         write!(f, "PrivateKey(")?;
@@ -254,7 +257,7 @@ impl fmt::Debug for PrivateKey {
 }
 
 /// The public component of a signature keypair.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SigningPublicKey {
     DsaSha1(dsa::DsaPublicKey),
     EcdsaSha256P256(ecdsa::PublicKey<NistP256>),
@@ -431,14 +434,14 @@ impl Clone for SigningPrivateKey {
 }
 
 /// The public component of an offline signature keypair.
-#[derive(Clone, PartialEq)]
+#[derive(Clone)]
 pub enum OfflineSigningPublicKey {
     Rsa2048Sha256(Vec<u8>),
     Rsa3072Sha384(Vec<u8>),
     Rsa4096Sha512(Vec<u8>),
 }
 
-#[cfg_attr(tarpaulin, skip)]
+#[cfg(not(tarpaulin_include))]
 impl fmt::Debug for OfflineSigningPublicKey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         write!(f, "OfflineSigningPublicKey(")?;
@@ -484,17 +487,17 @@ impl OfflineSigningPublicKey {
         match (self, signature) {
             (OfflineSigningPublicKey::Rsa2048Sha256(pk), Signature::Rsa2048Sha256(s)) => {
                 UnparsedPublicKey::new(&RSA_PKCS1_2048_8192_SHA256_RAW, pk)
-                    .verify(message, &s)
+                    .verify(message, s)
                     .map_err(|_| Error::InvalidSignature)
             }
             (OfflineSigningPublicKey::Rsa3072Sha384(pk), Signature::Rsa3072Sha384(s)) => {
                 UnparsedPublicKey::new(&RSA_PKCS1_3072_8192_SHA384_RAW, pk)
-                    .verify(message, &s)
+                    .verify(message, s)
                     .map_err(|_| Error::InvalidSignature)
             }
             (OfflineSigningPublicKey::Rsa4096Sha512(pk), Signature::Rsa4096Sha512(s)) => {
                 UnparsedPublicKey::new(&RSA_PKCS1_4096_8192_SHA512_RAW, pk)
-                    .verify(message, &s)
+                    .verify(message, s)
                     .map_err(|_| Error::InvalidSignature)
             }
             _ => Err(Error::TypeMismatch),
@@ -561,8 +564,20 @@ impl Signature {
 }
 
 /// A symmetric key used for AES-256 encryption.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct SessionKey(pub [u8; 32]);
+
+impl ConstantTimeEq for SessionKey {
+    fn ct_eq(&self, other: &Self) -> Choice {
+        self.0.ct_eq(&other.0)
+    }
+}
+
+impl PartialEq for SessionKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.ct_eq(other).into()
+    }
+}
 
 impl SessionKey {
     pub fn generate<R: Rng>(rng: &mut R) -> Self {
@@ -582,7 +597,7 @@ impl SessionKey {
 // Algorithm implementations
 //
 
-fn to_blocks<N>(data: &mut [u8]) -> &mut [AesGenericArray<u8, N>]
+pub(crate) fn to_blocks<N>(data: &mut [u8]) -> &mut [AesGenericArray<u8, N>]
 where
     N: ArrayLength<u8>,
 {
@@ -596,15 +611,17 @@ where
 }
 
 pub(crate) struct Aes256 {
-    cbc_enc: Cbc<aes::Aes256, NoPadding>,
-    cbc_dec: Cbc<aes::Aes256, NoPadding>,
+    cbc_enc: cbc::Encryptor<aes::Aes256>,
+    cbc_dec: cbc::Decryptor<aes::Aes256>,
 }
 
 impl Aes256 {
     pub fn new(key: &SessionKey, iv_enc: &[u8], iv_dec: &[u8]) -> Self {
         Aes256 {
-            cbc_enc: Cbc::new_from_slices(&key.0, iv_enc).expect("key and iv are correct length"),
-            cbc_dec: Cbc::new_from_slices(&key.0, iv_dec).expect("key and iv are correct length"),
+            cbc_enc: cbc::Encryptor::new_from_slices(&key.0, iv_enc)
+                .expect("key and iv are correct length"),
+            cbc_dec: cbc::Decryptor::new_from_slices(&key.0, iv_dec)
+                .expect("key and iv are correct length"),
         }
     }
 
@@ -616,7 +633,7 @@ impl Aes256 {
 
         // Integer division, leaves extra bytes unencrypted at the end
         let end = (buf.len() / AES_BLOCK_SIZE) * AES_BLOCK_SIZE;
-        self.cbc_enc.encrypt_blocks(to_blocks(&mut buf[..end]));
+        self.cbc_enc.encrypt_blocks_mut(to_blocks(&mut buf[..end]));
         Some(end)
     }
 
@@ -628,7 +645,7 @@ impl Aes256 {
 
         // Integer division, leaves extra bytes undecrypted at the end
         let end = (buf.len() / AES_BLOCK_SIZE) * AES_BLOCK_SIZE;
-        self.cbc_dec.decrypt_blocks(to_blocks(&mut buf[..end]));
+        self.cbc_dec.decrypt_blocks_mut(to_blocks(&mut buf[..end]));
         Some(end)
     }
 }

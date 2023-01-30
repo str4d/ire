@@ -50,9 +50,7 @@ impl Su3File {
         signers: &HashMap<&'static str, OfflineSigningPublicKey>,
     ) -> Result<Su3File, Error> {
         let (input, ret) = frame::http_status_line(input)?;
-        if let Err(e) = ret {
-            return Err(e);
-        }
+        ret?;
 
         let res: Result<_, nom::Err<()>> = take_until(&SU3_MAGIC[..])(input);
         let (data, _) = res?;
