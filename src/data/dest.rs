@@ -182,11 +182,7 @@ mod tests {
         let mut ls = LeaseSet::new(dest, enc_key, sig_key);
         let end_date = I2PDate::from_system_time(SystemTime::now());
         for i in 1..3 {
-            ls.add_lease(Lease::new(
-                Hash([i; 32]),
-                TunnelId(i.into()),
-                end_date.clone(),
-            ));
+            ls.add_lease(Lease::new(Hash([i; 32]), TunnelId(i.into()), end_date));
         }
 
         assert_eq!(ls.verify(), Err(crypto::Error::NoSignature));

@@ -72,8 +72,8 @@ where
         // Initialize our responder NoiseSession using a builder.
         let builder: Builder<'_> = Builder::new(NTCP2_NOISE_PROTOCOL_NAME.parse().unwrap());
         let noise = builder
-            .local_private_key(&static_key)
-            .aesobfse(&aesobfse_key, &aesobfse_iv)
+            .local_private_key(static_key)
+            .aesobfse(aesobfse_key, aesobfse_iv)
             .enable_ask()
             .build_responder()
             .unwrap();
@@ -371,7 +371,7 @@ where
         // Initialize our initiator NoiseSession using a builder.
         let builder: Builder<'_> = Builder::new(NTCP2_NOISE_PROTOCOL_NAME.parse().unwrap());
         let noise = builder
-            .local_private_key(&static_key)
+            .local_private_key(static_key)
             .remote_public_key(&remote_key)
             .aesobfse(&aesobfse_key, &aesobfse_iv)
             .enable_ask()
@@ -691,9 +691,8 @@ mod tests {
 
             fn poll(&mut self) -> Poll<(), io::Error> {
                 loop {
-                    match self.sock.poll()? {
-                        Async::Ready(None) => return Ok(Async::Ready(())),
-                        _ => {}
+                    if let Async::Ready(None) = self.sock.poll()? {
+                        return Ok(Async::Ready(()));
                     }
                 }
             }

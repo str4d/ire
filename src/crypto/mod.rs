@@ -22,6 +22,7 @@ use signatory::{
 use signatory_dalek::{Ed25519Signer, Ed25519Verifier};
 use signatory_ring::ecdsa::{p256, p384};
 use std::{fmt, slice};
+use subtle::{Choice, ConstantTimeEq};
 
 use crate::constants;
 use crate::util::fmt_colon_delimited_hex;
@@ -64,7 +65,7 @@ impl fmt::Display for Error {
 }
 
 /// Various signature algorithms present on the network.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SigType {
     DsaSha1,
     EcdsaSha256P256,
@@ -156,7 +157,7 @@ impl SigType {
 }
 
 /// Various encryption algorithms present on the network.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum EncType {
     ElGamal2048,
 }
@@ -254,7 +255,7 @@ impl fmt::Debug for PrivateKey {
 }
 
 /// The public component of a signature keypair.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SigningPublicKey {
     DsaSha1(dsa::DsaPublicKey),
     EcdsaSha256P256(ecdsa::PublicKey<NistP256>),
@@ -431,7 +432,7 @@ impl Clone for SigningPrivateKey {
 }
 
 /// The public component of an offline signature keypair.
-#[derive(Clone, PartialEq)]
+#[derive(Clone)]
 pub enum OfflineSigningPublicKey {
     Rsa2048Sha256(Vec<u8>),
     Rsa3072Sha384(Vec<u8>),
@@ -484,17 +485,17 @@ impl OfflineSigningPublicKey {
         match (self, signature) {
             (OfflineSigningPublicKey::Rsa2048Sha256(pk), Signature::Rsa2048Sha256(s)) => {
                 UnparsedPublicKey::new(&RSA_PKCS1_2048_8192_SHA256_RAW, pk)
-                    .verify(message, &s)
+                    .verify(message, s)
                     .map_err(|_| Error::InvalidSignature)
             }
             (OfflineSigningPublicKey::Rsa3072Sha384(pk), Signature::Rsa3072Sha384(s)) => {
                 UnparsedPublicKey::new(&RSA_PKCS1_3072_8192_SHA384_RAW, pk)
-                    .verify(message, &s)
+                    .verify(message, s)
                     .map_err(|_| Error::InvalidSignature)
             }
             (OfflineSigningPublicKey::Rsa4096Sha512(pk), Signature::Rsa4096Sha512(s)) => {
                 UnparsedPublicKey::new(&RSA_PKCS1_4096_8192_SHA512_RAW, pk)
-                    .verify(message, &s)
+                    .verify(message, s)
                     .map_err(|_| Error::InvalidSignature)
             }
             _ => Err(Error::TypeMismatch),
@@ -561,8 +562,20 @@ impl Signature {
 }
 
 /// A symmetric key used for AES-256 encryption.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct SessionKey(pub [u8; 32]);
+
+impl ConstantTimeEq for SessionKey {
+    fn ct_eq(&self, other: &Self) -> Choice {
+        self.0.ct_eq(&other.0)
+    }
+}
+
+impl PartialEq for SessionKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.ct_eq(other).into()
+    }
+}
 
 impl SessionKey {
     pub fn generate<R: Rng>(rng: &mut R) -> Self {

@@ -49,7 +49,7 @@ impl<T> From<nom::Err<T>> for BuildRequestError {
 // Common structures
 //
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum ParticipantType {
     InboundGateway,
     Intermediate,
@@ -129,7 +129,7 @@ impl BuildRequestRecord {
 
 /// Reply to a BuildRequestRecord stating whether or not a particular hop agrees
 /// to participate.
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Eq)]
 pub struct BuildResponseRecord {
     pub reply: u8,
 }
@@ -185,7 +185,7 @@ impl fmt::Display for DatabaseStore {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DatabaseLookupType {
     Any,
     LeaseSet,

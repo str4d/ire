@@ -313,14 +313,15 @@ mod tests {
 
     macro_rules! bake_and_eat {
         ($oven:expr, $monster:expr, $value:expr, $expected:expr) => {
+            let value = $value;
             let mut res = vec![];
             res.resize($expected.len(), 0);
-            match $oven((&mut res, 0), &$value) {
+            match $oven((&mut res, 0), &value) {
                 Ok(_) => assert_eq!(&res, &$expected),
                 Err(e) => panic!("Unexpected error: {:?}", e),
             }
             match $monster(&res) {
-                Ok((_, m)) => assert_eq!(m, $value),
+                Ok((_, m)) => assert_eq!(m, value),
                 Err(e) => panic!("Unexpected error: {:?}", e),
             }
         };
@@ -358,7 +359,7 @@ mod tests {
         ri_block.extend_from_slice(ROUTER_INFO);
 
         eval_block!(
-            Block::RouterInfo(ri.clone(), RouterInfoFlags { flood: true }),
+            Block::RouterInfo(ri, RouterInfoFlags { flood: true }),
             ri_block
         );
     }

@@ -80,11 +80,11 @@ fn gen_adler(
 // +------+------------+---------+-------+
 //  short  size octets     octets    octets
 
+#[rustfmt::skip]
 fn gen_standard_frame<'a>(
     input: (&'a mut [u8], usize),
     msg: &Message,
 ) -> Result<(&'a mut [u8], usize), GenError> {
-    #[cfg_attr(rustfmt, rustfmt_skip)]
     do_gen!(
         input,
         start:     gen_skip!(2) >>
@@ -101,11 +101,11 @@ fn gen_standard_frame<'a>(
 // +-----+-----------+---------+-------+
 //  short    long      octets    octets
 
+#[rustfmt::skip]
 fn gen_timestamp_frame(
     input: (&mut [u8], usize),
     timestamp: u32,
 ) -> Result<(&mut [u8], usize), GenError> {
-    #[cfg_attr(rustfmt, rustfmt_skip)]
     do_gen!(
         input,
         start: gen_be_u16!(0) >>
@@ -137,7 +137,7 @@ pub fn gen_frame<'a>(
     frame: &Frame,
 ) -> Result<(&'a mut [u8], usize), GenError> {
     match *frame {
-        Frame::Standard(ref msg) => gen_standard_frame(input, &msg),
+        Frame::Standard(ref msg) => gen_standard_frame(input, msg),
         Frame::TimeSync(ts) => gen_timestamp_frame(input, ts),
     }
 }

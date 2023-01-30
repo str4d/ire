@@ -95,7 +95,7 @@ macro_rules! io_err {
 // Message transport
 //
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Eq)]
 pub struct RouterInfoFlags {
     flood: bool,
 }

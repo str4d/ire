@@ -66,7 +66,7 @@ impl TunnelBuildRequest for [[u8; 528]; 8] {
     }
 
     fn iter_mut(&mut self) -> IterMut<[u8; 528]> {
-        (&mut self[..]).iter_mut()
+        self[..].iter_mut()
     }
 
     fn to_msg(self, msg_id: u32) -> Message {
@@ -88,7 +88,7 @@ impl TunnelBuildRequest for Vec<[u8; 528]> {
     }
 
     fn iter_mut(&mut self) -> IterMut<[u8; 528]> {
-        (&mut self[..]).iter_mut()
+        self[..].iter_mut()
     }
 
     fn to_msg(self, msg_id: u32) -> Message {
@@ -586,7 +586,7 @@ mod tests {
         };
 
         let f = HopAcceptor::new(
-            from_ident.clone(),
+            from_ident,
             tb,
             0,
             decryptor,
@@ -636,7 +636,7 @@ mod tests {
         };
 
         let f = HopAcceptor::new(
-            from_ident.clone(),
+            from_ident,
             tb,
             0,
             decryptor,

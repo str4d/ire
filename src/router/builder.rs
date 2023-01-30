@@ -87,7 +87,7 @@ impl Builder {
         settings.set_default(config::RESEED_ENABLE, true).unwrap();
 
         if let Some(ref cfg_file) = self.cfg_file {
-            settings.merge(File::with_name(&cfg_file)).unwrap();
+            settings.merge(File::with_name(cfg_file)).unwrap();
         }
 
         let keys = match self.keys {

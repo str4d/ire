@@ -125,7 +125,7 @@ impl<D: Distributor> CommSystem for Manager<D> {
     fn send(&self, peer: RouterInfo, msg: Message) -> Result<IoFuture<()>, (RouterInfo, Message)> {
         match once(self.ntcp.bid(&peer, msg.size()))
             .chain(once(self.ntcp2.bid(&peer, msg.ntcp2_size())))
-            .filter_map(|b| b)
+            .flatten()
             .min_by_key(|b| b.bid)
         {
             Some(bid) => Ok(Box::new(bid.send((peer, msg)).map(|_| ()).map_err(|_| {
@@ -183,7 +183,7 @@ mod tests {
                 cable.bob_to_alice = cable.bob_to_alice.split_off(n_out);
                 Ok(n_out)
             } else {
-                (&mut buf[..n_in]).copy_from_slice(&cable.bob_to_alice);
+                buf[..n_in].copy_from_slice(&cable.bob_to_alice);
                 cable.bob_to_alice.clear();
                 Ok(n_in)
             }
@@ -231,7 +231,7 @@ mod tests {
                 cable.alice_to_bob = cable.alice_to_bob.split_off(n_out);
                 Ok(n_out)
             } else {
-                (&mut buf[..n_in]).copy_from_slice(&cable.alice_to_bob);
+                buf[..n_in].copy_from_slice(&cable.alice_to_bob);
                 cable.alice_to_bob.clear();
                 Ok(n_in)
             }

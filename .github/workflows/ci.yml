@@ -62,7 +62,7 @@ jobs:
       - run: cargo fetch
 
       # Ensure intra-documentation links all resolve correctly
-      # Requires #![deny(intra_doc_link_resolution_failure)] in crate.
+      # Requires #![deny(rustdoc::broken_intra_doc_links)] in crate.
       - name: Check intra-doc links
         run: cargo doc --document-private-items
 

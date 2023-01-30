@@ -9,24 +9,49 @@ use num_bigint::BigUint;
 use num_traits::Zero;
 use rand::{rngs::OsRng, Rng};
 use sha1::{Digest, Sha1};
+use subtle::{Choice, ConstantTimeEq};
 
 use super::math::rectify;
 use crate::constants::{DSA_G, DSA_P, DSA_Q, DSA_QM2};
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct DsaSignature {
     rbar: [u8; 20],
     sbar: [u8; 20],
+}
+
+impl ConstantTimeEq for DsaSignature {
+    fn ct_eq(&self, other: &Self) -> Choice {
+        self.rbar.ct_eq(&other.rbar) & self.sbar.ct_eq(&other.sbar)
+    }
+}
+
+impl PartialEq for DsaSignature {
+    fn eq(&self, other: &Self) -> bool {
+        self.ct_eq(other).into()
+    }
 }
 
 /// An I2P DSA 1024 signing key. Private because we only want the implementation
 /// for testing purposes; Ire does not support DSA 1024 key material.
 struct DsaPrivateKey(BigUint);
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, Eq)]
 pub struct DsaPublicKey {
     bi: BigUint,
     bytes: Vec<u8>,
+}
+
+impl ConstantTimeEq for DsaPublicKey {
+    fn ct_eq(&self, other: &Self) -> Choice {
+        self.as_bytes().ct_eq(other.as_bytes())
+    }
+}
+
+impl PartialEq for DsaPublicKey {
+    fn eq(&self, other: &Self) -> bool {
+        self.ct_eq(other).into()
+    }
 }
 
 impl DsaSignature {
