@@ -98,7 +98,7 @@ Bug reports and pull requests are welcome on GitHub at https://github.com/str4d/
 
 ## Copyright
 
-Copyright (c) 2017 [The Ire Developers][AUTHORS].
+Copyright (c) 2017-2023 [The Ire Developers][AUTHORS].
 See [LICENSE.txt] for further details.
 
 [AUTHORS]: https://github.com/str4d/ire/blob/master/AUTHORS.md

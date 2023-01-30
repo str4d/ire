@@ -28,7 +28,7 @@ fn main() {
 fn inner_main() -> i32 {
     let matches = App::new("ire")
         .version("0.0.1")
-        .author("Jack Grigg <str4d@i2pmail.org>")
+        .author("Jack Grigg <thestr4d@gmail.com>")
         .about("The I2P Rust engine")
         .subcommand(
             SubCommand::with_name("router").arg(
