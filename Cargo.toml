@@ -38,7 +38,6 @@ siphasher = "0.3"
 tokio = "0.1"
 tokio-threadpool = "0.1"
 tokio-tls = "0.2"
-zip = { version = "0.5", default-features = false, features = ["deflate"] }
 
 # AES-256
 aes = "0.8"
@@ -47,6 +46,9 @@ cbc = "0.1"
 # Hash functions
 sha1 = "0.10"
 sha2 = "0.10"
+
+# Reseeding
+zip = { version = "0.6", default-features = false, features = ["deflate"] }
 
 # Secret management
 subtle = "2"
