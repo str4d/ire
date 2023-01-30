@@ -34,8 +34,6 @@ num-bigint = { version = "0.4", features = ["rand"] }
 num-traits = "0.2"
 rand = "0.8"
 ring = "0.16.9"
-sha-1 = "0.9"
-sha2 = "0.9"
 signatory = { version = "0.17.1", features = ["ecdsa", "ed25519"] }
 signatory-dalek = "0.17"
 signatory-ring = "0.17"
@@ -48,6 +46,10 @@ zip = { version = "0.5", default-features = false, features = ["deflate"] }
 # AES-256
 aes = "0.8"
 cbc = "0.1"
+
+# Hash functions
+sha1 = "0.10"
+sha2 = "0.10"
 
 # Secret management
 subtle = "2"
