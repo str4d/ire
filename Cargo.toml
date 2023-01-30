@@ -17,7 +17,6 @@ arrayref = "0.3"
 bloom-filter-rs = "0.1"
 bytes = "0.4"
 chrono = "0.4"
-config = { version = "0.11", default-features = false, features = ["toml"] }
 cookie-factory = "0.2"
 data-encoding = "2.1"
 flate2 = "1.0"
@@ -51,6 +50,9 @@ sha2 = "0.10"
 
 # Secret management
 subtle = "2"
+
+# Configuration
+config = { version = "0.13", default-features = false, features = ["toml"] }
 
 # CLI dependencies
 clap = { version = "2.32", optional = true }

@@ -81,18 +81,22 @@ impl Builder {
 
     /// Build a Router.
     pub fn build(self) -> Result<Router, Error> {
-        let mut settings = Config::default();
-
-        // Default config options
-        settings.set_default(config::RESEED_ENABLE, true).unwrap();
-
-        if let Some(ref cfg_file) = self.cfg_file {
-            settings.merge(File::with_name(cfg_file)).unwrap();
-        }
+        let settings = Config::builder()
+            .set_default(config::RESEED_ENABLE, true)
+            .unwrap()
+            .add_source(
+                self.cfg_file
+                    .as_deref()
+                    .map(File::with_name)
+                    .into_iter()
+                    .collect::<Vec<_>>(),
+            )
+            .build()
+            .unwrap();
 
         let keys = match self.keys {
             Some(keys) => keys,
-            None => match settings.get_str(config::ROUTER_KEYFILE) {
+            None => match settings.get_string(config::ROUTER_KEYFILE) {
                 // Check if the keyfile exists
                 Ok(keyfile) => match fs::metadata(&keyfile) {
                     Ok(_) => RouterSecretKeys::from_file(&keyfile)?,
@@ -160,7 +164,7 @@ impl Builder {
         ri.set_addresses(comms.read().unwrap().addresses());
         ri.sign(&keys.signing_private_key);
 
-        match settings.get_str(config::RI_FILE) {
+        match settings.get_string(config::RI_FILE) {
             Ok(ri_file) => ri.to_file(&ri_file)?,
             Err(ConfigError::NotFound(key)) => warn!(
                 "Config option {} not set, not writing RouterInfo to disk",

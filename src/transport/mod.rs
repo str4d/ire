@@ -59,16 +59,16 @@ trait Transport {
 impl<D: Distributor> Manager<D> {
     pub fn from_config(config: &config::Config, distributor: D) -> Self {
         let ntcp_addr = config
-            .get_str(config::NTCP_LISTEN)
+            .get_string(config::NTCP_LISTEN)
             .expect("Must configure an NTCP address")
             .parse()
             .unwrap();
         let ntcp2_addr = config
-            .get_str(config::NTCP2_LISTEN)
+            .get_string(config::NTCP2_LISTEN)
             .expect("Must configure an NTCP2 address")
             .parse()
             .unwrap();
-        let ntcp2_keyfile = config.get_str(config::NTCP2_KEYFILE).unwrap();
+        let ntcp2_keyfile = config.get_string(config::NTCP2_KEYFILE).unwrap();
 
         let ntcp_manager = ntcp::Manager::new(ntcp_addr, distributor.clone());
         let ntcp2_manager =
@@ -265,15 +265,14 @@ mod tests {
         let ntcp2_addr: SocketAddr = "127.0.0.2:0".parse().unwrap();
         let ntcp2_keyfile = dir.path().join("test.ntcp2.keys.dat");
 
-        let mut config = config::Config::default();
-        config
-            .set(config::NTCP_LISTEN, ntcp_addr.to_string())
-            .unwrap();
-        config
-            .set(config::NTCP2_LISTEN, ntcp2_addr.to_string())
-            .unwrap();
-        config
-            .set(config::NTCP2_KEYFILE, ntcp2_keyfile.to_str())
+        let config = config::Config::builder()
+            .set_override(config::NTCP_LISTEN, ntcp_addr.to_string())
+            .unwrap()
+            .set_override(config::NTCP2_LISTEN, ntcp2_addr.to_string())
+            .unwrap()
+            .set_override(config::NTCP2_KEYFILE, ntcp2_keyfile.to_str())
+            .unwrap()
+            .build()
             .unwrap();
 
         let distributor = MockDistributor::new();
