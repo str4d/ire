@@ -17,19 +17,18 @@ type IoFuture<T> = Box<dyn Future<Item = T, Error = io::Error> + Send>;
 // ((url, port), path)                      // certificates/reseed/      // certificates/ssl/          // notes
 // ----------------------------------       ------------------------     -------------------------     ---------------
 #[rustfmt::skip]
-const DEFAULT_RESEED_HOSTS: [((&str, u16), &str); 12] = [
-    (("i2p.novg.net", 443), "/"),           // igor_at_novg.net.crt      // CA
-    (("i2pseed.creativecowpat.net", 8443), "/"), // creativecowpat_at_mail.i2p.crt // i2pseed.creativecowpat.net.crt
-    (("itoopie.atomike.ninja", 443), "/"),  // atomike_at_mail.i2p.crt   // CA
-    (("reseed.onion.im", 443), "/"),        // lazygravy_at_mail.i2p     // reseed.onion.im.crt
+const DEFAULT_RESEED_HOSTS: [((&str, u16), &str); 11] = [
+    (("reseed-pl.i2pd.xyz", 443), "/"),     // r4sas-reseed_at_mail.i2p.crt // CA
+    (("reseed-fr.i2pd.xyz", 443), "/"),     // r4sas-reseed_at_mail.i2p.crt // CA
+    (("www2.mk16.de", 443), "/"),           // i2p-reseed_at_mk16.de.crt // CA
+    (("reseed2.i2p.net", 443), "/"),        // echelon3_at_mail.i2p.crt  // CA
+    (("banana.incognet.io", 443), "/"),     // rambler_at_mail.i2p.crt   // CA
+    (("reseed.diva.exchange", 443), "/"),   // reseed_at_diva.exchange.crt       // CA
+    (("reseed.i2pgit.org", 443), "/"),      // hankhill19580_at_gmail.com.crt    // CA
+    (("i2p.novg.net", 443), "/"),           // igor_at_novg.net.crt      // CA                         // Java 8+ only
+    (("i2pseed.creativecowpat.net", 8443), "/"), // creativecowpat_at_mail.i2p.crt // i2pseed.creativecowpat.net.crt // Java 7+
+    (("reseed.onion.im", 443), "/"),        // lazygravy_at_mail.i2p     // CA                         // Java 8+ only
     (("reseed.memcpy.io", 443), "/"),       // hottuna_at_mail.i2p.crt   // CA                         // SNI required
-    (("reseed.atomike.ninja", 443), "/"),   // atomike_at_mail.i2p.crt   // CA                         // SNI required
-    (("i2p.manas.ca", 8443), "/"),          // zmx_at_mail.i2p.crt       // CA                         // SNI required
-    (("i2p-0.manas.ca", 8443), "/"),        // zmx_at_mail.i2p.crt       // CA                         // SNI required
-    (("i2p.mooo.com", 443), "/netDb/"),     // bugme_at_mail.i2p.crt     // i2p.mooo.com.crt
-    (("download.xxlspeed.com", 443), "/"),  // backup_at_mail.i2p.crt    // CA
-    (("netdb.i2p2.no", 443), "/"),          // meeh_at_mail.i2p.crt      // CA                         // SNI required
-    (("reseed.i2p-projekt.de", 443), "/"),  // echelon_at_mail.i2p.crt   // echelon.reseed2017.crt
 ];
 
 macro_rules! reseed_cert {
@@ -54,31 +53,30 @@ macro_rules! reseed_4096 {
 lazy_static! {
     pub(crate) static ref RESEED_SIGNERS: HashMap<&'static str, OfflineSigningPublicKey> = {
         let mut m = HashMap::new();
-        reseed_4096!(m, "atomike@mail.i2p", "atomike_at_mail.i2p.der");
-        reseed_4096!(m, "backup@mail.i2p", "backup_at_mail.i2p.der");
-        reseed_4096!(m, "bugme@mail.i2p", "bugme_at_mail.i2p.der");
         reseed_4096!(
             m,
             "creativecowpat@mail.i2p",
             "creativecowpat_at_mail.i2p.der"
         );
-        reseed_4096!(m, "echelon@mail.i2p", "echelon_at_mail.i2p.der");
+        reseed_4096!(m, "echelon@mail.i2p", "echelon3_at_mail.i2p.der");
+        reseed_4096!(
+            m,
+            "hankhill19580@gmail.com",
+            "hankhill19580_at_gmail.com.der"
+        );
         reseed_4096!(m, "hottuna@mail.i2p", "hottuna_at_mail.i2p.der");
+        reseed_4096!(m, "i2p-reseed@mk16.de", "i2p-reseed_at_mk16.de.der");
         reseed_4096!(m, "igor@novg.net", "igor_at_novg.net.der");
         reseed_4096!(m, "lazygravy@mail.i2p", "lazygravy_at_mail.i2p.der");
-        reseed_4096!(m, "meeh@mail.i2p", "meeh_at_mail.i2p.der");
-        reseed_4096!(m, "zmx@mail.i2p", "zmx_at_mail.i2p.der");
+        reseed_4096!(m, "r4sas-reseed@mail.i2p", "r4sas-reseed_at_mail.i2p.der");
+        reseed_4096!(m, "rambler@mail.i2p", "rambler_at_mail.i2p.der");
+        reseed_4096!(m, "reseed@diva.exchange", "reseed_at_diva.exchange.der");
         m
     };
 }
 
 const SSL_CERT_CREATIVECOWPAT_NET: &[u8] =
     include_bytes!("../../assets/certificates/ssl/i2pseed.creativecowpat.net.crt");
-const SSL_CERT_ONION_IM: &[u8] =
-    include_bytes!("../../assets/certificates/ssl/reseed.onion.im.crt");
-const SSL_CERT_MOOO_COM: &[u8] = include_bytes!("../../assets/certificates/ssl/i2p.mooo.com.crt");
-const SSL_CERT_ECHELON: &[u8] =
-    include_bytes!("../../assets/certificates/ssl/echelon.reseed2017.crt");
 
 const MIN_RI_WANTED: usize = 100;
 const MIN_RESEED_SERVERS: usize = 2;
@@ -187,9 +185,6 @@ impl HttpsReseeder {
         // Build TLS context with the necessary self-signed certificates
         let mut cx = TlsConnector::builder();
         cx.add_root_certificate(Certificate::from_pem(SSL_CERT_CREATIVECOWPAT_NET).unwrap());
-        cx.add_root_certificate(Certificate::from_pem(SSL_CERT_ONION_IM).unwrap());
-        cx.add_root_certificate(Certificate::from_pem(SSL_CERT_MOOO_COM).unwrap());
-        cx.add_root_certificate(Certificate::from_pem(SSL_CERT_ECHELON).unwrap());
         let cx = cx.build().unwrap();
 
         let mut hosts: Vec<_> = DEFAULT_RESEED_HOSTS.to_vec();
