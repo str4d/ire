@@ -8,6 +8,7 @@ use tokio::{io, net::tcp::TcpStream, timer::Timeout};
 
 use super::client::{Client, StoreRouterInfo};
 use crate::crypto::{OfflineSigningPublicKey, SigType};
+use crate::data::NET_ID;
 use crate::file::{Error as FileError, Su3Content, Su3File};
 
 type IoFuture<T> = Box<dyn Future<Item = T, Error = io::Error> + Send>;
@@ -116,12 +117,12 @@ fn reseed_from_host(
                 socket,
                 format!(
                     "\
-                     GET {}i2pseeds.su3 HTTP/1.0\r\n\
+                     GET {}i2pseeds.su3?netid={} HTTP/1.0\r\n\
                      Host: {}\r\n\
                      User-Agent: Wget/1.11.4\r\n\
                      \r\n\
                      ",
-                    path, host.0
+                    path, NET_ID.0, host.0
                 ),
             )
         })
