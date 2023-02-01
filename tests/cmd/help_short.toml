@@ -2,20 +2,17 @@ bin.name = "ire"
 args = ["-h"]
 status.code = 0
 stdout = """
-ire 0.0.1
-Jack Grigg <thestr4d@gmail.com>
 The I2P Rust engine
 
-USAGE:
-    ire [SUBCOMMAND]
+Usage: ire [COMMAND]
 
-OPTIONS:
-    -h, --help       Print help information
-    -V, --version    Print version information
+Commands:
+  router  
+  cli     
+  help    Print this message or the help of the given subcommand(s)
 
-SUBCOMMANDS:
-    cli       
-    help      Print this message or the help of the given subcommand(s)
-    router    
+Options:
+  -h, --help     Print help
+  -V, --version  Print version
 """
 stderr = ""

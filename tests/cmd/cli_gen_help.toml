@@ -2,15 +2,12 @@ bin.name = "ire"
 args = ["cli", "gen", "--help"]
 status.code = 0
 stdout = """
-ire-cli-gen 
+Usage: ire cli gen <routerKeys>
 
-USAGE:
-    ire cli gen <routerKeys>
+Arguments:
+  <routerKeys>  Path to write the router.keys.dat to
 
-ARGS:
-    <routerKeys>    Path to write the router.keys.dat to
-
-OPTIONS:
-    -h, --help    Print help information
+Options:
+  -h, --help  Print help
 """
 stderr = ""

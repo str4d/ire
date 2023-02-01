@@ -57,7 +57,7 @@ subtle = "2"
 config = { version = "0.13", default-features = false, features = ["toml"] }
 
 # CLI dependencies
-clap = { version = "3", optional = true }
+clap = { version = "4", optional = true }
 env_logger = { version = "0.10", optional = true }
 
 [dev-dependencies]

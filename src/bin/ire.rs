@@ -25,7 +25,7 @@ fn main() {
     std::process::exit(exit_code);
 }
 
-fn app() -> Command<'static> {
+fn app() -> Command {
     Command::new("ire")
         .version("0.0.1")
         .author("Jack Grigg <thestr4d@gmail.com>")
@@ -66,7 +66,6 @@ fn app() -> Command<'static> {
                             Arg::new("transport")
                                 .help("Transport to test")
                                 .value_parser(PossibleValuesParser::new(&["NTCP", "NTCP2"]))
-                                .takes_value(true)
                                 .required(true)
                                 .action(ArgAction::Set),
                         ),
