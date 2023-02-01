@@ -1,0 +1,17 @@
+bin.name = "ire"
+args = ["router", "--help"]
+status.code = 0
+stdout = """
+ire-router 
+
+USAGE:
+    ire router <cfgFile>
+
+FLAGS:
+    -h, --help       Prints help information
+    -V, --version    Prints version information
+
+ARGS:
+    <cfgFile>    Path to the router's TOML config file
+"""
+stderr = ""

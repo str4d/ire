@@ -63,6 +63,7 @@ env_logger = { version = "0.10", optional = true }
 [dev-dependencies]
 pretty_assertions = "1.3"
 tempfile = "3"
+trycmd = "0.14"
 
 [features]
 cli = ["clap", "env_logger"]
@@ -70,6 +71,10 @@ nightly = []
 
 [[bin]]
 name = "ire"
+required-features = ["cli"]
+
+[[test]]
+name = "cli_tests"
 required-features = ["cli"]
 
 [patch.crates-io]

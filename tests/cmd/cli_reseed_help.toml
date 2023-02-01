@@ -1,0 +1,14 @@
+bin.name = "ire"
+args = ["cli", "reseed", "--help"]
+status.code = 0
+stdout = """
+ire-cli-reseed 
+
+USAGE:
+    ire cli reseed
+
+FLAGS:
+    -h, --help       Prints help information
+    -V, --version    Prints version information
+"""
+stderr = ""

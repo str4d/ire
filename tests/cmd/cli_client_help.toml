@@ -1,0 +1,19 @@
+bin.name = "ire"
+args = ["cli", "client", "--help"]
+status.code = 0
+stdout = """
+ire-cli-client 
+
+USAGE:
+    ire cli client <routerKeys> <peerInfo> <transport>
+
+FLAGS:
+    -h, --help       Prints help information
+    -V, --version    Prints version information
+
+ARGS:
+    <routerKeys>    Path to the client's router.keys.dat
+    <peerInfo>      Path to the peer's router.info file
+    <transport>     Transport to test [possible values: NTCP, NTCP2]
+"""
+stderr = ""

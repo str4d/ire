@@ -1,0 +1,21 @@
+bin.name = "ire"
+args = ["-h"]
+status.code = 0
+stdout = """
+ire 0.0.1
+Jack Grigg <thestr4d@gmail.com>
+The I2P Rust engine
+
+USAGE:
+    ire [SUBCOMMAND]
+
+FLAGS:
+    -h, --help       Prints help information
+    -V, --version    Prints version information
+
+SUBCOMMANDS:
+    cli       
+    help      Prints this message or the help of the given subcommand(s)
+    router    
+"""
+stderr = ""
