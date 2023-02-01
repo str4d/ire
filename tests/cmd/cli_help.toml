@@ -7,14 +7,13 @@ ire-cli
 USAGE:
     ire cli [SUBCOMMAND]
 
-FLAGS:
-    -h, --help       Prints help information
-    -V, --version    Prints version information
+OPTIONS:
+    -h, --help    Print help information
 
 SUBCOMMANDS:
     client    
     gen       
-    help      Prints this message or the help of the given subcommand(s)
+    help      Print this message or the help of the given subcommand(s)
     reseed    
 """
 stderr = ""

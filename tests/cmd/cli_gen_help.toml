@@ -7,11 +7,10 @@ ire-cli-gen
 USAGE:
     ire cli gen <routerKeys>
 
-FLAGS:
-    -h, --help       Prints help information
-    -V, --version    Prints version information
-
 ARGS:
     <routerKeys>    Path to write the router.keys.dat to
+
+OPTIONS:
+    -h, --help    Print help information
 """
 stderr = ""

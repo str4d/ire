@@ -7,8 +7,7 @@ ire-cli-reseed
 USAGE:
     ire cli reseed
 
-FLAGS:
-    -h, --help       Prints help information
-    -V, --version    Prints version information
+OPTIONS:
+    -h, --help    Print help information
 """
 stderr = ""

@@ -25,8 +25,8 @@ fn main() {
     std::process::exit(exit_code);
 }
 
-fn inner_main() -> i32 {
-    let matches = App::new("ire")
+fn app() -> App<'static> {
+    App::new("ire")
         .version("0.0.1")
         .author("Jack Grigg <thestr4d@gmail.com>")
         .about("The I2P Rust engine")
@@ -67,15 +67,18 @@ fn inner_main() -> i32 {
                 )
                 .subcommand(SubCommand::with_name("reseed")),
         )
-        .get_matches();
+}
+
+fn inner_main() -> i32 {
+    let matches = app().get_matches();
 
     match matches.subcommand() {
-        ("router", Some(matches)) => cli_router(matches),
-        ("cli", Some(matches)) => match matches.subcommand() {
-            ("gen", Some(matches)) => cli_gen(matches),
-            ("client", Some(matches)) => cli_client(matches),
-            ("reseed", Some(_)) => cli_reseed(),
-            (&_, _) => panic!("Invalid matches for cli subcommand"),
+        Some(("router", matches)) => cli_router(matches),
+        Some(("cli", matches)) => match matches.subcommand() {
+            Some(("gen", matches)) => cli_gen(matches),
+            Some(("client", matches)) => cli_client(matches),
+            Some(("reseed", _)) => cli_reseed(),
+            _ => panic!("Invalid matches for cli subcommand"),
         },
         _ => 1,
     }
@@ -161,4 +164,10 @@ fn cli_reseed() -> i32 {
     let reseeder = HttpsReseeder::new(mock_context().netdb.clone());
     tokio::run(reseeder);
     0
+}
+
+#[cfg(test)]
+#[test]
+fn verify_app() {
+    app().debug_assert();
 }
