@@ -7,7 +7,7 @@ extern crate futures;
 extern crate ire;
 extern crate tokio;
 
-use clap::{App, Arg, ArgMatches, SubCommand};
+use clap::{builder::PossibleValuesParser, Arg, ArgAction, ArgMatches, Command};
 use futures::{Future, Sink};
 use ire::{
     data, i2np,
@@ -25,57 +25,65 @@ fn main() {
     std::process::exit(exit_code);
 }
 
-fn inner_main() -> i32 {
-    let matches = App::new("ire")
+fn app() -> Command {
+    Command::new("ire")
         .version("0.0.1")
         .author("Jack Grigg <thestr4d@gmail.com>")
         .about("The I2P Rust engine")
         .subcommand(
-            SubCommand::with_name("router").arg(
-                Arg::with_name("cfgFile")
+            Command::new("router").arg(
+                Arg::new("cfgFile")
                     .help("Path to the router's TOML config file")
-                    .required(true),
+                    .required(true)
+                    .action(ArgAction::Set),
             ),
         )
         .subcommand(
-            SubCommand::with_name("cli")
+            Command::new("cli")
                 .subcommand(
-                    SubCommand::with_name("gen").arg(
-                        Arg::with_name("routerKeys")
+                    Command::new("gen").arg(
+                        Arg::new("routerKeys")
                             .help("Path to write the router.keys.dat to")
-                            .required(true),
+                            .required(true)
+                            .action(ArgAction::Set),
                     ),
                 )
                 .subcommand(
-                    SubCommand::with_name("client")
+                    Command::new("client")
                         .arg(
-                            Arg::with_name("routerKeys")
+                            Arg::new("routerKeys")
                                 .help("Path to the client's router.keys.dat")
-                                .required(true),
+                                .required(true)
+                                .action(ArgAction::Set),
                         )
                         .arg(
-                            Arg::with_name("peerInfo")
+                            Arg::new("peerInfo")
                                 .help("Path to the peer's router.info file")
-                                .required(true),
+                                .required(true)
+                                .action(ArgAction::Set),
                         )
                         .arg(
-                            Arg::with_name("transport")
+                            Arg::new("transport")
                                 .help("Transport to test")
-                                .possible_values(&["NTCP", "NTCP2"])
-                                .required(true),
+                                .value_parser(PossibleValuesParser::new(&["NTCP", "NTCP2"]))
+                                .required(true)
+                                .action(ArgAction::Set),
                         ),
                 )
-                .subcommand(SubCommand::with_name("reseed")),
+                .subcommand(Command::new("reseed")),
         )
-        .get_matches();
+}
+
+fn inner_main() -> i32 {
+    let matches = app().get_matches();
 
     match matches.subcommand() {
-        ("router", Some(matches)) => cli_router(matches),
-        ("cli", Some(matches)) => match matches.subcommand() {
-            ("gen", Some(matches)) => cli_gen(matches),
-            ("client", Some(matches)) => cli_client(matches),
-            ("reseed", Some(_)) => cli_reseed(),
-            (&_, _) => panic!("Invalid matches for cli subcommand"),
+        Some(("router", matches)) => cli_router(matches),
+        Some(("cli", matches)) => match matches.subcommand() {
+            Some(("gen", matches)) => cli_gen(matches),
+            Some(("client", matches)) => cli_client(matches),
+            Some(("reseed", _)) => cli_reseed(),
+            _ => panic!("Invalid matches for cli subcommand"),
         },
         _ => 1,
     }
@@ -83,14 +91,15 @@ fn inner_main() -> i32 {
 
 fn cli_gen(args: &ArgMatches) -> i32 {
     let pkf = data::RouterSecretKeys::new();
-    pkf.to_file(args.value_of("routerKeys").unwrap()).unwrap();
+    pkf.to_file(args.get_one::<String>("routerKeys").unwrap())
+        .unwrap();
     0
 }
 
 fn cli_router(args: &ArgMatches) -> i32 {
     let builder = Builder::new();
 
-    let builder = if let Some(cfg_file) = args.value_of("cfgFile") {
+    let builder = if let Some(cfg_file) = args.get_one::<String>("cfgFile") {
         builder.config_file(cfg_file.to_string())
     } else {
         builder
@@ -105,8 +114,9 @@ fn cli_router(args: &ArgMatches) -> i32 {
 }
 
 fn cli_client(args: &ArgMatches) -> i32 {
-    let rsk = data::RouterSecretKeys::from_file(args.value_of("routerKeys").unwrap()).unwrap();
-    let peer_ri = data::RouterInfo::from_file(args.value_of("peerInfo").unwrap()).unwrap();
+    let rsk =
+        data::RouterSecretKeys::from_file(args.get_one::<String>("routerKeys").unwrap()).unwrap();
+    let peer_ri = data::RouterInfo::from_file(args.get_one::<String>("peerInfo").unwrap()).unwrap();
 
     let mut ri = data::RouterInfo::new(rsk.rid.clone());
     ri.sign(&rsk.signing_private_key);
@@ -114,7 +124,7 @@ fn cli_client(args: &ArgMatches) -> i32 {
     let distributor = MockDistributor::new();
 
     info!("Connecting to {}", peer_ri.router_id.hash());
-    match args.value_of("transport") {
+    match args.get_one::<String>("transport").map(|s| s.as_str()) {
         Some("NTCP") => {
             let mut ntcp =
                 transport::ntcp::Manager::new("127.0.0.1:0".parse().unwrap(), distributor);
@@ -161,4 +171,10 @@ fn cli_reseed() -> i32 {
     let reseeder = HttpsReseeder::new(mock_context().netdb.clone());
     tokio::run(reseeder);
     0
+}
+
+#[cfg(test)]
+#[test]
+fn verify_app() {
+    app().debug_assert();
 }
