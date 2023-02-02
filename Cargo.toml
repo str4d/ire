@@ -29,11 +29,9 @@ native-tls = "0.2"
 nom = "7"
 num-bigint = { version = "0.4", features = ["rand"] }
 num-traits = "0.2"
+rand_7 = { package = "rand", version = "0.7" }
 rand = "0.8"
 ring = "0.16.9"
-signatory = { version = "0.17.1", features = ["ecdsa", "ed25519"] }
-signatory-dalek = "0.17"
-signatory-ring = "0.17"
 siphasher = "0.3"
 tokio = "0.1"
 tokio-threadpool = "0.1"
@@ -42,6 +40,12 @@ tokio-tls = "0.2"
 # AES-256
 aes = "0.8"
 cbc = "0.1"
+
+# Signatures
+ed25519-dalek = "1"
+p256 = "0.12"
+p384 = "0.12"
+rsa = "0.8"
 
 # Hash functions
 sha1 = "0.10"
@@ -76,6 +80,3 @@ required-features = ["cli"]
 [[test]]
 name = "cli_tests"
 required-features = ["cli"]
-
-[patch.crates-io]
-ring = { git = "https://github.com/str4d/ring.git", branch = "i2p-0.16.9" }
