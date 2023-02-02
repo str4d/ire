@@ -2,27 +2,23 @@
 
 use aes::cipher::{
     generic_array::{ArrayLength, GenericArray as AesGenericArray},
+    typenum::Unsigned,
     BlockDecryptMut, BlockEncryptMut, KeyIvInit,
 };
+use ed25519_dalek::{ed25519::signature::Signature as _, Verifier as _};
 use nom::Err;
+use p256::{
+    ecdsa::signature::Verifier as _,
+    elliptic_curve::FieldSize,
+    pkcs8::{DecodePublicKey, EncodePublicKey},
+    NistP256,
+};
+use p384::NistP384;
 use rand::Rng;
 use ring::signature::{
     UnparsedPublicKey, RSA_PKCS1_2048_8192_SHA256_RAW, RSA_PKCS1_3072_8192_SHA384_RAW,
     RSA_PKCS1_4096_8192_SHA512_RAW,
 };
-use signatory::{
-    ecdsa::{
-        self,
-        curve::{Curve, NistP256, NistP384},
-        generic_array::{typenum::Unsigned, GenericArray as SignatoryGenericArray},
-        FixedSignature,
-    },
-    ed25519,
-    public_key::PublicKeyed,
-    signature::{Signature as SignatorySignature, Signer, Verifier},
-};
-use signatory_dalek::{Ed25519Signer, Ed25519Verifier};
-use signatory_ring::ecdsa::{p256, p384};
 use std::{fmt, slice};
 use subtle::{Choice, ConstantTimeEq};
 
@@ -104,39 +100,39 @@ impl SigType {
     pub fn pubkey_len(self) -> u32 {
         match self {
             SigType::DsaSha1 => 128,
-            SigType::EcdsaSha256P256 => 2 * <NistP256 as Curve>::ScalarSize::to_u32(),
-            SigType::EcdsaSha384P384 => 2 * <NistP384 as Curve>::ScalarSize::to_u32(),
+            SigType::EcdsaSha256P256 => 2 * FieldSize::<NistP256>::U32,
+            SigType::EcdsaSha384P384 => 2 * FieldSize::<NistP384>::U32,
             SigType::EcdsaSha512P521 => 132,
             SigType::Rsa2048Sha256 => 256,
             SigType::Rsa3072Sha384 => 384,
             SigType::Rsa4096Sha512 => 512,
-            SigType::Ed25519 => ed25519::PUBLIC_KEY_SIZE as u32,
+            SigType::Ed25519 => ed25519_dalek::PUBLIC_KEY_LENGTH as u32,
         }
     }
 
     pub fn privkey_len(self) -> u32 {
         match self {
             SigType::DsaSha1 => 20,
-            SigType::EcdsaSha256P256 => <NistP256 as Curve>::ScalarSize::to_u32(),
-            SigType::EcdsaSha384P384 => <NistP384 as Curve>::ScalarSize::to_u32(),
+            SigType::EcdsaSha256P256 => FieldSize::<NistP256>::U32,
+            SigType::EcdsaSha384P384 => FieldSize::<NistP384>::U32,
             SigType::EcdsaSha512P521 => 66,
             SigType::Rsa2048Sha256 => 512,
             SigType::Rsa3072Sha384 => 768,
             SigType::Rsa4096Sha512 => 1024,
-            SigType::Ed25519 => ed25519::SEED_SIZE as u32,
+            SigType::Ed25519 => ed25519_dalek::SECRET_KEY_LENGTH as u32,
         }
     }
 
     pub fn sig_len(self) -> u32 {
         match self {
             SigType::DsaSha1 => 40,
-            SigType::EcdsaSha256P256 => 2 * <NistP256 as Curve>::ScalarSize::to_u32(),
-            SigType::EcdsaSha384P384 => 2 * <NistP384 as Curve>::ScalarSize::to_u32(),
+            SigType::EcdsaSha256P256 => 2 * FieldSize::<NistP256>::U32,
+            SigType::EcdsaSha384P384 => 2 * FieldSize::<NistP384>::U32,
             SigType::EcdsaSha512P521 => 132,
             SigType::Rsa2048Sha256 => 256,
             SigType::Rsa3072Sha384 => 384,
             SigType::Rsa4096Sha512 => 512,
-            SigType::Ed25519 => ed25519::SIGNATURE_SIZE as u32,
+            SigType::Ed25519 => ed25519_dalek::SIGNATURE_LENGTH as u32,
         }
     }
 
@@ -260,18 +256,18 @@ impl fmt::Debug for PrivateKey {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SigningPublicKey {
     DsaSha1(dsa::DsaPublicKey),
-    EcdsaSha256P256(ecdsa::PublicKey<NistP256>),
-    EcdsaSha384P384(ecdsa::PublicKey<NistP384>),
+    EcdsaSha256P256(p256::EncodedPoint, p256::ecdsa::VerifyingKey),
+    EcdsaSha384P384(p384::EncodedPoint, p384::ecdsa::VerifyingKey),
     EcdsaSha512P521,
-    Ed25519(ed25519::PublicKey),
+    Ed25519(ed25519_dalek::PublicKey),
 }
 
 impl SigningPublicKey {
     pub fn sig_type(&self) -> SigType {
         match *self {
             SigningPublicKey::DsaSha1(_) => SigType::DsaSha1,
-            SigningPublicKey::EcdsaSha256P256(_) => SigType::EcdsaSha256P256,
-            SigningPublicKey::EcdsaSha384P384(_) => SigType::EcdsaSha384P384,
+            SigningPublicKey::EcdsaSha256P256(_, _) => SigType::EcdsaSha256P256,
+            SigningPublicKey::EcdsaSha384P384(_, _) => SigType::EcdsaSha384P384,
             SigningPublicKey::EcdsaSha512P521 => SigType::EcdsaSha512P521,
             SigningPublicKey::Ed25519(_) => SigType::Ed25519,
         }
@@ -284,19 +280,26 @@ impl SigningPublicKey {
             SigType::DsaSha1 => Ok(SigningPublicKey::DsaSha1(dsa::DsaPublicKey::from_bytes(
                 data,
             )?)),
-            SigType::EcdsaSha256P256 => Ok(SigningPublicKey::EcdsaSha256P256(
-                ecdsa::PublicKey::from_untagged_point(SignatoryGenericArray::from_slice(data)),
-            )),
-            SigType::EcdsaSha384P384 => Ok(SigningPublicKey::EcdsaSha384P384(
-                ecdsa::PublicKey::from_untagged_point(SignatoryGenericArray::from_slice(data)),
-            )),
+            SigType::EcdsaSha256P256 if data.len() == sig_type.pubkey_len() as usize => {
+                let encoded = p256::EncodedPoint::from_untagged_bytes(data.into());
+                p256::ecdsa::VerifyingKey::from_encoded_point(&encoded)
+                    .map(|vk| SigningPublicKey::EcdsaSha256P256(encoded, vk))
+                    .map_err(|_| Error::InvalidKey)
+            }
+            SigType::EcdsaSha384P384 if data.len() == sig_type.pubkey_len() as usize => {
+                let encoded = p384::EncodedPoint::from_untagged_bytes(data.into());
+                p384::ecdsa::VerifyingKey::from_encoded_point(&encoded)
+                    .map(|vk| SigningPublicKey::EcdsaSha384P384(encoded, vk))
+                    .map_err(|_| Error::InvalidKey)
+            }
             SigType::EcdsaSha512P521 => unimplemented!(),
             SigType::Rsa2048Sha256 | SigType::Rsa3072Sha384 | SigType::Rsa4096Sha512 => {
                 panic!("Online verifying not supported")
             }
-            SigType::Ed25519 => ed25519::PublicKey::from_bytes(data)
+            SigType::Ed25519 => ed25519_dalek::PublicKey::from_bytes(data)
                 .map(SigningPublicKey::Ed25519)
-                .ok_or(Error::InvalidKey),
+                .map_err(|_| Error::InvalidKey),
+            _ => Err(Error::InvalidKey),
         }
     }
 
@@ -306,20 +309,17 @@ impl SigningPublicKey {
             SigningPrivateKey::EcdsaSha256P256 => unimplemented!(),
             SigningPrivateKey::EcdsaSha384P384 => unimplemented!(),
             SigningPrivateKey::EcdsaSha512P521 => unimplemented!(),
-            SigningPrivateKey::Ed25519(ref seed) => Ed25519Signer::from(seed)
-                .public_key()
-                .map(SigningPublicKey::Ed25519)
-                .map_err(|_| Error::InvalidKey),
+            SigningPrivateKey::Ed25519(_, _, ref pk) => Ok(SigningPublicKey::Ed25519(*pk)),
         }
     }
 
     pub fn as_bytes(&self) -> &[u8] {
         match *self {
             SigningPublicKey::DsaSha1(ref pk) => pk.as_bytes(),
-            SigningPublicKey::EcdsaSha256P256(ref pk) => &pk.as_bytes()[1..],
-            SigningPublicKey::EcdsaSha384P384(ref pk) => &pk.as_bytes()[1..],
+            SigningPublicKey::EcdsaSha256P256(ref pk, _) => &pk.as_bytes()[1..],
+            SigningPublicKey::EcdsaSha384P384(ref pk, _) => &pk.as_bytes()[1..],
             SigningPublicKey::EcdsaSha512P521 => unimplemented!(),
-            SigningPublicKey::Ed25519(ref pk) => pk.as_bytes(),
+            SigningPublicKey::Ed25519(ref pk) => pk.as_ref(),
         }
     }
 
@@ -332,21 +332,15 @@ impl SigningPublicKey {
                     Err(Error::InvalidSignature)
                 }
             }
-            (&SigningPublicKey::EcdsaSha256P256(ref pk), &Signature::EcdsaSha256P256(ref s)) => {
-                p256::Verifier::from(pk)
-                    .verify(message, s)
-                    .map_err(|_| Error::InvalidSignature)
+            (&SigningPublicKey::EcdsaSha256P256(_, ref vk), &Signature::EcdsaSha256P256(ref s)) => {
+                vk.verify(message, s).map_err(|_| Error::InvalidSignature)
             }
-            (&SigningPublicKey::EcdsaSha384P384(ref pk), &Signature::EcdsaSha384P384(ref s)) => {
-                p384::Verifier::from(pk)
-                    .verify(message, s)
-                    .map_err(|_| Error::InvalidSignature)
+            (&SigningPublicKey::EcdsaSha384P384(_, ref vk), &Signature::EcdsaSha384P384(ref s)) => {
+                vk.verify(message, s).map_err(|_| Error::InvalidSignature)
             }
             (&SigningPublicKey::EcdsaSha512P521, &Signature::EcdsaSha512P521) => unimplemented!(),
             (&SigningPublicKey::Ed25519(ref pk), &Signature::Ed25519(ref s)) => {
-                Ed25519Verifier::from(pk)
-                    .verify(message, s)
-                    .map_err(|_| Error::InvalidSignature)
+                pk.verify(message, s).map_err(|_| Error::InvalidSignature)
             }
             _ => Err(Error::TypeMismatch),
         }
@@ -359,7 +353,11 @@ pub enum SigningPrivateKey {
     EcdsaSha256P256,
     EcdsaSha384P384,
     EcdsaSha512P521,
-    Ed25519(ed25519::Seed),
+    Ed25519(
+        ed25519_dalek::SecretKey,
+        ed25519_dalek::ExpandedSecretKey,
+        ed25519_dalek::PublicKey,
+    ),
 }
 
 impl SigningPrivateKey {
@@ -376,7 +374,12 @@ impl SigningPrivateKey {
             SigType::Rsa2048Sha256 | SigType::Rsa3072Sha384 | SigType::Rsa4096Sha512 => {
                 panic!("Online signing not supported")
             }
-            SigType::Ed25519 => SigningPrivateKey::Ed25519(ed25519::Seed::generate()),
+            SigType::Ed25519 => {
+                let seed = ed25519_dalek::SecretKey::generate(&mut rand_7::rngs::OsRng);
+                let sk: ed25519_dalek::ExpandedSecretKey = (&seed).into();
+                let pk = (&sk).into();
+                SigningPrivateKey::Ed25519(seed, sk, pk)
+            }
         }
     }
 
@@ -389,9 +392,13 @@ impl SigningPrivateKey {
             SigType::Rsa2048Sha256 | SigType::Rsa3072Sha384 | SigType::Rsa4096Sha512 => {
                 panic!("Online signing not supported")
             }
-            SigType::Ed25519 => ed25519::Seed::from_bytes(data)
-                .map(SigningPrivateKey::Ed25519)
-                .ok_or(Error::InvalidKey),
+            SigType::Ed25519 => ed25519_dalek::SecretKey::from_bytes(data)
+                .map(|seed| {
+                    let sk: ed25519_dalek::ExpandedSecretKey = (&seed).into();
+                    let pk = (&sk).into();
+                    SigningPrivateKey::Ed25519(seed, sk, pk)
+                })
+                .map_err(|_| Error::InvalidKey),
         }
     }
 
@@ -401,7 +408,7 @@ impl SigningPrivateKey {
             SigningPrivateKey::EcdsaSha256P256 => unimplemented!(),
             SigningPrivateKey::EcdsaSha384P384 => unimplemented!(),
             SigningPrivateKey::EcdsaSha512P521 => unimplemented!(),
-            SigningPrivateKey::Ed25519(ref seed) => seed.as_secret_slice(),
+            SigningPrivateKey::Ed25519(ref seed, _, _) => seed.as_ref(),
         }
     }
 
@@ -411,8 +418,8 @@ impl SigningPrivateKey {
             SigningPrivateKey::EcdsaSha256P256 => unimplemented!(),
             SigningPrivateKey::EcdsaSha384P384 => unimplemented!(),
             SigningPrivateKey::EcdsaSha512P521 => unimplemented!(),
-            SigningPrivateKey::Ed25519(ref seed) => {
-                Ok(Signature::Ed25519(Ed25519Signer::from(seed).sign(msg)))
+            SigningPrivateKey::Ed25519(_, ref sk, ref pk) => {
+                Ok(Signature::Ed25519(sk.sign(msg, pk)))
             }
         }
     }
@@ -421,15 +428,17 @@ impl SigningPrivateKey {
 // TODO impl a way to reference a single key from multiple spots
 impl Clone for SigningPrivateKey {
     fn clone(&self) -> Self {
-        match *self {
-            SigningPrivateKey::DsaSha1 => unimplemented!(),
-            SigningPrivateKey::EcdsaSha256P256 => unimplemented!(),
-            SigningPrivateKey::EcdsaSha384P384 => unimplemented!(),
-            SigningPrivateKey::EcdsaSha512P521 => unimplemented!(),
-            SigningPrivateKey::Ed25519(ref seed) => SigningPrivateKey::Ed25519(
-                ed25519::Seed::from_bytes(seed.as_secret_slice()).unwrap(),
-            ),
-        }
+        Self::from_bytes(
+            match *self {
+                SigningPrivateKey::DsaSha1 => SigType::DsaSha1,
+                SigningPrivateKey::EcdsaSha256P256 => SigType::EcdsaSha256P256,
+                SigningPrivateKey::EcdsaSha384P384 => SigType::EcdsaSha384P384,
+                SigningPrivateKey::EcdsaSha512P521 => SigType::EcdsaSha512P521,
+                SigningPrivateKey::Ed25519(..) => SigType::Ed25519,
+            },
+            self.as_bytes(),
+        )
+        .unwrap()
     }
 }
 
@@ -509,13 +518,13 @@ impl OfflineSigningPublicKey {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Signature {
     DsaSha1(dsa::DsaSignature),
-    EcdsaSha256P256(FixedSignature<NistP256>),
-    EcdsaSha384P384(FixedSignature<NistP384>),
+    EcdsaSha256P256(p256::ecdsa::Signature),
+    EcdsaSha384P384(p384::ecdsa::Signature),
     EcdsaSha512P521,
     Rsa2048Sha256(Vec<u8>),
     Rsa3072Sha384(Vec<u8>),
     Rsa4096Sha512(Vec<u8>),
-    Ed25519(ed25519::Signature),
+    Ed25519(ed25519_dalek::Signature),
     Unsupported(Vec<u8>),
 }
 
@@ -524,13 +533,13 @@ impl Signature {
         match sig_type {
             SigType::DsaSha1 => Ok(Signature::DsaSha1(dsa::DsaSignature::from_bytes(data)?)),
             SigType::EcdsaSha256P256 => Ok(Signature::EcdsaSha256P256(
-                FixedSignature::from_bytes(data).map_err(|_| Error::InvalidSignature)?,
+                p256::ecdsa::Signature::try_from(data).map_err(|_| Error::InvalidSignature)?,
             )),
             SigType::EcdsaSha384P384 => Ok(Signature::EcdsaSha384P384(
-                FixedSignature::from_bytes(data).map_err(|_| Error::InvalidSignature)?,
+                p384::ecdsa::Signature::try_from(data).map_err(|_| Error::InvalidSignature)?,
             )),
             SigType::Ed25519 => Ok(Signature::Ed25519(
-                ed25519::Signature::from_bytes(data).map_err(|_| Error::InvalidSignature)?,
+                ed25519_dalek::Signature::from_bytes(data).map_err(|_| Error::InvalidSignature)?,
             )),
             SigType::EcdsaSha512P521
             | SigType::Rsa2048Sha256
@@ -551,8 +560,8 @@ impl Signature {
     pub fn to_bytes(&self) -> Vec<u8> {
         match *self {
             Signature::DsaSha1(ref s) => s.to_bytes(),
-            Signature::EcdsaSha256P256(ref s) => Vec::from(s.as_ref()),
-            Signature::EcdsaSha384P384(ref s) => Vec::from(s.as_ref()),
+            Signature::EcdsaSha256P256(ref s) => s.to_vec(),
+            Signature::EcdsaSha384P384(ref s) => s.to_vec(),
             Signature::EcdsaSha512P521 => unimplemented!(),
             Signature::Rsa2048Sha256(ref s) => s.clone(),
             Signature::Rsa3072Sha384(ref s) => s.clone(),
