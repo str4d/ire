@@ -15,10 +15,11 @@ use p256::{
 };
 use p384::NistP384;
 use rand::Rng;
-use ring::signature::{
-    UnparsedPublicKey, RSA_PKCS1_2048_8192_SHA256_RAW, RSA_PKCS1_3072_8192_SHA384_RAW,
-    RSA_PKCS1_4096_8192_SHA512_RAW,
+use rsa::{
+    pkcs1::{DecodeRsaPublicKey, EncodeRsaPublicKey},
+    PublicKeyParts, SignatureScheme,
 };
+use sha2::{Digest, Sha256, Sha384, Sha512};
 use std::{fmt, slice};
 use subtle::{Choice, ConstantTimeEq};
 
@@ -445,9 +446,9 @@ impl Clone for SigningPrivateKey {
 /// The public component of an offline signature keypair.
 #[derive(Clone)]
 pub enum OfflineSigningPublicKey {
-    Rsa2048Sha256(Vec<u8>),
-    Rsa3072Sha384(Vec<u8>),
-    Rsa4096Sha512(Vec<u8>),
+    Rsa2048Sha256(rsa::RsaPublicKey),
+    Rsa3072Sha384(rsa::RsaPublicKey),
+    Rsa4096Sha512(rsa::RsaPublicKey),
 }
 
 #[cfg(not(tarpaulin_include))]
@@ -457,17 +458,17 @@ impl fmt::Debug for OfflineSigningPublicKey {
         match self {
             OfflineSigningPublicKey::Rsa2048Sha256(key) => {
                 write!(f, "Rsa2048Sha256(")?;
-                fmt_colon_delimited_hex(f, key)?;
+                fmt_colon_delimited_hex(f, key.to_pkcs1_der().unwrap().as_bytes())?;
                 write!(f, ")")?;
             }
             OfflineSigningPublicKey::Rsa3072Sha384(key) => {
                 write!(f, "Rsa3072Sha384(")?;
-                fmt_colon_delimited_hex(f, key)?;
+                fmt_colon_delimited_hex(f, key.to_pkcs1_der().unwrap().as_bytes())?;
                 write!(f, ")")?;
             }
             OfflineSigningPublicKey::Rsa4096Sha512(key) => {
                 write!(f, "Rsa4096Sha512(")?;
-                fmt_colon_delimited_hex(f, key)?;
+                fmt_colon_delimited_hex(f, key.to_pkcs1_der().unwrap().as_bytes())?;
                 write!(f, ")")?;
             }
         };
@@ -479,14 +480,20 @@ impl OfflineSigningPublicKey {
     pub fn from_bytes(sig_type: SigType, data: &[u8]) -> Result<Self, Error> {
         match sig_type {
             SigType::Rsa2048Sha256 | SigType::Rsa3072Sha384 | SigType::Rsa4096Sha512 => {
-                // Ring requires the binary RSAPublicKey format
-                let pub_key_der = data.to_vec();
-                Ok(match sig_type {
-                    SigType::Rsa2048Sha256 => OfflineSigningPublicKey::Rsa2048Sha256(pub_key_der),
-                    SigType::Rsa3072Sha384 => OfflineSigningPublicKey::Rsa3072Sha384(pub_key_der),
-                    SigType::Rsa4096Sha512 => OfflineSigningPublicKey::Rsa4096Sha512(pub_key_der),
-                    _ => unreachable!(),
-                })
+                rsa::RsaPublicKey::from_pkcs1_der(data)
+                    .map_err(|_| Error::InvalidKey)
+                    .and_then(|pk| match sig_type {
+                        SigType::Rsa2048Sha256 if pk.size() == sig_type.pubkey_len() as usize => {
+                            Ok(OfflineSigningPublicKey::Rsa2048Sha256(pk))
+                        }
+                        SigType::Rsa3072Sha384 if pk.size() == sig_type.pubkey_len() as usize => {
+                            Ok(OfflineSigningPublicKey::Rsa3072Sha384(pk))
+                        }
+                        SigType::Rsa4096Sha512 if pk.size() == sig_type.pubkey_len() as usize => {
+                            Ok(OfflineSigningPublicKey::Rsa4096Sha512(pk))
+                        }
+                        _ => Err(Error::InvalidKey),
+                    })
             }
             _ => panic!("Invalid offline SigType"),
         }
@@ -495,18 +502,18 @@ impl OfflineSigningPublicKey {
     pub fn verify(&self, message: &[u8], signature: &Signature) -> Result<(), Error> {
         match (self, signature) {
             (OfflineSigningPublicKey::Rsa2048Sha256(pk), Signature::Rsa2048Sha256(s)) => {
-                UnparsedPublicKey::new(&RSA_PKCS1_2048_8192_SHA256_RAW, pk)
-                    .verify(message, s)
+                rsa::Pkcs1v15Sign::new_raw()
+                    .verify(pk, &Sha256::digest(message), s)
                     .map_err(|_| Error::InvalidSignature)
             }
             (OfflineSigningPublicKey::Rsa3072Sha384(pk), Signature::Rsa3072Sha384(s)) => {
-                UnparsedPublicKey::new(&RSA_PKCS1_3072_8192_SHA384_RAW, pk)
-                    .verify(message, s)
+                rsa::Pkcs1v15Sign::new_raw()
+                    .verify(pk, &Sha384::digest(message), s)
                     .map_err(|_| Error::InvalidSignature)
             }
             (OfflineSigningPublicKey::Rsa4096Sha512(pk), Signature::Rsa4096Sha512(s)) => {
-                UnparsedPublicKey::new(&RSA_PKCS1_4096_8192_SHA512_RAW, pk)
-                    .verify(message, s)
+                rsa::Pkcs1v15Sign::new_raw()
+                    .verify(pk, &Sha512::digest(message), s)
                     .map_err(|_| Error::InvalidSignature)
             }
             _ => Err(Error::TypeMismatch),
