@@ -203,7 +203,7 @@ where
                     }
 
                     let ri_a = match frames.remove(0) {
-                        Block::RouterInfo(ri, _) => ri,
+                        Block::RouterInfo(ri) => ri.0,
                         _ => {
                             // TODO: Finish handshake and then return error in Termination block
                             return io_err!(
@@ -716,8 +716,8 @@ mod tests {
                         let len = cmp::min(self.rem, self.chunk);
                         let buf = DATA[..len].to_vec();
 
-                        frame.push(Block::Message(Message::from_payload(MessagePayload::Data(
-                            buf,
+                        frame.push(Block::Message(Box::new(Message::from_payload(
+                            MessagePayload::Data(buf),
                         ))));
                         self.rem -= len;
                         if self.rem == 0 {

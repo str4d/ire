@@ -73,7 +73,7 @@ fn gen_routerinfo_flags<'a>(
 fn routerinfo(i: &[u8]) -> IResult<&[u8], Block> {
     map(
         length_value(be_u16, pair(routerinfo_flags, router_info)),
-        |(flags, ri)| Block::RouterInfo(ri, flags),
+        |(flags, ri)| Block::RouterInfo(Box::new((ri, flags))),
     )(i)
 }
 
@@ -94,7 +94,10 @@ fn gen_routerinfo<'a>(
 // I2NP Message
 
 fn message(i: &[u8]) -> IResult<&[u8], Block> {
-    map(length_value(be_u16, ntcp2_message), Block::Message)(i)
+    map(
+        map(length_value(be_u16, ntcp2_message), Box::new),
+        Block::Message,
+    )(i)
 }
 
 fn gen_message<'a>(
@@ -194,7 +197,7 @@ fn gen_block<'a>(
     match *block {
         Block::DateTime(ts) => blockgen!(0, gen_datetime(ts)),
         Block::Options(ref options) => blockgen!(1, gen_options(options)),
-        Block::RouterInfo(ref ri, ref flags) => blockgen!(2, gen_routerinfo(ri, flags)),
+        Block::RouterInfo(ref ri) => blockgen!(2, gen_routerinfo(&ri.0, &ri.1)),
         Block::Message(ref message) => blockgen!(3, gen_message(message)),
         Block::Termination(valid_received, rsn, ref addl_data) => {
             blockgen!(4, gen_termination(valid_received, rsn, addl_data))
@@ -295,7 +298,7 @@ pub fn gen_session_confirmed<'a>(
     do_gen!(
         input,
         gen_frame(&vec![
-            Block::RouterInfo(ri_a.clone(), RouterInfoFlags { flood: false }),
+            Block::RouterInfo(Box::new((ri_a.clone(), RouterInfoFlags { flood: false }))),
             Block::Padding(padlen),
         ])
     )
@@ -359,7 +362,7 @@ mod tests {
         ri_block.extend_from_slice(ROUTER_INFO);
 
         eval_block!(
-            Block::RouterInfo(ri, RouterInfoFlags { flood: true }),
+            Block::RouterInfo(Box::new((ri, RouterInfoFlags { flood: true }))),
             ri_block
         );
     }
@@ -367,11 +370,11 @@ mod tests {
     #[test]
     fn test_message() {
         eval_block!(
-            Block::Message(Message {
+            Block::Message(Box::new(Message {
                 id: 0,
                 expiration: I2PDate::from_system_time(UNIX_EPOCH + Duration::new(1_524_874_654, 0)),
                 payload: MessagePayload::Data(vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9]),
-            }),
+            })),
             [
                 0x03, 0x00, 0x17, 0x14, 0x00, 0x00, 0x00, 0x00, 0x5a, 0xe3, 0xbd, 0x9e, 0x00, 0x00,
                 0x00, 0x0a, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09,

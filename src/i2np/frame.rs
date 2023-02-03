@@ -243,8 +243,8 @@ fn database_store(i: &[u8]) -> IResult<&[u8], MessagePayload> {
     let (i, (key, ds_type)) = pair(hash, be_u8)(i)?;
     let (i, reply) = reply_path(i)?;
     let (i, data) = match ds_type {
-        0 => map(compressed_ri, DatabaseStoreData::RI)(i),
-        1 => map(lease_set, DatabaseStoreData::LS)(i),
+        0 => map(map(compressed_ri, Box::new), DatabaseStoreData::RI)(i),
+        1 => map(map(lease_set, Box::new), DatabaseStoreData::LS)(i),
         _ => unimplemented!(),
     }?;
     Ok((
@@ -557,7 +557,7 @@ fn gen_garlic<'a>(
 
 fn tunnel_data(i: &[u8]) -> IResult<&[u8], MessagePayload> {
     map(pair(tunnel_id, take(1024usize)), |(tid, data)| {
-        MessagePayload::TunnelData(TunnelData::from(tid, array_ref![data, 0, 1024]))
+        MessagePayload::TunnelData(TunnelData::new(tid, array_ref![data, 0, 1024]))
     })(i)
 }
 
@@ -602,7 +602,7 @@ fn gen_data<'a>(input: (&'a mut [u8], usize), d: &[u8]) -> Result<(&'a mut [u8],
 
 fn tunnel_build(input: &[u8]) -> IResult<&[u8], MessagePayload> {
     let (i, r) = count(take(528usize), 8)(input)?;
-    let mut xs = [[0u8; 528]; 8];
+    let mut xs = Box::new([[0u8; 528]; 8]);
     for (i, &s) in r.iter().enumerate() {
         xs[i].copy_from_slice(s);
     }
@@ -630,7 +630,7 @@ fn gen_tunnel_build<'a>(
 
 fn tunnel_build_reply(input: &[u8]) -> IResult<&[u8], MessagePayload> {
     let (i, r) = count(take(528usize), 8)(input)?;
-    let mut xs = [[0u8; 528]; 8];
+    let mut xs = Box::new([[0u8; 528]; 8]);
     for (i, &s) in r.iter().enumerate() {
         xs[i].copy_from_slice(s);
     }
@@ -811,7 +811,7 @@ fn gen_payload<'a>(
     input: (&'a mut [u8], usize),
     payload: &MessagePayload,
 ) -> Result<(&'a mut [u8], usize), GenError> {
-    match *payload {
+    match payload {
         MessagePayload::DatabaseStore(ref ds) => gen_database_store(input, ds),
         MessagePayload::DatabaseLookup(ref dl) => gen_database_lookup(input, dl),
         MessagePayload::DatabaseSearchReply(ref dsr) => gen_database_search_reply(input, dsr),
@@ -820,8 +820,8 @@ fn gen_payload<'a>(
         MessagePayload::TunnelData(ref td) => gen_tunnel_data(input, td),
         MessagePayload::TunnelGateway(ref tg) => gen_tunnel_gateway(input, tg),
         MessagePayload::Data(ref d) => gen_data(input, d),
-        MessagePayload::TunnelBuild(tb) => gen_tunnel_build(input, &tb),
-        MessagePayload::TunnelBuildReply(tbr) => gen_tunnel_build_reply(input, &tbr),
+        MessagePayload::TunnelBuild(tb) => gen_tunnel_build(input, tb),
+        MessagePayload::TunnelBuildReply(tbr) => gen_tunnel_build_reply(input, tbr),
         MessagePayload::VariableTunnelBuild(ref vtb) => gen_variable_tunnel_build(input, vtb),
         MessagePayload::VariableTunnelBuildReply(ref vtbr) => {
             gen_variable_tunnel_build_reply(input, vtbr)

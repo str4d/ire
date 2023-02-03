@@ -61,7 +61,7 @@ trait TunnelBuildRequest {
     fn to_reply(self, msg_id: u32) -> Message;
 }
 
-impl TunnelBuildRequest for [[u8; 528]; 8] {
+impl TunnelBuildRequest for Box<[[u8; 528]; 8]> {
     fn entry_mut(&mut self, entry: usize) -> &mut [u8; 528] {
         &mut self[entry]
     }
@@ -116,13 +116,23 @@ struct EncryptionInfo<TB: TunnelBuildRequest> {
     reply_iv: [u8; 16],
 }
 
+struct ResolvingState<TB: TunnelBuildRequest> {
+    from_ident: Hash,
+    f: LookupRouterInfo,
+    brr: BuildRequestRecord,
+    tb: TB,
+    i: usize,
+}
+
+struct RegisterParticipatingState<TB: TunnelBuildRequest> {
+    f: sink::Send<mpsc::Sender<(TunnelId, HopConfig)>>,
+    info: EncryptionInfo<TB>,
+}
+
 enum HopAcceptorState<TB: TunnelBuildRequest> {
     Decrypt(Hash, TB, usize),
-    Resolving(Hash, LookupRouterInfo, BuildRequestRecord, TB, usize),
-    RegisterParticipating(
-        sink::Send<mpsc::Sender<(TunnelId, HopConfig)>>,
-        EncryptionInfo<TB>,
-    ),
+    Resolving(Box<ResolvingState<TB>>),
+    RegisterParticipating(Box<RegisterParticipatingState<TB>>),
     Encrypt(EncryptionInfo<TB>),
     Sending(IoFuture<()>),
 }
@@ -242,7 +252,13 @@ impl<TB: TunnelBuildRequest> Future for HopAcceptor<TB> {
                                 MAX_LOOKUP_TIME * 1000,
                                 None,
                             );
-                            HopAcceptorState::Resolving(from_ident, f, brr, tb, i)
+                            HopAcceptorState::Resolving(Box::new(ResolvingState {
+                                from_ident,
+                                f,
+                                brr,
+                                tb,
+                                i,
+                            }))
                         }
                         Err(_) => {
                             debug!("Couldn't decrypt build request, dropping");
@@ -250,70 +266,77 @@ impl<TB: TunnelBuildRequest> Future for HopAcceptor<TB> {
                         }
                     }
                 }
-                HopAcceptorState::Resolving(from_ident, mut f, brr, tb, i) => {
+                HopAcceptorState::Resolving(mut resolving) => {
                     // Wait for the lookup to finish
                     let next_hop = try_poll!(
-                        f.poll(),
+                        resolving.f.poll(),
                         self,
-                        HopAcceptorState::Resolving(from_ident, f, brr, tb, i)
+                        HopAcceptorState::Resolving(resolving)
                     );
 
                     // Decide whether to accept or reject
                     // TODO: Add support for IBGW, OBEP, metrics
-                    let reply = match brr.hop_type {
+                    let reply = match resolving.brr.hop_type {
                         ParticipantType::Intermediate => TUNNEL_ACCEPT,
                         _ => TUNNEL_REJECT_CRIT,
                     };
 
                     // Prepare the information necessary to forward the response
                     let info = EncryptionInfo {
-                        is_obep: brr.hop_type == ParticipantType::OutboundEndpoint,
+                        is_obep: resolving.brr.hop_type == ParticipantType::OutboundEndpoint,
                         next_hop: next_hop.clone(),
-                        send_msg_id: brr.send_msg_id,
+                        send_msg_id: resolving.brr.send_msg_id,
                         response: BuildResponseRecord { reply },
-                        tb,
-                        i,
-                        reply_key: brr.reply_key,
-                        reply_iv: brr.reply_iv,
+                        tb: resolving.tb,
+                        i: resolving.i,
+                        reply_key: resolving.brr.reply_key,
+                        reply_iv: resolving.brr.reply_iv,
                     };
 
                     if reply == TUNNEL_ACCEPT {
                         // We're committing to storing the following data in-memory for
                         // TUNNEL_LIFETIME seconds, and processing packets that match it.
                         let config = HopConfig {
-                            hop_data: match brr.hop_type {
+                            hop_data: match resolving.brr.hop_type {
                                 ParticipantType::InboundGateway => {
-                                    HopData::InboundGateway((next_hop, brr.next_tid))
+                                    HopData::InboundGateway((next_hop, resolving.brr.next_tid))
                                 }
-                                ParticipantType::Intermediate => {
-                                    HopData::Intermediate(from_ident, (next_hop, brr.next_tid))
-                                }
+                                ParticipantType::Intermediate => HopData::Intermediate(
+                                    resolving.from_ident,
+                                    (next_hop, resolving.brr.next_tid),
+                                ),
                                 ParticipantType::OutboundEndpoint => {
-                                    HopData::OutboundEndpoint(from_ident)
+                                    HopData::OutboundEndpoint(resolving.from_ident)
                                 }
                             },
-                            layer_cipher: LayerCipher::new(&brr.iv_key, brr.layer_key),
+                            layer_cipher: LayerCipher::new(
+                                &resolving.brr.iv_key,
+                                resolving.brr.layer_key,
+                            ),
                             expires: SystemTime::now() + Duration::from_secs(TUNNEL_LIFETIME),
                         };
 
-                        HopAcceptorState::RegisterParticipating(
-                            self.new_participating_tx
-                                .clone()
-                                .send((brr.receive_tid, config)),
-                            info,
-                        )
+                        HopAcceptorState::RegisterParticipating(Box::new(
+                            RegisterParticipatingState {
+                                f: self
+                                    .new_participating_tx
+                                    .clone()
+                                    .send((resolving.brr.receive_tid, config)),
+                                info,
+                            },
+                        ))
                     } else {
                         // We declined to participate in the tunnel; just send our response onward.
                         HopAcceptorState::Encrypt(info)
                     }
                 }
-                HopAcceptorState::RegisterParticipating(mut f, info) => {
+                HopAcceptorState::RegisterParticipating(mut rp) => {
                     try_poll!(
-                        f.poll(),
+                        rp.f.poll(),
                         self,
-                        HopAcceptorState::RegisterParticipating(f, info)
+                        HopAcceptorState::RegisterParticipating(rp)
                     );
-                    HopAcceptorState::Encrypt(info)
+                    HopAcceptorState::Encrypt(rp.info)
                 }
                 HopAcceptorState::Encrypt(mut info) => {
                     try_poll!(
@@ -423,7 +446,7 @@ impl Future for Listener {
             if let Some((from, msg)) = try_ready!(self.ib_rx.poll()) {
                 match msg.payload {
                     MessagePayload::TunnelBuild(tb) => {
-                        if let Some(i) = self.find_our_entry(&tb) {
+                        if let Some(i) = self.find_our_entry(tb.as_ref()) {
                             // Let's try to accept it
                             spawn(HopAcceptor::new(
                                 from,

@@ -33,10 +33,15 @@ impl Future for MockNetDb {
 
     fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
         loop {
-            if let Some(Query::LookupRouterInfo(key, timeout_ms, from_peer, ret)) =
-                try_ready!(self.client_rx.poll())
-            {
-                ret.send(self.ri_ds.get(&key).cloned().ok_or(LookupError::NotFound))
+            if let Some(Query::LookupRouterInfo(query)) = try_ready!(self.client_rx.poll()) {
+                query
+                    .response_tx
+                    .send(
+                        self.ri_ds
+                            .get(&query.key)
+                            .cloned()
+                            .ok_or(LookupError::NotFound),
+                    )
                     .unwrap()
             }
         }

@@ -10,32 +10,38 @@ use tokio::spawn;
 use super::{errors::*, LocalNetworkDatabase};
 use crate::data::{Hash, LeaseSet, RouterInfo};
 
+pub struct LookupRouterInfoQuery {
+    pub(super) key: Hash,
+    timeout_ms: u64,
+    from_peer: Option<RouterInfo>,
+    pub(super) response_tx: oneshot::Sender<Result<RouterInfo, LookupError>>,
+}
+
+pub struct StoreRouterInfoQuery {
+    key: Hash,
+    ri: RouterInfo,
+    from_reseed: bool,
+    response_tx: oneshot::Sender<Result<Option<RouterInfo>, StoreError>>,
+}
+
+pub struct StoreLeaseSetQuery {
+    key: Hash,
+    ls: LeaseSet,
+    response_tx: oneshot::Sender<Result<Option<LeaseSet>, StoreError>>,
+}
+
 pub enum Query {
     KnownRouters(oneshot::Sender<usize>),
     SelectClosestFloodfill(Hash, oneshot::Sender<Option<RouterInfo>>),
-    LookupRouterInfo(
-        Hash,
-        u64,
-        Option<RouterInfo>,
-        oneshot::Sender<Result<RouterInfo, LookupError>>,
-    ),
+    LookupRouterInfo(Box<LookupRouterInfoQuery>),
     LookupLeaseSet(
         Hash,
         u64,
         Option<Hash>,
         oneshot::Sender<Result<LeaseSet, LookupError>>,
     ),
-    StoreRouterInfo(
-        Hash,
-        RouterInfo,
-        bool,
-        oneshot::Sender<Result<Option<RouterInfo>, StoreError>>,
-    ),
-    StoreLeaseSet(
-        Hash,
-        LeaseSet,
-        oneshot::Sender<Result<Option<LeaseSet>, StoreError>>,
-    ),
+    StoreRouterInfo(Box<StoreRouterInfoQuery>),
+    StoreLeaseSet(Box<StoreLeaseSetQuery>),
 }
 
 impl Query {
@@ -51,10 +57,12 @@ impl Query {
                     warn!("Completed floodfill selection, but client gave up");
                 }
             }
-            Query::LookupRouterInfo(key, timeout_ms, from_peer, ret) => {
+            Query::LookupRouterInfo(query) => {
+                let key = query.key;
+                let ret = query.response_tx;
                 spawn(
                     netdb
-                        .lookup_router_info(&key, timeout_ms, from_peer)
+                        .lookup_router_info(&key, query.timeout_ms, query.from_peer)
                         .then(|res| ret.send(res))
                         .map_err(move |_| {
                             warn!("Completed RouterInfo lookup on {}, but client gave up", key)
@@ -71,17 +79,28 @@ impl Query {
                         }),
                 );
             }
-            Query::StoreRouterInfo(key, ri, from_reseed, ret) => {
-                if ret
-                    .send(netdb.store_router_info(key.clone(), ri, from_reseed))
+            Query::StoreRouterInfo(query) => {
+                if query
+                    .response_tx
+                    .send(netdb.store_router_info(query.key.clone(), query.ri, query.from_reseed))
                     .is_err()
                 {
-                    warn!("Completed RouterInfo store at {}, but client gave up", key);
+                    warn!(
+                        "Completed RouterInfo store at {}, but client gave up",
+                        query.key
+                    );
                 }
             }
-            Query::StoreLeaseSet(key, ls, ret) => {
-                if ret.send(netdb.store_lease_set(key.clone(), ls)).is_err() {
-                    warn!("Completed LeaseSet store at {}, but client gave up", key);
+            Query::StoreLeaseSet(query) => {
+                if query
+                    .response_tx
+                    .send(netdb.store_lease_set(query.key.clone(), query.ls))
+                    .is_err()
+                {
+                    warn!(
+                        "Completed LeaseSet store at {}, but client gave up",
+                        query.key
+                    );
                 }
             }
         }
@@ -181,12 +200,13 @@ impl Future for LookupRouterInfo {
         if let Some(query) = self.query.take() {
             let (response_tx, response_rx) = oneshot::channel();
             self.response_rx = Some(response_rx);
-            self.client.send(Query::LookupRouterInfo(
-                query.0,
-                query.1,
-                query.2,
-                response_tx,
-            ))?;
+            self.client
+                .send(Query::LookupRouterInfo(Box::new(LookupRouterInfoQuery {
+                    key: query.0,
+                    timeout_ms: query.1,
+                    from_peer: query.2,
+                    response_tx,
+                })))?;
         }
 
         match self.response_rx.as_mut().unwrap().poll() {
@@ -264,7 +284,12 @@ impl Future for StoreRouterInfo {
             let (response_tx, response_rx) = oneshot::channel();
             self.response_rx = Some(response_rx);
             self.client
-                .send(Query::StoreRouterInfo(key, ri, from_reseed, response_tx))?;
+                .send(Query::StoreRouterInfo(Box::new(StoreRouterInfoQuery {
+                    key,
+                    ri,
+                    from_reseed,
+                    response_tx,
+                })))?;
         }
 
         match self.response_rx.as_mut().unwrap().poll() {
@@ -301,7 +326,11 @@ impl Future for StoreLeaseSet {
             let (response_tx, response_rx) = oneshot::channel();
             self.response_rx = Some(response_rx);
             self.client
-                .send(Query::StoreLeaseSet(key, ls, response_tx))?;
+                .send(Query::StoreLeaseSet(Box::new(StoreLeaseSetQuery {
+                    key,
+                    ls,
+                    response_tx,
+                })))?;
         }
 
         match self.response_rx.as_mut().unwrap().poll() {

@@ -35,6 +35,7 @@ macro_rules! try_poll {
     };
 }
 
+#[allow(clippy::large_enum_variant)]
 enum HopProcessorState {
     Processing((RouterInfo, TunnelId), TunnelData, LayerCipher),
     Sending(IoFuture<()>),

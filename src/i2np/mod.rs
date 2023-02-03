@@ -145,8 +145,8 @@ pub struct ReplyPath {
 }
 
 pub enum DatabaseStoreData {
-    RI(RouterInfo),
-    LS(LeaseSet),
+    RI(Box<RouterInfo>),
+    LS(Box<LeaseSet>),
 }
 
 /// An unsolicited database store, or the response to a successful DatabaseLookup
@@ -164,7 +164,7 @@ impl DatabaseStore {
             key: ri.router_id.hash(),
             ds_type: 0,
             reply,
-            data: DatabaseStoreData::RI(ri),
+            data: DatabaseStoreData::RI(Box::new(ri)),
         }
     }
 
@@ -173,7 +173,7 @@ impl DatabaseStore {
             key: ls.dest.hash(),
             ds_type: 1,
             reply,
-            data: DatabaseStoreData::LS(ls),
+            data: DatabaseStoreData::LS(Box::new(ls)),
         }
     }
 }
@@ -321,14 +321,15 @@ pub struct Garlic {
 /// fragmented, batched, padded, and encrypted.
 pub struct TunnelData {
     pub tid: TunnelId,
-    pub data: [u8; 1024],
+    pub data: Box<[u8; 1024]>,
 }
 
 impl TunnelData {
-    fn from(tid: TunnelId, data: &[u8; 1024]) -> Self {
-        let mut x = [0u8; 1024];
-        x.copy_from_slice(data);
-        TunnelData { tid, data: x }
+    fn new(tid: TunnelId, data: &[u8; 1024]) -> Self {
+        TunnelData {
+            tid,
+            data: Box::new(*data),
+        }
     }
 }
 
@@ -350,8 +351,8 @@ pub enum MessagePayload {
 
     /// Used by Garlic messages and Garlic Cloves to wrap arbitrary data.
     Data(Vec<u8>),
-    TunnelBuild([[u8; 528]; 8]),
-    TunnelBuildReply([[u8; 528]; 8]),
+    TunnelBuild(Box<[[u8; 528]; 8]>),
+    TunnelBuildReply(Box<[[u8; 528]; 8]>),
     VariableTunnelBuild(Vec<[u8; 528]>),
     VariableTunnelBuildReply(Vec<[u8; 528]>),
 }

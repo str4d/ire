@@ -349,6 +349,7 @@ impl SigningPublicKey {
 }
 
 /// The private component of a signature keypair.
+#[allow(clippy::large_enum_variant)]
 pub enum SigningPrivateKey {
     DsaSha1,
     EcdsaSha256P256,
