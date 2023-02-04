@@ -255,7 +255,7 @@ where
 
                     let codec = Codec {
                         noise,
-                        noise_buf: [0u8; NTCP2_MTU],
+                        noise_buf: Box::new([0u8; NTCP2_MTU]),
                         enc_len_masker: SipHasher::new_with_keys(ek0, ek1),
                         enc_len_iv: eiv,
                         dec_len_masker: SipHasher::new_with_keys(dk0, dk1),
@@ -531,7 +531,7 @@ where
 
                     let codec = Codec {
                         noise,
-                        noise_buf: [0u8; NTCP2_MTU],
+                        noise_buf: Box::new([0u8; NTCP2_MTU]),
                         enc_len_masker: SipHasher::new_with_keys(ek0, ek1),
                         enc_len_iv: eiv,
                         dec_len_masker: SipHasher::new_with_keys(dk0, dk1),
