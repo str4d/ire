@@ -162,7 +162,7 @@ type Frame = Vec<Block>;
 
 pub struct Codec {
     noise: i2p_snow::Session,
-    noise_buf: [u8; NTCP2_MTU],
+    noise_buf: Box<[u8; NTCP2_MTU]>,
     enc_len_masker: SipHasher,
     enc_len_iv: u64,
     dec_len_masker: SipHasher,
@@ -196,7 +196,10 @@ impl Decoder for Codec {
         match self.next_len {
             Some(len) if buf.len() >= len => {
                 // Read the frame
-                let frame_len = match self.noise.read_message(&buf[..len], &mut self.noise_buf) {
+                let frame_len = match self
+                    .noise
+                    .read_message(&buf[..len], self.noise_buf.as_mut())
+                {
                     Ok(len) => len,
                     Err(e) => return io_err!(Other, format!("Decryption error: {:?}", e)),
                 };
@@ -230,7 +233,7 @@ impl Encoder for Codec {
     type Error = io::Error;
 
     fn encode(&mut self, frame: Frame, buf: &mut BytesMut) -> io::Result<()> {
-        match frame::gen_frame((&mut self.noise_buf, 0), &frame).map(|tup| tup.1) {
+        match frame::gen_frame((self.noise_buf.as_mut(), 0), &frame).map(|tup| tup.1) {
             Ok(sz) => {
                 let msg_len = sz + 16;
 
